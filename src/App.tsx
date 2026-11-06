@@ -3,9 +3,9 @@
  * Linear/Notion style dashboard with Firebase Cloud Firestore Real-time Sync & Google Auth
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { User, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import { User, onAuthStateChanged, signInWithPopup, signOut, GoogleAuthProvider } from 'firebase/auth';
 import { marked } from 'marked';
-import { auth, googleProvider } from './firebase';
+import { auth } from './firebase';
 import {
   PageItem,
   MaterialItem,
@@ -35,6 +35,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [cloudSyncActive, setCloudSyncActive] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Preferences & Layout
   const [bgIndex, setBgIndex] = useState<number>(0);
@@ -383,22 +384,35 @@ export default function App() {
 
   // Google Login Handler
   const handleGoogleLogin = async () => {
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
     try {
-      await signInWithPopup(auth, googleProvider);
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      });
+      await signInWithPopup(auth, provider);
     } catch (error: any) {
-      console.error('Google Sign In Error:', error);
       const code = error?.code || '';
-      if (code === 'auth/unauthorized-domain') {
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        // User closed or cancelled the popup — expected user action, handle gracefully without console.error
+        console.info('Google sign-in popup was closed by user.');
+        showToast('Accesso annullato.', 'info');
+      } else if (code === 'auth/unauthorized-domain') {
+        console.error('Google Sign In Error:', error);
         showToast('Dominio non autorizzato! Aggiungi "iqfeb888.github.io" nei Domini autorizzati su Firebase Console.', 'error');
       } else if (code === 'auth/operation-not-allowed') {
+        console.error('Google Sign In Error:', error);
         showToast('Provider Google non abilitato! Abilitalo in Firebase Console > Authentication > Sign-in method.', 'error');
       } else if (code === 'auth/popup-blocked') {
+        console.warn('Google sign-in popup was blocked by browser.');
         showToast('Finestra popup bloccata dal browser. Consenti i popup per accedere con Google.', 'error');
-      } else if (code === 'auth/popup-closed-by-user') {
-        showToast('Accesso annullato dalla chiusura della finestra.', 'info');
       } else {
+        console.error('Google Sign In Error:', error);
         showToast(`Errore accesso (${code || 'sconosciuto'}): ${error?.message || 'Riprova'}`, 'error');
       }
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -1348,6 +1362,8 @@ export default function App() {
           <button
             className="top-btn top-btn-auth"
             onClick={handleGoogleLogin}
+            disabled={isLoggingIn}
+            style={{ opacity: isLoggingIn ? 0.7 : 1, cursor: isLoggingIn ? 'wait' : 'pointer' }}
             title="Accedi con Google per sincronizzare i tuoi dati su Cloud Firestore"
           >
             <svg width="14" height="14" viewBox="0 0 24 24">
