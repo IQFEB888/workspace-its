@@ -1,0 +1,345 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile and dashboard display preferences",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address",
+          "maxLength": 256
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of the user",
+          "maxLength": 128
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Avatar photo URL",
+          "maxLength": 1024
+        },
+        "activeSubject": {
+          "type": "string",
+          "description": "Currently selected subject",
+          "maxLength": 100
+        },
+        "bgIndex": {
+          "type": "number",
+          "description": "Selected background wallpaper index"
+        },
+        "isImmersion": {
+          "type": "boolean",
+          "description": "Whether focus/immersion mode is active"
+        },
+        "isSidebarCollapsed": {
+          "type": "boolean",
+          "description": "Whether sidebar is collapsed"
+        },
+        "isChatCollapsed": {
+          "type": "boolean",
+          "description": "Whether chat panel is collapsed"
+        },
+        "selectedModel": {
+          "type": "string",
+          "description": "Selected Gemini model identifier",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last update"
+        }
+      },
+      "required": ["userId"]
+    },
+    "Subject": {
+      "title": "Subject",
+      "description": "A study subject or course folder",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Subject identifier",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of owner",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the subject/course",
+          "maxLength": 100
+        },
+        "driveLink": {
+          "type": "string",
+          "description": "Optional Google Drive folder URL",
+          "maxLength": 1024
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["id", "userId", "name"]
+    },
+    "Page": {
+      "title": "Page",
+      "description": "A document/notes tab belonging to a subject",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Page ID",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of owner",
+          "maxLength": 128
+        },
+        "subjectId": {
+          "type": "string",
+          "description": "Subject to which the page belongs",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Title of the notes page",
+          "maxLength": 120
+        },
+        "content": {
+          "type": "string",
+          "description": "Rich HTML / Markdown content of notes",
+          "maxLength": 1000000
+        },
+        "order": {
+          "type": "number",
+          "description": "Tab display order index"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["id", "userId", "subjectId", "name"]
+    },
+    "Material": {
+      "title": "Material",
+      "description": "Resource or file link for a subject",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Material ID",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of owner",
+          "maxLength": 128
+        },
+        "subjectId": {
+          "type": "string",
+          "description": "Associated subject",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Title of the resource",
+          "maxLength": 200
+        },
+        "url": {
+          "type": "string",
+          "description": "Link to the resource or drive file",
+          "maxLength": 2048
+        },
+        "category": {
+          "type": "string",
+          "description": "Category group name",
+          "maxLength": 80
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["id", "userId", "subjectId", "name", "url"]
+    },
+    "ChatSession": {
+      "title": "ChatSession",
+      "description": "AI conversation history for a subject",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Subject ID matching the chat context",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of owner",
+          "maxLength": 128
+        },
+        "subjectId": {
+          "type": "string",
+          "description": "Subject associated with this chat",
+          "maxLength": 128
+        },
+        "messages": {
+          "type": "array",
+          "description": "List of recent chat messages (serialized JSON or array of parts)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["id", "userId", "subjectId"]
+    },
+    "UserKeys": {
+      "title": "UserKeys",
+      "description": "User private Gemini API keys and active selection index",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of owner",
+          "maxLength": 128
+        },
+        "keys": {
+          "type": "array",
+          "description": "List of configured API keys"
+        },
+        "selectedKeyIndex": {
+          "type": "number",
+          "description": "Index of the preferred key"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["userId"]
+    },
+    "AccessRequest": {
+      "title": "AccessRequest",
+      "description": "Pending approval request by a new user",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of requesting user",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of requester",
+          "maxLength": 256
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of requester",
+          "maxLength": 128
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Avatar photo URL",
+          "maxLength": 1024
+        },
+        "requestedAt": {
+          "type": "string",
+          "description": "ISO timestamp of request"
+        },
+        "status": {
+          "type": "string",
+          "description": "Status of the request (pending, approved, rejected)",
+          "enum": ["pending", "approved", "rejected"]
+        }
+      },
+      "required": ["userId", "email"]
+    },
+    "ApprovedUser": {
+      "title": "ApprovedUser",
+      "description": "Record of a user approved by the super admin",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of approved user",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of approved user",
+          "maxLength": 256
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of approved user",
+          "maxLength": 128
+        },
+        "approvedAt": {
+          "type": "string",
+          "description": "ISO timestamp of approval"
+        },
+        "approvedBy": {
+          "type": "string",
+          "description": "Email of the approving admin",
+          "maxLength": 256
+        },
+        "status": {
+          "type": "string",
+          "description": "Approval status (active, revoked)",
+          "enum": ["active", "revoked"]
+        }
+      },
+      "required": ["userId", "email", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Root document for user profile and preferences (accessible only if approved or admin)"
+    },
+    "/users/{userId}/subjects/{subjectId}": {
+      "schema": "Subject",
+      "description": "Study courses and subjects belonging to the user"
+    },
+    "/users/{userId}/pages/{pageId}": {
+      "schema": "Page",
+      "description": "Notes pages belonging to the user's courses"
+    },
+    "/users/{userId}/materials/{materialId}": {
+      "schema": "Material",
+      "description": "Course materials, PDFs, and links"
+    },
+    "/users/{userId}/chats/{subjectId}": {
+      "schema": "ChatSession",
+      "description": "Chat conversations with Gemini for each subject"
+    },
+    "/users/{userId}/settings/keys": {
+      "schema": "UserKeys",
+      "description": "Private user API key configuration"
+    },
+    "/access_requests/{userId}": {
+      "schema": "AccessRequest",
+      "description": "Access requests sent by new users awaiting admin approval"
+    },
+    "/approved_users/{userId}": {
+      "schema": "ApprovedUser",
+      "description": "Directory of approved users managed exclusively by beccalli.fabio4@gmail.com"
+    }
+  }
+}

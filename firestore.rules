@@ -1,0 +1,143 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: default-deny all paths unless explicitly permitted
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Super Admin: Only beccalli.fabio4@gmail.com with verified email
+    function isAdmin() {
+      return isSignedIn() &&
+             request.auth.token.email == "beccalli.fabio4@gmail.com" &&
+             request.auth.token.email_verified == true;
+    }
+
+    // Checks whether the user is approved by the admin
+    function isApprovedUser(userId) {
+      return isAdmin() ||
+             (exists(/databases/$(database)/documents/approved_users/$(userId)) &&
+              get(/databases/$(database)/documents/approved_users/$(userId)).data.status == 'active');
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidUserProfile(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 256)) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 128)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1024)) &&
+             (!('activeSubject' in data) || (data.activeSubject is string && data.activeSubject.size() <= 100)) &&
+             (!('bgIndex' in data) || (data.bgIndex is number)) &&
+             (!('isImmersion' in data) || (data.isImmersion is bool)) &&
+             (!('isSidebarCollapsed' in data) || (data.isSidebarCollapsed is bool)) &&
+             (!('isChatCollapsed' in data) || (data.isChatCollapsed is bool)) &&
+             (!('selectedModel' in data) || (data.selectedModel is string && data.selectedModel.size() <= 64));
+    }
+
+    function isValidSubject(data, userId) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.userId is string && data.userId == userId &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             (!('driveLink' in data) || (data.driveLink is string && data.driveLink.size() <= 1024));
+    }
+
+    function isValidPage(data, userId) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.userId is string && data.userId == userId &&
+             data.subjectId is string && data.subjectId.size() > 0 && data.subjectId.size() <= 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
+             (!('content' in data) || (data.content is string && data.content.size() <= 1000000));
+    }
+
+    function isValidMaterial(data, userId) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.userId is string && data.userId == userId &&
+             data.subjectId is string && data.subjectId.size() > 0 && data.subjectId.size() <= 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.url is string && data.url.size() > 0 && data.url.size() <= 2048 &&
+             (!('category' in data) || (data.category is string && data.category.size() <= 80));
+    }
+
+    function isValidChatSession(data, userId) {
+      return data.userId is string && data.userId == userId &&
+             data.subjectId is string && data.subjectId.size() > 0 && data.subjectId.size() <= 128 &&
+             (!('messages' in data) || (data.messages is list && data.messages.size() <= 100));
+    }
+
+    // Access Requests: any signed in user can create their request; Admin can manage all
+    match /access_requests/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(userId) && incoming().userId == userId;
+      allow update, delete: if isAdmin();
+    }
+
+    // Approved Users: Admin manages approvals; User can check their own approval status
+    match /approved_users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // Root User Profile (only accessible if user is approved or is Super Admin)
+    match /users/{userId} {
+      allow read, delete: if isOwner(userId) && isApprovedUser(userId);
+      allow create: if isOwner(userId) && isApprovedUser(userId) && isValidUserProfile(incoming());
+      allow update: if isOwner(userId) && isApprovedUser(userId) && isValidUserProfile(incoming()) && incoming().userId == existing().userId;
+
+      // Subjects Subcollection
+      match /subjects/{subjectId} {
+        allow read, delete: if isOwner(userId) && isApprovedUser(userId);
+        allow create: if isOwner(userId) && isApprovedUser(userId) && isValidId(subjectId) && isValidSubject(incoming(), userId);
+        allow update: if isOwner(userId) && isApprovedUser(userId) && isValidId(subjectId) && isValidSubject(incoming(), userId) && incoming().userId == existing().userId;
+      }
+
+      // Pages Subcollection
+      match /pages/{pageId} {
+        allow read, delete: if isOwner(userId) && isApprovedUser(userId);
+        allow create: if isOwner(userId) && isApprovedUser(userId) && isValidId(pageId) && isValidPage(incoming(), userId);
+        allow update: if isOwner(userId) && isApprovedUser(userId) && isValidId(pageId) && isValidPage(incoming(), userId) && incoming().userId == existing().userId;
+      }
+
+      // Materials Subcollection
+      match /materials/{materialId} {
+        allow read, delete: if isOwner(userId) && isApprovedUser(userId);
+        allow create: if isOwner(userId) && isApprovedUser(userId) && isValidId(materialId) && isValidMaterial(incoming(), userId);
+        allow update: if isOwner(userId) && isApprovedUser(userId) && isValidId(materialId) && isValidMaterial(incoming(), userId) && incoming().userId == existing().userId;
+      }
+
+      // Chat Sessions Subcollection
+      match /chats/{subjectId} {
+        allow read, delete: if isOwner(userId) && isApprovedUser(userId);
+        allow create, update: if isOwner(userId) && isApprovedUser(userId) && isValidId(subjectId) && isValidChatSession(incoming(), userId);
+      }
+
+      // Settings Subcollection (e.g. Gemini Keys)
+      match /settings/{settingId} {
+        allow read, delete: if isOwner(userId) && isApprovedUser(userId);
+        allow create, update: if isOwner(userId) && isApprovedUser(userId) && isValidId(settingId) && incoming().userId == userId;
+      }
+    }
+  }
+}

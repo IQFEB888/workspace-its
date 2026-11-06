@@ -1,0 +1,2697 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workspace ITS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        :root {
+            --bg-base: #070709;
+            --panel-bg: rgba(18, 18, 22, 0.78);
+            --panel-bg-elevated: rgba(28, 28, 35, 0.85);
+            --panel-border: rgba(255, 255, 255, 0.08);
+            --panel-border-hover: rgba(255, 255, 255, 0.16);
+            --text-primary: #f4f4f6;
+            --text-secondary: #94949e;
+            --text-muted: #5e5e68;
+            --accent-primary: #6366f1;
+            --accent-secondary: #38bdf8;
+            --accent-gradient: linear-gradient(135deg, #6366f1 0%, #38bdf8 100%);
+            --accent-surface: rgba(99, 102, 241, 0.14);
+            --accent-border: rgba(99, 102, 241, 0.35);
+            --accent-hover: rgba(255, 255, 255, 0.06);
+            --focus-ring: rgba(99, 102, 241, 0.4);
+            --danger: #f43f5e;
+            --radius: 20px;
+            --radius-md: 12px;
+            --radius-sm: 8px;
+            --shadow-panel: 0 24px 48px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        body {
+            background-color: var(--bg-base);
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-image 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+            padding: 1.5rem;
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: 
+                radial-gradient(circle at 15% 15%, rgba(99, 102, 241, 0.15), transparent 45%),
+                radial-gradient(circle at 85% 85%, rgba(56, 189, 248, 0.12), transparent 45%),
+                linear-gradient(to bottom, rgba(7, 7, 9, 0.65), rgba(7, 7, 9, 0.92));
+            backdrop-filter: blur(2px);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* Top Floating Pill Controls */
+        .top-controls {
+            position: fixed;
+            top: 1.1rem;
+            right: 1.5rem;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(14, 14, 18, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            padding: 4px 6px;
+            border-radius: 999px;
+            border: 1px solid var(--panel-border);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+        .top-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            padding: 6px 14px;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            font-size: 0.75rem;
+            font-weight: 500;
+            letter-spacing: 0.2px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .top-btn:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .top-btn-auth {
+            background: var(--accent-surface);
+            border: 1px solid var(--accent-border);
+            color: #c7d2fe;
+        }
+        .top-btn-auth:hover {
+            background: var(--accent-primary);
+            color: #fff;
+        }
+        .sync-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #10b981;
+            box-shadow: 0 0 8px #10b981;
+        }
+        #immersion-btn {
+            color: #a5b4fc;
+        }
+        #immersion-btn:hover {
+            background: var(--accent-surface);
+            border-color: var(--accent-border);
+            color: #fff;
+        }
+
+        /* Full Immersion Mode */
+        body.full-immersion {
+            --panel-border: rgba(255, 255, 255, 0.14);
+            padding: 0 !important;
+            background: #050507 !important;
+        }
+        body.full-immersion::before {
+            display: none;
+        }
+        body.full-immersion .dashboard-container {
+            height: 100vh;
+            max-height: 100vh;
+            max-width: 100%;
+            gap: 0;
+            border-radius: 0;
+        }
+        body.full-immersion .panel {
+            border-radius: 0;
+            border: none;
+            border-right: 1px solid rgba(255, 255, 255, 0.16);
+            background: #08080c;
+            box-shadow: none;
+        }
+        body.full-immersion .panel:last-child {
+            border-right: none;
+        }
+        body.full-immersion .top-controls {
+            top: 0.75rem;
+            right: 1rem;
+            background: rgba(20, 20, 26, 0.9);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        /* VS Code / Modern Browser Tabs System */
+        .vscode-tabs-bar {
+            display: flex;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.28);
+            border: 1px solid var(--panel-border);
+            padding: 4px;
+            gap: 4px;
+            overflow-x: auto;
+            flex-shrink: 0;
+            margin-bottom: 0.65rem;
+            border-radius: var(--radius-md);
+        }
+        .vscode-tabs-bar::-webkit-scrollbar { height: 3px; }
+        .vscode-tab {
+            padding: 7px 14px;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            border: 1px solid transparent;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: transparent;
+            transition: all 0.18s ease;
+            white-space: nowrap;
+            user-select: none;
+        }
+        .vscode-tab:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-primary);
+        }
+        .vscode-tab.active {
+            background: rgba(99, 102, 241, 0.16);
+            color: #fff;
+            border-color: rgba(99, 102, 241, 0.35);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+        }
+        .vscode-tab .close-tab {
+            font-size: 0.7rem;
+            opacity: 0.45;
+            border-radius: 4px;
+            width: 18px;
+            height: 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+        }
+        .vscode-tab .close-tab:hover {
+            opacity: 1;
+            color: #fff;
+            background: var(--danger);
+        }
+        .add-tab-btn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            width: 28px;
+            height: 28px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 1.05rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            flex-shrink: 0;
+            margin-left: 2px;
+        }
+        .add-tab-btn:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.1);
+            border-color: var(--panel-border-hover);
+        }
+
+        /* Main 3-Column Layout */
+        .dashboard-container {
+            --left-w: 300px;
+            --right-w: 360px;
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: var(--left-w) 1fr var(--right-w);
+            gap: 1.25rem;
+            width: 100%;
+            max-width: 1680px;
+            height: calc(100vh - 3rem); 
+            max-height: calc(100vh - 3rem);
+            transition: grid-template-columns 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .dashboard-container.sidebar-collapsed {
+            --left-w: 76px;
+        }
+        
+        .dashboard-container.chat-collapsed {
+            --right-w: 64px;
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(28px) saturate(160%);
+            -webkit-backdrop-filter: blur(28px) saturate(160%);
+            border: 1px solid var(--panel-border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            box-shadow: var(--shadow-panel);
+            position: relative;
+            transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        /* Left Column: Tools & Quick Launch */
+        .tools-column::-webkit-scrollbar { display: none; }
+        
+        .sidebar-top-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1.25rem;
+            border-bottom: 1px solid var(--panel-border);
+        }
+        .sidebar-toggle-btn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--panel-border);
+            color: var(--text-secondary);
+            border-radius: 10px;
+            width: 34px;
+            height: 34px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+        .sidebar-toggle-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+            border-color: var(--panel-border-hover);
+            transform: translateY(-1px);
+        }
+
+        .datetime-header { display: flex; flex-direction: column; transition: all 0.3s ease; }
+        #clock {
+            font-size: 2.85rem;
+            font-weight: 700;
+            letter-spacing: -2px;
+            background: linear-gradient(180deg, #ffffff 0%, #a1a1aa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            line-height: 1;
+            font-variant-numeric: tabular-nums;
+            transition: all 0.3s ease;
+        }
+        #date {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #818cf8;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin-top: 0.45rem;
+            white-space: nowrap;
+        }
+
+        .dashboard-container.sidebar-collapsed .tools-column { padding: 1.25rem 0.5rem; align-items: center; }
+        .dashboard-container.sidebar-collapsed .sidebar-top-row { flex-direction: column; align-items: center; gap: 1rem; margin-bottom: 1rem; padding-bottom: 1rem; width: 100%; }
+        .dashboard-container.sidebar-collapsed #clock { font-size: 0.95rem; font-weight: 600; letter-spacing: -0.5px; }
+        .dashboard-container.sidebar-collapsed #date,
+        .dashboard-container.sidebar-collapsed .weather-container,
+        .dashboard-container.sidebar-collapsed .search-container,
+        .dashboard-container.sidebar-collapsed .app-name { display: none; }
+        .dashboard-container.sidebar-collapsed .apps-grid { grid-template-columns: 1fr; gap: 0.6rem; width: 100%; }
+        .dashboard-container.sidebar-collapsed .app-card { padding: 0.65rem; border-color: transparent; background: transparent; }
+        .dashboard-container.sidebar-collapsed .app-card:hover { background: var(--accent-hover); border-color: var(--panel-border); }
+
+        .weather-container {
+            width: 100%;
+            margin-bottom: 1.25rem;
+            border-radius: var(--radius-md);
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--panel-border);
+            padding: 8px 12px;
+            overflow: hidden;
+            opacity: 0.9;
+            transition: all 0.3s ease;
+        }
+        .weather-container:hover {
+            opacity: 1;
+            border-color: var(--panel-border-hover);
+        }
+
+        .search-container {
+            margin-bottom: 1.5rem;
+            position: relative;
+        }
+        .search-container input {
+            width: 100%;
+            padding: 12px 14px 12px 38px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--panel-border);
+            background: rgba(0, 0, 0, 0.3) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394949e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'%3E%3C/line%3E%3C/svg%3E") no-repeat 12px center;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+        .search-container input::placeholder { color: var(--text-muted); }
+        .search-container input:focus {
+            border-color: var(--accent-primary);
+            background-color: rgba(0, 0, 0, 0.5);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+        }
+
+        .apps-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.65rem;
+        }
+        .app-card {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 10px;
+            text-decoration: none;
+            padding: 0.75rem 0.85rem;
+            border-radius: var(--radius-md);
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid var(--panel-border);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .app-card:hover {
+            background: rgba(99, 102, 241, 0.1);
+            border-color: rgba(99, 102, 241, 0.35);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px -6px rgba(0, 0, 0, 0.5);
+        }
+        .app-icon {
+            color: var(--text-secondary);
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+        .app-card:hover .app-icon {
+            color: #818cf8;
+            transform: scale(1.08);
+        }
+        .app-name {
+            font-size: 0.78rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            text-align: left;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: color 0.2s ease;
+        }
+        .app-card:hover .app-name { color: var(--text-primary); }
+
+        /* Center Column: Workspace Notes & Materials */
+        #notes-panel.notes-maximized .drive-bar,
+        #notes-panel.notes-maximized .tabs-container,
+        #notes-panel.notes-maximized .header-btn:not(#fullscreen-btn),
+        #notes-panel.notes-maximized #materials-area { display: none !important; }
+        
+        #notes-panel.notes-maximized #notes-area-container { display: flex !important; }
+
+        .notes-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.85rem;
+            padding-bottom: 0.85rem;
+            border-bottom: 1px solid var(--panel-border);
+        }
+        .notes-header-left {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            flex: 1;
+        }
+        .notes-header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        #subject-select {
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-primary);
+            border: 1px solid var(--panel-border);
+            border-radius: var(--radius-sm);
+            outline: none;
+            font-size: 1.05rem;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 6px 12px;
+            transition: all 0.2s ease;
+        }
+        #subject-select:hover, #subject-select:focus {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--accent-border);
+        }
+        #subject-select option { background: #141419; color: #fff; }
+        
+        .header-btn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--panel-border);
+            color: var(--text-secondary);
+            padding: 7px 14px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.78rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .header-btn:hover {
+            background: rgba(255, 255, 255, 0.09);
+            color: var(--text-primary);
+            border-color: var(--panel-border-hover);
+            transform: translateY(-1px);
+        }
+
+        .drive-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 0.85rem;
+            flex-shrink: 0;
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--panel-border);
+            border-radius: var(--radius-md);
+            padding: 6px 8px 6px 14px;
+            transition: border-color 0.2s ease;
+        }
+        .drive-bar:focus-within {
+            border-color: var(--accent-border);
+            background: rgba(0, 0, 0, 0.4);
+        }
+        .drive-bar svg { color: #818cf8; flex-shrink: 0; }
+        .drive-bar input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-size: 0.8rem;
+            outline: none;
+        }
+        .drive-bar input::placeholder { color: var(--text-muted); }
+        .drive-btn {
+            background: var(--accent-surface);
+            border: 1px solid var(--accent-border);
+            color: #c7d2fe;
+            padding: 6px 12px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .drive-btn:hover {
+            background: var(--accent-primary);
+            color: #fff;
+        }
+
+        /* Segmented Control for Notes / Materials */
+        .tabs-container {
+            display: inline-flex;
+            gap: 4px;
+            margin-bottom: 0.85rem;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--panel-border);
+            padding: 4px;
+            border-radius: var(--radius-md);
+            flex-shrink: 0;
+            align-self: flex-start;
+        }
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 7px 16px;
+            border-radius: var(--radius-sm);
+            font-weight: 500;
+            font-size: 0.82rem;
+            transition: all 0.2s ease;
+        }
+        .tab-btn.active {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+        .tab-btn:hover:not(.active) {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .content-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 0;
+        }
+        
+        #notes-area-container {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            height: 100%;
+            min-height: 0;
+        }
+        .editor-toolbar {
+            display: flex;
+            gap: 4px;
+            padding: 6px 10px;
+            background: rgba(0, 0, 0, 0.28);
+            border: 1px solid var(--panel-border);
+            border-radius: var(--radius-md);
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+        .editor-toolbar button {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            width: 30px;
+            height: 30px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85rem;
+            transition: all 0.15s ease;
+        }
+        .editor-toolbar button:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+        }
+        .editor-toolbar select {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--panel-border);
+            color: var(--text-primary);
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-size: 0.78rem;
+            font-weight: 500;
+            outline: none;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        .editor-toolbar select:hover { border-color: var(--panel-border-hover); }
+        .editor-toolbar select option { background: #18181b; color: #fff; }
+        .editor-toolbar .divider {
+            width: 1px;
+            height: 18px;
+            background: var(--panel-border);
+            margin: 0 4px;
+        }
+
+        /* Document Editor Surface */
+        #notes-area {
+            flex: 1;
+            width: 100%;
+            background: rgba(0, 0, 0, 0.18);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: var(--radius-md);
+            color: #ececf1;
+            font-size: 0.96rem;
+            outline: none;
+            line-height: 1.75;
+            font-weight: 400;
+            overflow-y: auto;
+            padding: 1.25rem 1.5rem 3rem 1.5rem;
+            transition: border-color 0.2s ease, background 0.2s ease;
+        }
+        #notes-area:focus {
+            background: rgba(0, 0, 0, 0.26);
+            border-color: rgba(99, 102, 241, 0.28);
+        }
+        #notes-area:empty:before {
+            content: attr(placeholder);
+            color: var(--text-muted);
+            pointer-events: none;
+        }
+        #notes-area ul, #notes-area ol { padding-left: 24px; margin-bottom: 0.75rem; }
+        #notes-area li { margin-bottom: 0.25rem; }
+        #notes-area ul { list-style-type: disc; }
+        #notes-area ol { list-style-type: decimal; }
+        #notes-area h1 {
+            font-size: 1.65rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            color: #fff;
+            margin-top: 1.25rem;
+            margin-bottom: 0.6rem;
+            padding-bottom: 0.3rem;
+            border-bottom: 1px solid var(--panel-border);
+        }
+        #notes-area h2 {
+            font-size: 1.35rem;
+            font-weight: 600;
+            letter-spacing: -0.3px;
+            color: #f4f4f6;
+            margin-top: 1.1rem;
+            margin-bottom: 0.5rem;
+        }
+        #notes-area h3 {
+            font-size: 1.12rem;
+            font-weight: 600;
+            color: #c7d2fe;
+            margin-top: 0.9rem;
+            margin-bottom: 0.4rem;
+        }
+        #notes-area p { margin-bottom: 0.65rem; }
+        #notes-area code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85em;
+            background: rgba(255, 255, 255, 0.08);
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #38bdf8;
+        }
+        #notes-area pre {
+            background: rgba(0, 0, 0, 0.45);
+            border: 1px solid var(--panel-border);
+            padding: 12px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin-bottom: 0.75rem;
+        }
+        
+        /* Materials Library */
+        #materials-area {
+            flex: 1;
+            display: none;
+            flex-direction: column;
+            gap: 1.25rem;
+            overflow-y: auto;
+            padding-right: 6px;
+        }
+        .materials-header-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.22);
+            padding: 12px 16px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--panel-border);
+        }
+        .materials-header-title {
+            font-size: 0.92rem;
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+        .add-material-btn {
+            background: var(--accent-gradient);
+            border: none;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 600;
+            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+            transition: all 0.2s ease;
+        }
+        .add-material-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+        }
+
+        .material-category { margin-bottom: 0.75rem; }
+        .material-category-title {
+            font-size: 0.72rem;
+            color: #a5b4fc;
+            margin-bottom: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid var(--panel-border);
+            padding-bottom: 6px;
+        }
+        .materials-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 12px;
+        }
+        
+        .material-card {
+            background: rgba(0, 0, 0, 0.28);
+            border: 1px solid var(--panel-border);
+            padding: 12px 14px;
+            border-radius: var(--radius-md);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .material-card:hover {
+            border-color: rgba(99, 102, 241, 0.4);
+            background: rgba(255, 255, 255, 0.04);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.5);
+        }
+        .material-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            overflow: hidden;
+            flex: 1;
+            margin-right: 10px;
+        }
+        .material-icon-box {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.15rem;
+            flex-shrink: 0;
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .material-text { display: flex; flex-direction: column; overflow: hidden; gap: 2px; }
+        .material-name {
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-weight: 600;
+        }
+        .material-sub { font-size: 0.72rem; color: var(--text-secondary); }
+        .material-actions { display: flex; gap: 6px; }
+        .material-dl-btn {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--panel-border);
+            color: var(--text-primary);
+            text-decoration: none;
+            padding: 6px 11px;
+            border-radius: 6px;
+            font-size: 0.74rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .material-dl-btn:hover {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+            color: #fff;
+        }
+        .material-del-btn {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid transparent;
+            padding: 6px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            transition: all 0.2s;
+        }
+        .material-del-btn:hover {
+            color: var(--danger);
+            background: rgba(244, 63, 94, 0.12);
+            border-color: rgba(244, 63, 94, 0.3);
+        }
+
+        /* Right Column: AI Copilot Panel */
+        .ai-chat-panel {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+        .chat-header-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--panel-border);
+        }
+        .chat-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .chat-title::before {
+            content: '✦';
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            border-radius: 6px;
+            background: var(--accent-gradient);
+            color: #fff;
+            font-size: 0.75rem;
+            box-shadow: 0 2px 10px rgba(99, 102, 241, 0.4);
+        }
+        .expand-btn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--panel-border);
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 500;
+            padding: 5px 10px;
+            border-radius: var(--radius-sm);
+            transition: all 0.2s;
+        }
+        .expand-btn:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.1);
+            border-color: var(--panel-border-hover);
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            font-size: 0.83rem;
+            margin-bottom: 0.75rem;
+            padding-right: 4px;
+        }
+        .chat-messages::-webkit-scrollbar { width: 4px; }
+        .chat-messages::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 4px; }
+        .chat-msg {
+            padding: 11px 14px;
+            border-radius: 14px;
+            max-width: 94%;
+            line-height: 1.55;
+            word-wrap: break-word;
+            position: relative;
+            padding-right: 36px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        .chat-msg.user {
+            align-self: flex-end;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.28), rgba(56, 189, 248, 0.22));
+            border: 1px solid rgba(99, 102, 241, 0.4);
+            border-bottom-right-radius: 4px;
+            color: #fff;
+        }
+        .chat-msg.ai {
+            align-self: flex-start;
+            background: rgba(255, 255, 255, 0.035);
+            color: var(--text-primary);
+            border: 1px solid var(--panel-border);
+            border-bottom-left-radius: 4px;
+        }
+        .chat-msg.ai p { margin-bottom: 6px; }
+        .chat-msg.ai p:last-child { margin-bottom: 0; }
+        .chat-msg.ai ul, .chat-msg.ai ol { margin-left: 18px; margin-bottom: 6px; }
+        .chat-msg.ai code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.82em;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 2px 5px;
+            border-radius: 4px;
+            color: #38bdf8;
+        }
+        
+        .msg-action-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(0, 0, 0, 0.45);
+            border: 1px solid var(--panel-border);
+            color: var(--text-secondary);
+            border-radius: 6px;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            opacity: 0;
+        }
+        .chat-msg:hover .msg-action-btn { opacity: 0.85; }
+        .msg-action-btn:hover {
+            opacity: 1 !important;
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+            color: #fff;
+        }
+        
+        /* Collapsed Chat Styles */
+        body .dashboard-container.chat-collapsed .chat-column { padding: 1.25rem 0.5rem; align-items: center; }
+        body .dashboard-container.chat-collapsed .chat-title,
+        body .dashboard-container.chat-collapsed .chat-controls-hide,
+        body .dashboard-container.chat-collapsed .chat-messages,
+        body .dashboard-container.chat-collapsed .file-upload-preview-bar,
+        body .dashboard-container.chat-collapsed .chat-input-row { display: none !important; }
+        body .dashboard-container.chat-collapsed .chat-header-bar { border-bottom: none; justify-content: center; width: 100%; margin-bottom: 0; padding-bottom: 0; margin-top: 3.5rem; }
+        
+        body .dashboard-container.chat-collapsed #notes-panel .notes-header { padding-right: 220px; }
+        
+        .chat-vertical-title {
+            display: none;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            transform: rotate(180deg);
+            color: #a5b4fc;
+            margin-top: 2rem;
+            font-weight: 600;
+            letter-spacing: 3px;
+            font-size: 0.78rem;
+        }
+        body .dashboard-container.chat-collapsed .chat-vertical-title { display: block; }
+
+        .file-upload-preview-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        #attached-file-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--accent-surface);
+            border: 1px solid var(--accent-border);
+            color: #a5b4fc;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-weight: 500;
+        }
+        #attached-file-badge button {
+            background: transparent;
+            border: none;
+            color: #a5b4fc;
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        .chat-input-row {
+            display: flex;
+            gap: 6px;
+            margin-top: 4px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .chat-input-row select {
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid var(--panel-border);
+            border-radius: var(--radius-sm);
+            padding: 8px 10px;
+            color: var(--text-primary);
+            font-size: 0.78rem;
+            font-weight: 500;
+            outline: none;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        .chat-input-row select:hover { border-color: var(--panel-border-hover); }
+        .chat-input-row select option { background: #18181b; color: #fff; }
+        #user-chat-input {
+            flex: 1;
+            min-width: 150px;
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid var(--panel-border);
+            border-radius: var(--radius-sm);
+            padding: 9px 12px;
+            color: #fff;
+            font-size: 0.82rem;
+            outline: none;
+            transition: all 0.2s;
+        }
+        #user-chat-input:focus {
+            border-color: var(--accent-primary);
+            background: rgba(0, 0, 0, 0.55);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+        }
+        .chat-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--panel-border);
+            color: var(--text-secondary);
+            padding: 8px 12px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.76rem;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+        .chat-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+            border-color: var(--panel-border-hover);
+        }
+        .chat-btn.accent {
+            background: var(--accent-gradient);
+            border: none;
+            color: #fff;
+            font-weight: 600;
+            padding: 9px 16px;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+        }
+        .chat-btn.accent:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(99, 102, 241, 0.5);
+        }
+
+        /* API Keys Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            z-index: 999;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-box {
+            background: #141419;
+            border: 1px solid var(--panel-border-hover);
+            border-radius: 20px;
+            width: 90%;
+            max-width: 500px;
+            padding: 1.75rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.1rem;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85);
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--panel-border);
+            padding-bottom: 0.85rem;
+        }
+        .modal-title { font-size: 1.05rem; font-weight: 600; color: var(--text-primary); }
+        .modal-close {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--panel-border);
+            color: var(--text-secondary);
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        .modal-close:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+        .modal-save-btn {
+            background: var(--accent-gradient);
+            border: none;
+            color: #fff;
+            padding: 11px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 0.88rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 0.5rem;
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.35);
+        }
+        .modal-save-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 25px rgba(99, 102, 241, 0.5); }
+
+        /* Dynamic Key Rows */
+        .key-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.35);
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid var(--panel-border);
+            transition: border-color 0.2s;
+        }
+        .key-row:focus-within { border-color: var(--accent-border); }
+        .key-row input[type="radio"] {
+            accent-color: var(--accent-primary);
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+            margin-right: 4px;
+        }
+        .key-row input[type="password"] {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            font-family: 'JetBrains Mono', monospace;
+            outline: none;
+        }
+        .key-del-btn {
+            background: transparent;
+            color: var(--text-secondary);
+            border: none;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            transition: 0.2s;
+        }
+        .key-del-btn:hover { color: var(--danger); background: rgba(244, 63, 94, 0.12); }
+        .add-key-btn {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px dashed var(--panel-border-hover);
+            color: var(--text-secondary);
+            padding: 10px;
+            border-radius: 10px;
+            cursor: pointer;
+            margin-top: 4px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            transition: 0.2s;
+        }
+        .add-key-btn:hover {
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-primary);
+            border-color: var(--accent-primary);
+        }
+
+        /* Custom Context Menu */
+        .custom-context-menu {
+            display: none;
+            position: absolute;
+            background: rgba(20, 20, 26, 0.96);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--panel-border-hover);
+            border-radius: 14px;
+            box-shadow: 0 20px 45px rgba(0, 0, 0, 0.75);
+            z-index: 10000;
+            min-width: 230px;
+            padding: 6px;
+            flex-direction: column;
+            gap: 2px;
+            overflow: hidden;
+        }
+        .context-menu-item {
+            padding: 9px 12px;
+            cursor: pointer;
+            color: var(--text-primary);
+            font-size: 0.82rem;
+            font-weight: 500;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.15s;
+        }
+        .context-menu-item:hover {
+            background: var(--accent-surface);
+            color: #a5b4fc;
+        }
+
+        /* Custom Universal Dialogs & Toast Notifications */
+        .dialog-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(5, 5, 8, 0.72);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .dialog-overlay.show {
+            display: flex;
+            opacity: 1;
+        }
+        .dialog-box {
+            background: #141419;
+            border: 1px solid var(--panel-border-hover);
+            border-radius: 20px;
+            width: 92%;
+            max-width: 440px;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.15rem;
+            box-shadow: 0 28px 64px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+            transform: scale(0.95) translateY(8px);
+            transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .dialog-overlay.show .dialog-box {
+            transform: scale(1) translateY(0);
+        }
+        .dialog-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .dialog-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .dialog-desc {
+            font-size: 0.84rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-top: -0.35rem;
+        }
+        .dialog-fields {
+            display: flex;
+            flex-direction: column;
+            gap: 0.85rem;
+        }
+        .dialog-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .dialog-field label {
+            font-size: 0.76rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            letter-spacing: 0.2px;
+        }
+        .dialog-field input, .dialog-field select {
+            background: rgba(0, 0, 0, 0.42);
+            border: 1px solid var(--panel-border);
+            border-radius: 10px;
+            padding: 10px 12px;
+            color: var(--text-primary);
+            font-size: 0.86rem;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+        .dialog-field input:focus, .dialog-field select:focus {
+            border-color: var(--accent-primary);
+            background: rgba(0, 0, 0, 0.6);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+        }
+        .dialog-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 0.25rem;
+        }
+        .dialog-btn {
+            padding: 9px 16px;
+            border-radius: 10px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid var(--panel-border);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-secondary);
+        }
+        .dialog-btn:hover {
+            background: rgba(255, 255, 255, 0.09);
+            color: var(--text-primary);
+        }
+        .dialog-btn.primary {
+            background: var(--accent-gradient);
+            border: none;
+            color: #fff;
+            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+        }
+        .dialog-btn.primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(99, 102, 241, 0.5);
+        }
+        .dialog-btn.danger {
+            background: rgba(244, 63, 94, 0.16);
+            border: 1px solid rgba(244, 63, 94, 0.4);
+            color: #fda4af;
+        }
+        .dialog-btn.danger:hover {
+            background: var(--danger);
+            border-color: var(--danger);
+            color: #fff;
+        }
+
+        /* Toast Notification */
+        .toast-container {
+            position: fixed;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            z-index: 3000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+        }
+        .toast-item {
+            background: rgba(20, 20, 26, 0.94);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--panel-border-hover);
+            border-left: 3px solid var(--accent-primary);
+            color: var(--text-primary);
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            box-shadow: 0 14px 32px rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transform: translateY(16px);
+            opacity: 0;
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: auto;
+        }
+        .toast-item.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+        .toast-item.error { border-left-color: var(--danger); }
+
+        /* Scrollbars & Responsive */
+        #notes-area::-webkit-scrollbar, #materials-area::-webkit-scrollbar, .panel::-webkit-scrollbar { width: 5px; }
+        #notes-area::-webkit-scrollbar-track, #materials-area::-webkit-scrollbar-track, .panel::-webkit-scrollbar-track { background: transparent; }
+        #notes-area::-webkit-scrollbar-thumb, #materials-area::-webkit-scrollbar-thumb, .panel::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 10px; }
+        #notes-area::-webkit-scrollbar-thumb:hover, #materials-area::-webkit-scrollbar-thumb:hover, .panel::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
+
+        @media (max-width: 1180px) {
+            .dashboard-container {
+                --left-w: 250px;
+                --right-w: 310px;
+                gap: 0.85rem;
+            }
+            .panel { padding: 1.15rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="top-controls">
+        <button class="top-btn top-btn-auth" id="auth-btn" onclick="handleAuthClick()">
+            <span class="sync-dot" id="auth-dot" style="display:none;"></span>
+            <span id="auth-btn-label">Accedi con Google</span>
+        </button>
+        <button class="top-btn" id="immersion-btn" onclick="toggleImmersion()">Focus Mode</button>
+        <button class="top-btn" onclick="changeBackground()">Sfondo</button>
+    </div>
+
+    <div class="dashboard-container" id="main-container">
+        <!-- Colonna Strumenti -->
+        <div class="panel tools-column">
+            <div class="sidebar-top-row">
+                <div class="datetime-header">
+                    <div id="clock">00:00</div>
+                    <div id="date">Caricamento...</div>
+                </div>
+                <button class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Riduci / Espandi Pannello">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="weather-container">
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.82rem;">
+                    <span style="font-weight:600; color:#f4f4f6;">🌤️ Seregno</span>
+                    <span style="color:#818cf8; font-weight:500;">ITS Meteo</span>
+                </div>
+            </div>
+            <div class="search-container">
+                <form action="https://www.google.com/search" method="GET" target="_blank"><input type="text" name="q" placeholder="Ricerca globale..." autofocus autocomplete="off"></form>
+            </div>
+            <div class="apps-grid">
+                <a href="https://notebooklm.google.com" class="app-card" target="_blank"><svg class="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M8 7h8"/><path d="M8 11h6"/></svg><span class="app-name">NotebookLM</span></a>
+                <a href="https://gemini.google.com" class="app-card" target="_blank"><svg class="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4L12 2z"/></svg><span class="app-name">Gemini</span></a>
+                <a href="https://claude.ai" class="app-card" target="_blank"><svg class="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg><span class="app-name">Claude</span></a>
+                <a href="https://chat.openai.com" class="app-card" target="_blank"><svg class="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><span class="app-name">ChatGPT</span></a>
+                <a href="https://github.com" class="app-card" target="_blank"><svg class="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg><span class="app-name">GitHub</span></a>
+                <a href="https://itsar.registrodiclasse.it/geopcfp2/" class="app-card" target="_blank"><svg class="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/></svg><span class="app-name">GEOP ITS</span></a>
+                <a href="https://drive.google.com" class="app-card" target="_blank"><svg class="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12H12l-5 9h10l5-9z"/><path d="M6 12L2 5h10l4 7-10 9z"/></svg><span class="app-name">Drive</span></a>
+                <a href="https://mail.google.com" class="app-card" target="_blank"><svg class="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg><span class="app-name">Gmail</span></a>
+            </div>
+        </div>
+
+        <!-- Colonna Appunti e Materiali -->
+        <div class="panel" id="notes-panel">
+            <div class="notes-header">
+                <div class="notes-header-left">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--text-secondary);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    <select id="subject-select" onchange="loadSubjectData()"></select>
+                </div>
+                <div class="notes-header-right">
+                    <button class="header-btn" onclick="addNewSubject()">Nuova</button>
+                    <button class="header-btn" id="fullscreen-btn" onclick="toggleFullscreenNotes()">Massimizza</button>
+                </div>
+            </div>
+
+            <!-- Barra Google Drive -->
+            <div class="drive-bar">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12H12l-5 9h10l5-9z"/><path d="M6 12L2 5h10l4 7-10 9z"/></svg>
+                <input type="url" id="drive-link-input" placeholder="Incolla qui il link della cartella Drive del corso..." oninput="saveDriveLink()">
+                <button class="drive-btn" onclick="openDriveLink()">🔗 Apri Drive</button>
+            </div>
+
+            <!-- SCHEDE -->
+            <div class="tabs-container">
+                <button id="tab-notes-btn" class="tab-btn active" onclick="switchTab('notes')">📝 Appunti</button>
+                <button id="tab-materials-btn" class="tab-btn" onclick="switchTab('materials')">📚 Materiali (PDF/Link)</button>
+            </div>
+
+            <div class="content-area">
+                <div id="notes-area-container">
+                    <div class="vscode-tabs-bar">
+                        <div id="vscode-tabs" style="display:flex;"></div>
+                        <button class="add-tab-btn" onclick="addNewPage()" title="Nuova Pagina">+</button>
+                    </div>
+                    <div class="editor-toolbar">
+                        <button onclick="formatText('bold')" title="Grassetto"><b>B</b></button>
+                        <button onclick="formatText('italic')" title="Corsivo"><i>I</i></button>
+                        <button onclick="formatText('underline')" title="Sottolineato"><u>U</u></button>
+                        <button onclick="formatText('strikeThrough')" title="Barrato"><s>S</s></button>
+                        <span class="divider"></span>
+                        <button onclick="formatText('insertUnorderedList')" title="Elenco puntato">•</button>
+                        <button onclick="formatText('insertOrderedList')" title="Elenco numerato">1.</button>
+                        <span class="divider"></span>
+                        <select onchange="formatText('formatBlock', this.value); this.selectedIndex=0;">
+                            <option value="" disabled selected>Stile Testo</option>
+                            <option value="H1">Titolo 1 (H1)</option>
+                            <option value="H2">Titolo 2 (H2)</option>
+                            <option value="H3">Titolo 3 (H3)</option>
+                            <option value="P">Paragrafo (Normale)</option>
+                        </select>
+                        <button onclick="formatText('removeFormat')" title="Rimuovi formattazione" style="margin-left: auto;">✕</button>
+                    </div>
+                    <div id="notes-area" contenteditable="true" placeholder="Inizia a digitare o formatta usando i tasti sopra..." oninput="saveCurrentNote()"></div>
+                </div>
+
+                <div id="materials-area" style="display:none;">
+                    <div class="materials-header-bar">
+                        <span class="materials-header-title">Libreria File</span>
+                        <button class="add-material-btn" onclick="addMaterial()">+ Aggiungi Risorsa</button>
+                    </div>
+                    <div id="materials-list-container"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Terza Colonna: Chat AI -->
+        <div class="panel chat-column" id="chat-column">
+            <div class="ai-chat-panel" id="ai-chat-panel">
+                <div class="chat-header-bar">
+                    <button class="expand-btn" id="chat-toggle-btn" onclick="toggleChat()" style="font-size: 1rem; padding: 2px 6px;" title="Riduci/Espandi Chat">▶</button>
+                    <span class="chat-title">Gemini Copilot</span>
+                    <div class="chat-controls-hide">
+                        <button class="expand-btn" onclick="clearChatHistory()">🧹 Pulisci</button>
+                    </div>
+                </div>
+                <div class="chat-vertical-title">GEMINI AI</div>
+                <div class="chat-messages" id="chat-messages"></div>
+                <div class="file-upload-preview-bar">
+                    <input type="file" id="ai-media-input" accept="image/*,application/pdf" style="display: none;" onchange="handleFileSelection(event)">
+                    <label for="ai-media-input" class="chat-btn">📎 Allega File</label>
+                    <div id="attached-file-badge"><span id="attached-file-name">file.pdf</span><button onclick="clearAttachedFile()">✕</button></div>
+                </div>
+                <div class="chat-input-row">
+                    <button class="chat-btn" onclick="openKeysModal()" id="keys-status-btn" style="border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;">🔑 Keys <span id="active-key-display" style="display:none;"></span></button>
+                    
+                    <select id="model-select" style="flex: 1; min-width: 90px;" onchange="saveModelSelection()">
+                        <option value="gemini-3.8-flash" selected>3.8 F</option>
+                        <option value="gemini-3.8-pro">3.8 P</option>
+                        <option value="gemini-3.6-flash">3.6 F</option>
+                    </select>
+                </div>
+                <div class="chat-input-row" style="margin-top: 8px;">
+                    <input type="text" id="user-chat-input" placeholder="Chiedi a Gemini..." onkeypress="if(event.key==='Enter'){ event.preventDefault(); sendAIChat(); }">
+                    <button class="chat-btn accent" onclick="sendAIChat()">Invia</button>
+                </div>
+                <div class="chat-input-row" style="margin-top: 8px; justify-content: space-between;">
+                    <button class="chat-btn" onclick="analyzeCurrentNotes()">🔍 Analizza Note</button>
+                    <button class="chat-btn" onclick="appendLastResponseToNotes()">➕ Aggiungi</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODALE GESTIONE API KEYS -->
+    <div class="modal-overlay" id="keys-modal">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span class="modal-title">Gestione API Keys</span>
+                <button class="modal-close" onclick="closeKeysModal()">✕</button>
+            </div>
+            <div style="font-size: 0.8rem; color: var(--text-secondary);">
+                Aggiungi infinite chiavi. Seleziona col pallino quella da usare primariamente. Se esaurisce la quota, il sistema testerà in automatico le altre.
+            </div>
+            <div id="keys-list-container" style="display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto; padding-right: 4px;"></div>
+            <button class="add-key-btn" onclick="addKeyField()">+ Aggiungi nuova chiave</button>
+            <button class="modal-save-btn" onclick="saveKeysFromModal()">Salva Chiavi</button>
+        </div>
+    </div>
+
+    <!-- Custom Context Menu per l'AI -->
+    <div id="ai-context-menu" class="custom-context-menu">
+        <div class="context-menu-item text-action" onclick="handleAiMenuAction('correggi')">✨ Correggi grammatica</div>
+        <div class="context-menu-item text-action" onclick="handleAiMenuAction('migliora')">🚀 Migliora scrittura</div>
+        <div class="context-menu-item text-action" onclick="handleAiMenuAction('riassumi')">📝 Riassumi selezione</div>
+        <div class="context-menu-item text-action" onclick="handleAiMenuAction('spiega')">🧠 Spiegami questo</div>
+        <div class="context-menu-item text-action" onclick="handleAiMenuAction('traduci')">🌍 Traduci e Analizza</div>
+        <div class="context-menu-item empty-action" onclick="handleAiMenuAction('incolla_ai')" id="menu-paste-ai">📋 Incolla ultima risposta AI</div>
+    </div>
+
+    <!-- MODALE UNIVERSALE CUSTOM -->
+    <div class="dialog-overlay" id="custom-dialog-overlay">
+        <div class="dialog-box">
+            <div class="dialog-header">
+                <span class="dialog-title" id="custom-dialog-title">Titolo</span>
+                <button class="modal-close" onclick="closeCustomDialog(null)">✕</button>
+            </div>
+            <div class="dialog-desc" id="custom-dialog-desc" style="display:none;"></div>
+            <div class="dialog-fields" id="custom-dialog-fields"></div>
+            <div class="dialog-actions" id="custom-dialog-actions">
+                <button class="dialog-btn" id="custom-dialog-cancel" onclick="closeCustomDialog(null)">Annulla</button>
+                <button class="dialog-btn primary" id="custom-dialog-confirm">Conferma</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CONTENITORE NOTIFICHE TOAST -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- FIREBASE CLOUD FIRESTORE & GOOGLE AUTH MODULE -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js';
+        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
+        import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js';
+
+        const firebaseConfig = {
+            projectId: "workspace-its-10786",
+            appId: "1:455460787207:web:6993eabd770791a55606a2",
+            apiKey: "AIzaSyAEj1jKTIP4Jh0NsrO48rOFzGLCMNsgeII",
+            authDomain: "workspace-its-10786.firebaseapp.com",
+            firestoreDatabaseId: "ai-studio-workspaceits-3bed4683-d225-4e08-9dfa-deedfa0b0a7d",
+            storageBucket: "workspace-its-10786.firebasestorage.app",
+            messagingSenderId: "455460787207",
+            measurementId: "G-PYD8940MLR"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = firebaseConfig.firestoreDatabaseId ? getFirestore(app, firebaseConfig.firestoreDatabaseId) : getFirestore(app);
+        const googleProvider = new GoogleAuthProvider();
+
+        window.firebaseApp = app;
+        window.firebaseAuth = auth;
+        window.firebaseDb = db;
+
+        let currentUser = null;
+        let cloudUnsubscribers = [];
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            window.currentUser = user;
+            const btnLabel = document.getElementById('auth-btn-label');
+            const authDot = document.getElementById('auth-dot');
+            if (user) {
+                btnLabel.innerText = user.displayName || user.email.split('@')[0];
+                authDot.style.display = 'inline-block';
+                showToast(`Accesso effettuato come ${user.displayName || user.email}`);
+                initFirestoreSync(user.uid);
+            } else {
+                btnLabel.innerText = 'Accedi con Google';
+                authDot.style.display = 'none';
+                cloudUnsubscribers.forEach(u => u());
+                cloudUnsubscribers = [];
+            }
+        });
+
+        window.handleAuthClick = async function() {
+            if (currentUser) {
+                const confirmed = await openCustomDialog({
+                    title: 'Disconnessione',
+                    description: `Attualmente connesso come <b>${currentUser.displayName || currentUser.email}</b>.<br>Vuoi uscire dall'account Google?`,
+                    confirmText: 'Disconnetti',
+                    danger: true
+                });
+                if (confirmed) {
+                    await signOut(auth);
+                    showToast('Disconnesso con successo.');
+                }
+            } else {
+                try {
+                    await signInWithPopup(auth, googleProvider);
+                } catch(e) {
+                    console.error(e);
+                    showToast('Accesso Google annullato o fallito.', 'error');
+                }
+            }
+        };
+
+        function initFirestoreSync(uid) {
+            cloudUnsubscribers.forEach(u => u());
+            cloudUnsubscribers = [];
+
+            // Listen to pages
+            const pagesCol = collection(db, 'users', uid, 'pages');
+            const unsubPages = onSnapshot(pagesCol, (snapshot) => {
+                if (!snapshot.empty) {
+                    const newPagesData = {};
+                    snapshot.forEach(docSnap => {
+                        const d = docSnap.data();
+                        const sub = d.subjectId || 'Database';
+                        if (!newPagesData[sub]) newPagesData[sub] = [];
+                        newPagesData[sub].push({ id: d.id || docSnap.id, name: d.name, content: d.content || '' });
+                    });
+                    pagesData = newPagesData;
+                    localStorage.setItem('workspace_pages', JSON.stringify(pagesData));
+                    populateSelect();
+                    renderTabs();
+                }
+            }, (err) => console.warn("Firestore pages sync:", err));
+            cloudUnsubscribers.push(unsubPages);
+
+            // Listen to materials
+            const matCol = collection(db, 'users', uid, 'materials');
+            const unsubMat = onSnapshot(matCol, (snapshot) => {
+                if (!snapshot.empty) {
+                    const newMatData = {};
+                    snapshot.forEach(docSnap => {
+                        const d = docSnap.data();
+                        const sub = d.subjectId || 'Database';
+                        if (!newMatData[sub]) newMatData[sub] = [];
+                        newMatData[sub].push({ id: d.id || docSnap.id, name: d.name, url: d.url, category: d.category });
+                    });
+                    materialsData = newMatData;
+                    localStorage.setItem('workspace_materials', JSON.stringify(materialsData));
+                    renderMaterials();
+                }
+            }, (err) => console.warn("Firestore materials sync:", err));
+            cloudUnsubscribers.push(unsubMat);
+        }
+
+        window.savePageToCloud = async function(subject, page) {
+            if (!currentUser) return;
+            try {
+                const pageRef = doc(db, 'users', currentUser.uid, 'pages', page.id);
+                await setDoc(pageRef, {
+                    id: page.id,
+                    userId: currentUser.uid,
+                    subjectId: subject,
+                    name: page.name,
+                    content: page.content || '',
+                    updatedAt: new Date().toISOString()
+                }, { merge: true });
+            } catch(e) {
+                console.warn("Cloud save error:", e);
+            }
+        };
+
+        window.deletePageFromCloud = async function(pageId) {
+            if (!currentUser) return;
+            try {
+                const pageRef = doc(db, 'users', currentUser.uid, 'pages', pageId);
+                await deleteDoc(pageRef);
+            } catch(e) {
+                console.warn("Cloud delete error:", e);
+            }
+        };
+
+        window.saveMaterialToCloud = async function(subject, mat) {
+            if (!currentUser) return;
+            try {
+                const matRef = doc(db, 'users', currentUser.uid, 'materials', String(mat.id));
+                await setDoc(matRef, {
+                    id: String(mat.id),
+                    userId: currentUser.uid,
+                    subjectId: subject,
+                    name: mat.name,
+                    url: mat.url,
+                    category: mat.category || 'Lezioni',
+                    createdAt: new Date().toISOString()
+                });
+            } catch(e) {
+                console.warn("Cloud material save error:", e);
+            }
+        };
+
+        window.deleteMaterialFromCloud = async function(matId) {
+            if (!currentUser) return;
+            try {
+                const matRef = doc(db, 'users', currentUser.uid, 'materials', String(matId));
+                await deleteDoc(matRef);
+            } catch(e) {
+                console.warn("Cloud material delete error:", e);
+            }
+        };
+    </script>
+
+    <script>
+        // Dialog and Toast system
+        let activeDialogResolver = null;
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast-item ${type === 'error' ? 'error' : ''}`;
+            const icon = type === 'error' ? '⚠️' : '✨';
+            toast.innerHTML = `<span>${icon}</span><span>${message}</span>`;
+            container.appendChild(toast);
+            requestAnimationFrame(() => toast.classList.add('show'));
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 250);
+            }, 3200);
+        }
+
+        function openCustomDialog({ title, description = '', fields = [], confirmText = 'Conferma', cancelText = 'Annulla', hideCancel = false, danger = false }) {
+            return new Promise((resolve) => {
+                activeDialogResolver = resolve;
+                const overlay = document.getElementById('custom-dialog-overlay');
+                const titleEl = document.getElementById('custom-dialog-title');
+                const descEl = document.getElementById('custom-dialog-desc');
+                const fieldsEl = document.getElementById('custom-dialog-fields');
+                const cancelBtn = document.getElementById('custom-dialog-cancel');
+                const confirmBtn = document.getElementById('custom-dialog-confirm');
+
+                titleEl.innerHTML = title;
+                if (description) {
+                    descEl.innerHTML = description;
+                    descEl.style.display = 'block';
+                } else {
+                    descEl.style.display = 'none';
+                }
+
+                fieldsEl.innerHTML = '';
+                fields.forEach((f, idx) => {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'dialog-field';
+                    if (f.label) {
+                        const lbl = document.createElement('label');
+                        lbl.textContent = f.label;
+                        wrap.appendChild(lbl);
+                    }
+                    const inp = document.createElement('input');
+                    inp.type = f.type || 'text';
+                    inp.id = `dialog-field-${f.id || idx}`;
+                    inp.placeholder = f.placeholder || '';
+                    inp.value = f.value || '';
+                    inp.autocomplete = 'off';
+                    inp.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            submitCustomDialog(fields);
+                        } else if (e.key === 'Escape') {
+                            closeCustomDialog(null);
+                        }
+                    });
+                    wrap.appendChild(inp);
+                    fieldsEl.appendChild(wrap);
+                });
+
+                fieldsEl.style.display = fields.length > 0 ? 'flex' : 'none';
+                cancelBtn.style.display = hideCancel ? 'none' : 'inline-flex';
+                cancelBtn.textContent = cancelText;
+
+                confirmBtn.textContent = confirmText;
+                confirmBtn.className = `dialog-btn ${danger ? 'danger' : 'primary'}`;
+                confirmBtn.onclick = () => submitCustomDialog(fields);
+
+                overlay.classList.add('show');
+
+                setTimeout(() => {
+                    const firstInput = fieldsEl.querySelector('input');
+                    if (firstInput) {
+                        firstInput.focus();
+                        firstInput.select();
+                    } else {
+                        confirmBtn.focus();
+                    }
+                }, 40);
+            });
+        }
+
+        function submitCustomDialog(fields) {
+            if (!activeDialogResolver) return;
+            if (!fields || fields.length === 0) {
+                closeCustomDialog(true);
+                return;
+            }
+            const values = {};
+            fields.forEach((f, idx) => {
+                const key = f.id || idx;
+                const el = document.getElementById(`dialog-field-${key}`);
+                values[key] = el ? el.value : '';
+            });
+            closeCustomDialog(fields.length === 1 && !fields[0].id ? values[0] : values);
+        }
+
+        function closeCustomDialog(result) {
+            const overlay = document.getElementById('custom-dialog-overlay');
+            overlay.classList.remove('show');
+            if (activeDialogResolver) {
+                const resolve = activeDialogResolver;
+                activeDialogResolver = null;
+                resolve(result);
+            }
+        }
+
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('clock').innerText = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+            document.getElementById('date').innerText = now.toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+        }
+        setInterval(updateTime, 1000); updateTime();
+
+        const backgrounds = ['url("https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=2564")', 'url("https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=2564")', 'url("https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564")'];
+        let currentBgIndex = localStorage.getItem('workspace_bg_index') ? parseInt(localStorage.getItem('workspace_bg_index')) : 0;
+        document.body.style.backgroundImage = backgrounds[currentBgIndex];
+        function changeBackground() { currentBgIndex = (currentBgIndex + 1) % backgrounds.length; document.body.style.backgroundImage = backgrounds[currentBgIndex]; localStorage.setItem('workspace_bg_index', currentBgIndex); }
+
+        let isImmersion = localStorage.getItem('workspace_immersion') === 'true';
+        const immersionBtn = document.getElementById('immersion-btn');
+        if (isImmersion) {
+            document.body.classList.add('full-immersion');
+            immersionBtn.innerText = 'Esci da Focus';
+        }
+        function toggleImmersion() {
+            isImmersion = !isImmersion;
+            document.body.classList.toggle('full-immersion', isImmersion);
+            localStorage.setItem('workspace_immersion', isImmersion);
+            immersionBtn.innerText = isImmersion ? 'Esci da Focus' : 'Focus Mode';
+        }
+
+        const mainContainer = document.getElementById('main-container');
+        let isSidebarCollapsed = localStorage.getItem('workspace_sidebar_collapsed') === 'true';
+        if (isSidebarCollapsed) mainContainer.classList.add('sidebar-collapsed');
+        function toggleSidebar() { isSidebarCollapsed = !isSidebarCollapsed; mainContainer.classList.toggle('sidebar-collapsed', isSidebarCollapsed); localStorage.setItem('workspace_sidebar_collapsed', isSidebarCollapsed); }
+
+        let isChatCollapsed = localStorage.getItem('workspace_chat_collapsed') === 'true';
+        if (isChatCollapsed) mainContainer.classList.add('chat-collapsed');
+        
+        function toggleChat() {
+            isChatCollapsed = !isChatCollapsed;
+            mainContainer.classList.toggle('chat-collapsed', isChatCollapsed);
+            localStorage.setItem('workspace_chat_collapsed', isChatCollapsed);
+            const btn = document.getElementById('chat-toggle-btn');
+            if(btn) btn.innerText = isChatCollapsed ? '◀' : '▶';
+
+            if (!isChatCollapsed) {
+                const messagesContainer = document.getElementById('chat-messages');
+                if (messagesContainer) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }
+        }
+        document.getElementById('chat-toggle-btn').innerText = isChatCollapsed ? '◀' : '▶';
+
+        const notesPanel = document.getElementById('notes-panel');
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        let isNotesMaximized = false;
+        
+        function toggleFullscreenNotes() {
+            isNotesMaximized = !isNotesMaximized;
+            notesPanel.classList.toggle('notes-maximized', isNotesMaximized);
+            fullscreenBtn.innerText = isNotesMaximized ? 'Riduci' : 'Massimizza';
+        }
+
+        let notesData = JSON.parse(localStorage.getItem('workspace_notes')) || { "Database": "" };
+        let driveData = JSON.parse(localStorage.getItem('workspace_drive_links')) || {};
+        let materialsData = JSON.parse(localStorage.getItem('workspace_materials')) || {};
+        let pagesData = JSON.parse(localStorage.getItem('workspace_pages')) || {};
+        let activePageId = localStorage.getItem('workspace_active_page') || null;
+
+        const selectEl = document.getElementById('subject-select');
+        const textareaEl = document.getElementById('notes-area');
+        const notesAreaContainer = document.getElementById('notes-area-container');
+        const driveInputEl = document.getElementById('drive-link-input');
+        const materialsListContainer = document.getElementById('materials-list-container');
+        const tabsBar = document.getElementById('vscode-tabs');
+
+        function migrateOldNotes() {
+            let changed = false;
+            for (let sub in notesData) {
+                if (!pagesData[sub] || pagesData[sub].length === 0) {
+                    pagesData[sub] = [{ id: 'page_'+Date.now()+'_'+Math.random().toString(36).substr(2,5), name: 'Appunti Principali', content: notesData[sub] }];
+                    changed = true;
+                }
+            }
+            if (changed) localStorage.setItem('workspace_pages', JSON.stringify(pagesData));
+        }
+        migrateOldNotes();
+
+        function populateSelect() {
+            selectEl.innerHTML = '';
+            for (let subject in pagesData) {
+                let option = document.createElement('option');
+                option.value = subject; option.textContent = subject; selectEl.appendChild(option);
+            }
+        }
+
+        function renderTabs() {
+            const subject = selectEl.value;
+            const pages = pagesData[subject] || [];
+            tabsBar.innerHTML = '';
+            
+            if (pages.length === 0) {
+                pages.push({ id: 'page_'+Date.now(), name: 'Nuova Pagina', content: '' });
+                pagesData[subject] = pages;
+                localStorage.setItem('workspace_pages', JSON.stringify(pagesData));
+            }
+            
+            if (!activePageId || !pages.find(p => p.id === activePageId)) {
+                activePageId = pages[0].id;
+                localStorage.setItem('workspace_active_page', activePageId);
+            }
+
+            pages.forEach(p => {
+                const tab = document.createElement('div');
+                tab.className = `vscode-tab ${p.id === activePageId ? 'active' : ''}`;
+                tab.innerHTML = `<span onclick="switchPage('${p.id}')">${p.name}</span> <span class="close-tab" onclick="deletePage('${p.id}', event)" title="Chiudi">✕</span>`;
+                tab.oncontextmenu = (e) => { e.preventDefault(); renamePage(p.id); };
+                tabsBar.appendChild(tab);
+            });
+
+            const activePage = pages.find(p => p.id === activePageId);
+            textareaEl.innerHTML = activePage ? activePage.content : '';
+        }
+
+        function loadSubjectData() {
+            const subject = selectEl.value;
+            localStorage.setItem('workspace_active_subject', subject);
+            driveInputEl.value = driveData[subject] || "";
+            renderTabs();
+            renderMaterials();
+            loadChatHistoryForSubject();
+        }
+
+        let saveTimeout = null;
+        function saveCurrentNote() { 
+            const subject = selectEl.value;
+            const page = (pagesData[subject] || []).find(p => p.id === activePageId);
+            if (page) {
+                page.content = textareaEl.innerHTML;
+                localStorage.setItem('workspace_pages', JSON.stringify(pagesData));
+                if (window.savePageToCloud) {
+                    clearTimeout(saveTimeout);
+                    saveTimeout = setTimeout(() => {
+                        window.savePageToCloud(subject, page);
+                    }, 600);
+                }
+            }
+            notesData[subject] = textareaEl.innerHTML || "";
+            localStorage.setItem('workspace_notes', JSON.stringify(notesData));
+        }
+        
+        function saveDriveLink() { 
+            driveData[selectEl.value] = driveInputEl.value.trim(); 
+            localStorage.setItem('workspace_drive_links', JSON.stringify(driveData)); 
+        }
+        function openDriveLink() {
+            const link = driveInputEl.value.trim();
+            if (link) {
+                window.open(link, '_blank');
+            } else {
+                showToast("Nessun link Drive inserito per questa materia.", "error");
+                driveInputEl.focus();
+            }
+        }
+
+        async function addNewSubject() {
+            const newSub = await openCustomDialog({
+                title: '📚 Nuova Materia',
+                description: 'Inserisci il nome del nuovo corso o materia da aggiungere al tuo workspace.',
+                fields: [{ placeholder: 'Es. Sistemi Cloud, Cybersecurity...', value: '' }],
+                confirmText: 'Crea Materia'
+            });
+            if (newSub && newSub.trim() !== "") {
+                const cleanSub = newSub.trim();
+                if (pagesData[cleanSub]) {
+                    showToast("Questa materia esiste già!", "error");
+                    return;
+                }
+                const newP = { id: 'page_'+Date.now(), name: 'Appunti Principali', content: '' };
+                pagesData[cleanSub] = [newP];
+                notesData[cleanSub] = ""; driveData[cleanSub] = ""; materialsData[cleanSub] = [];
+                populateSelect(); selectEl.value = cleanSub; loadSubjectData(); saveCurrentNote();
+                if (window.savePageToCloud) {
+                    window.savePageToCloud(cleanSub, newP);
+                }
+                showToast(`Materia "${cleanSub}" creata!`);
+            }
+        }
+
+        function switchTab(tab) {
+            const tabNotesBtn = document.getElementById('tab-notes-btn');
+            const tabMaterialsBtn = document.getElementById('tab-materials-btn');
+            const materialsArea = document.getElementById('materials-area');
+            if (tab === 'notes') {
+                notesAreaContainer.style.display = 'flex'; materialsArea.style.display = 'none';
+                tabNotesBtn.classList.add('active'); tabMaterialsBtn.classList.remove('active');
+            } else {
+                notesAreaContainer.style.display = 'none'; materialsArea.style.display = 'flex';
+                tabNotesBtn.classList.remove('active'); tabMaterialsBtn.classList.add('active');
+            }
+        }
+        
+        function formatText(command, value = null) {
+            document.execCommand(command, false, value);
+            document.getElementById('notes-area').focus();
+            saveCurrentNote();
+        }
+
+        function getFileMeta(name, url) {
+            const n = name.toLowerCase();
+            const u = url.toLowerCase();
+
+            if (n.includes('pdf') || n.includes('slide') || u.includes('.pdf') || u.includes('export=download')) {
+                return { icon: '📄', color: 'rgba(239, 68, 68, 0.2)', border: 'rgba(239, 68, 68, 0.4)', type: 'Documento PDF' };
+            }
+            if (u.includes('youtube.com') || u.includes('youtu.be') || n.includes('video') || n.includes('rec')) {
+                return { icon: '🎥', color: 'rgba(244, 63, 94, 0.2)', border: 'rgba(244, 63, 94, 0.4)', type: 'Video / Media' };
+            }
+            if (n.includes('foto') || n.includes('img') || u.includes('.png') || u.includes('.jpg') || u.includes('.jpeg')) {
+                return { icon: '🖼️', color: 'rgba(56, 189, 248, 0.2)', border: 'rgba(56, 189, 248, 0.4)', type: 'Immagine' };
+            }
+            if (n.includes('doc') || n.includes('txt') || u.includes('docs.google.com')) {
+                return { icon: '📝', color: 'rgba(34, 197, 94, 0.2)', border: 'rgba(34, 197, 94, 0.4)', type: 'Testo' };
+            }
+            if (u.includes('drive.google.com')) {
+                return { icon: '📁', color: 'rgba(234, 179, 8, 0.2)', border: 'rgba(234, 179, 8, 0.4)', type: 'Link Drive' };
+            }
+            return { icon: '🔗', color: 'rgba(168, 85, 247, 0.2)', border: 'rgba(168, 85, 247, 0.4)', type: 'Risorsa Web' };
+        }
+
+        async function addMaterial() {
+            const subject = selectEl.value;
+            if (!materialsData[subject]) materialsData[subject] = [];
+            
+            const result = await openCustomDialog({
+                title: '📎 Aggiungi Risorsa',
+                description: `Aggiungi un nuovo file, PDF o link per <b>${subject}</b>.`,
+                fields: [
+                    { id: 'name', label: 'Nome della risorsa', placeholder: 'Es. Slide Lezione 1' },
+                    { id: 'url', label: 'Link (Drive, YouTube, PDF, Sito web)', placeholder: 'https://...' },
+                    { id: 'category', label: 'Categoria', placeholder: 'Es. Lezioni, Esercizi, Immagini', value: 'Lezioni' }
+                ],
+                confirmText: 'Salva Risorsa'
+            });
+
+            if (!result || !result.name || !result.name.trim() || !result.url || !result.url.trim()) return;
+            
+            const name = result.name.trim();
+            let url = result.url.trim();
+            const category = (result.category || 'Lezioni').trim();
+
+            const driveFileMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+            if (driveFileMatch && driveFileMatch[1]) {
+                url = `https://drive.google.com/uc?export=download&id=${driveFileMatch[1]}`;
+            }
+
+            const item = { id: Date.now(), name, url, category };
+            materialsData[subject].push(item);
+            localStorage.setItem('workspace_materials', JSON.stringify(materialsData));
+            renderMaterials();
+            if (window.saveMaterialToCloud) {
+                window.saveMaterialToCloud(subject, item);
+            }
+            showToast(`Risorsa "${name}" aggiunta!`);
+        }
+
+        async function deleteMaterial(id) {
+            const subject = selectEl.value;
+            const confirmed = await openCustomDialog({
+                title: '🗑️ Rimuovi Risorsa',
+                description: 'Sei sicuro di voler rimuovere questo file dalla libreria della materia?',
+                confirmText: 'Elimina',
+                danger: true
+            });
+            if (confirmed) {
+                materialsData[subject] = materialsData[subject].filter(item => item.id !== id);
+                localStorage.setItem('workspace_materials', JSON.stringify(materialsData));
+                renderMaterials();
+                if (window.deleteMaterialFromCloud) {
+                    window.deleteMaterialFromCloud(id);
+                }
+                showToast("Risorsa rimossa.");
+            }
+        }
+
+        function renderMaterials() {
+            const subject = selectEl.value;
+            const items = materialsData[subject] || [];
+            materialsListContainer.innerHTML = '';
+            
+            if (items.length === 0) {
+                materialsListContainer.innerHTML = '<div style="color:var(--text-secondary); font-size:0.85rem; padding:10px 0;">Nessuna risorsa salvata per questa materia. Clicca su "+ Aggiungi Risorsa".</div>';
+                return;
+            }
+
+            const grouped = {};
+            items.forEach(item => {
+                const cat = item.category || 'Lezioni';
+                if(!grouped[cat]) grouped[cat] = [];
+                grouped[cat].push(item);
+            });
+
+            for (const [cat, files] of Object.entries(grouped)) {
+                let catHtml = `<div class="material-category"><div class="material-category-title">${cat}</div><div class="materials-grid">`;
+                
+                files.forEach(f => {
+                    const meta = getFileMeta(f.name, f.url);
+                    catHtml += `
+                        <div class="material-card">
+                            <div class="material-info">
+                                <div class="material-icon-box" style="background:${meta.color}; border:1px solid ${meta.border}">
+                                    ${meta.icon}
+                                </div>
+                                <div class="material-text">
+                                    <div class="material-name" title="${f.name}">${f.name}</div>
+                                    <div class="material-sub">${meta.type}</div>
+                                </div>
+                            </div>
+                            <div class="material-actions">
+                                <a href="${f.url}" target="_blank" class="material-dl-btn" title="Apri/Scarica file">Scarica</a>
+                                <button class="material-del-btn" onclick="deleteMaterial(${f.id})" title="Rimuovi">✕</button>
+                            </div>
+                        </div>
+                    `;
+                });
+                catHtml += `</div></div>`;
+                materialsListContainer.innerHTML += catHtml;
+            }
+        }
+
+        function getStoredKeys() {
+            try { return JSON.parse(localStorage.getItem('workspace_gemini_keys_arr')) || []; }
+            catch(e) { return []; }
+        }
+        
+        function getSelectedKeyIndex() {
+            let idx = parseInt(localStorage.getItem('workspace_gemini_selected_key_idx'));
+            return isNaN(idx) ? 0 : idx;
+        }
+
+        function openKeysModal() {
+            renderKeyFields();
+            document.getElementById('keys-modal').style.display = 'flex';
+        }
+
+        function closeKeysModal() {
+            document.getElementById('keys-modal').style.display = 'none';
+        }
+
+        function renderKeyFields() {
+            const container = document.getElementById('keys-list-container');
+            const keys = getStoredKeys();
+            let selectedIdx = getSelectedKeyIndex();
+            
+            container.innerHTML = '';
+            if (keys.length === 0) keys.push('');
+
+            keys.forEach((key, index) => {
+                const row = document.createElement('div');
+                row.className = 'key-row';
+                row.innerHTML = `
+                    <input type="radio" name="active-key-radio" value="${index}" ${index === selectedIdx ? 'checked' : ''} title="Usa questa come preferita">
+                    <input type="password" class="key-input-val" value="${key}" placeholder="Incolla API Key (AIzaSy...)">
+                    <button class="key-del-btn" onclick="removeKeyField(${index})" title="Rimuovi">✕</button>
+                `;
+                container.appendChild(row);
+            });
+            
+            if (!document.querySelector('input[name="active-key-radio"]:checked') && container.querySelector('input[type="radio"]')) {
+                container.querySelector('input[type="radio"]').checked = true;
+            }
+        }
+
+        function addKeyField() {
+            const keys = scrapeKeysFromDOM();
+            keys.push('');
+            saveKeysToLocal(keys);
+            renderKeyFields();
+        }
+
+        function removeKeyField(index) {
+            const keys = scrapeKeysFromDOM();
+            keys.splice(index, 1);
+            let selectedIdx = scrapeSelectedRadio();
+            if (selectedIdx === index) selectedIdx = 0;
+            else if (selectedIdx > index) selectedIdx--;
+            
+            saveKeysToLocal(keys, selectedIdx);
+            renderKeyFields();
+        }
+
+        function scrapeKeysFromDOM() {
+            const inputs = document.querySelectorAll('.key-input-val');
+            return Array.from(inputs).map(inp => inp.value.trim());
+        }
+
+        function scrapeSelectedRadio() {
+            const radio = document.querySelector('input[name="active-key-radio"]:checked');
+            return radio ? parseInt(radio.value) : 0;
+        }
+
+        function saveKeysToLocal(keysArr, selectedIdx = null) {
+            if (selectedIdx === null) selectedIdx = scrapeSelectedRadio();
+            localStorage.setItem('workspace_gemini_keys_arr', JSON.stringify(keysArr));
+            localStorage.setItem('workspace_gemini_selected_key_idx', selectedIdx);
+        }
+
+        function saveKeysFromModal() {
+            const rawKeys = scrapeKeysFromDOM();
+            let selectedIdx = scrapeSelectedRadio();
+            
+            const validKeys = [];
+            let newSelectedIdx = 0;
+            for(let i = 0; i < rawKeys.length; i++) {
+                if(rawKeys[i] !== "") {
+                    validKeys.push(rawKeys[i]);
+                    if (i === selectedIdx) newSelectedIdx = validKeys.length - 1;
+                }
+            }
+
+            saveKeysToLocal(validKeys, newSelectedIdx);
+            closeKeysModal();
+            showToast("Chiavi API salvate!");
+        }
+
+        let chatHistory = [];
+        let lastAIResponse = "";
+
+        function getSavedChats() {
+            try { return JSON.parse(localStorage.getItem('workspace_chat_history')) || {}; }
+            catch(e) { return {}; }
+        }
+
+        function saveChatHistoryForSubject() {
+            const subject = selectEl.value;
+            const allChats = getSavedChats();
+            allChats[subject] = chatHistory.slice(-20);
+            localStorage.setItem('workspace_chat_history', JSON.stringify(allChats));
+        }
+
+        function loadChatHistoryForSubject() {
+            const subject = selectEl.value;
+            const allChats = getSavedChats();
+            chatHistory = allChats[subject] || [];
+            
+            const messagesContainer = document.getElementById('chat-messages');
+            messagesContainer.innerHTML = "";
+
+            if (chatHistory.length === 0) {
+                messagesContainer.innerHTML = '<div class="chat-msg ai">Chiedi qualcosa, dai istruzioni o premi <b>🔍 Analizza Note</b>!</div>';
+                return;
+            }
+
+            chatHistory.forEach((msg) => {
+                const msgDiv = document.createElement('div');
+                msgDiv.className = `chat-msg ${msg.role === 'user' ? 'user' : 'ai'}`;
+                
+                let text = "";
+                if (msg.parts && msg.parts[0] && msg.parts[0].text) {
+                    text = msg.parts[0].text;
+                }
+                msgDiv.dataset.rawText = text;
+                
+                let innerContent = "";
+                if (msg.role === 'ai' || msg.role === 'model') {
+                    innerContent = marked.parse(text) + `<button class="msg-action-btn" title="Copia" onclick="copyAiMessage(this)">📋</button>`;
+                } else {
+                    let filePart = msg.parts.find(p => p.inlineData);
+                    let displayT = text;
+                    if(filePart) displayT += `<br><small style="opacity:0.8;">📎 File Allegato</small>`;
+                    innerContent = displayT + `<button class="msg-action-btn" title="Reinvia" onclick="resendUserMessage(this)">🔄</button>`;
+                }
+                msgDiv.innerHTML = innerContent;
+                messagesContainer.appendChild(msgDiv);
+            });
+
+            setTimeout(() => { messagesContainer.scrollTop = messagesContainer.scrollHeight; }, 10);
+        }
+
+        async function addNewPage() {
+            const subject = selectEl.value;
+            if (!pagesData[subject]) pagesData[subject] = [];
+            const pageName = await openCustomDialog({
+                title: '📝 Nuova Pagina Appunti',
+                description: `Crea una nuova scheda di appunti in <b>${subject}</b>.`,
+                fields: [{ placeholder: 'Titolo della pagina...', value: `Pagina ${pagesData[subject].length + 1}` }],
+                confirmText: 'Crea Pagina'
+            });
+            if (pageName && pageName.trim()) {
+                const newId = 'page_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+                const newPageObj = { id: newId, name: pageName.trim(), content: '' };
+                pagesData[subject].push(newPageObj);
+                activePageId = newId;
+                localStorage.setItem('workspace_pages', JSON.stringify(pagesData));
+                localStorage.setItem('workspace_active_page', activePageId);
+                renderTabs();
+                if (window.savePageToCloud) {
+                    window.savePageToCloud(subject, newPageObj);
+                }
+                showToast(`Pagina "${pageName.trim()}" creata!`);
+            }
+        }
+
+        function switchPage(pageId) {
+            saveCurrentNote();
+            activePageId = pageId;
+            localStorage.setItem('workspace_active_page', activePageId);
+            renderTabs();
+        }
+
+        async function deletePage(pageId, event) {
+            if (event) event.stopPropagation();
+            const subject = selectEl.value;
+            const pages = pagesData[subject] || [];
+            if (pages.length <= 1) {
+                showToast("Impossibile eliminare l'unica pagina rimasta.", "error");
+                return;
+            }
+            const targetPage = pages.find(p => p.id === pageId);
+            const confirmed = await openCustomDialog({
+                title: '🗑️ Elimina Pagina',
+                description: `Vuoi davvero eliminare la pagina <b>"${targetPage ? targetPage.name : ''}"</b>? L'azione non è reversibile.`,
+                confirmText: 'Elimina Pagina',
+                danger: true
+            });
+            if (confirmed) {
+                pagesData[subject] = pages.filter(p => p.id !== pageId);
+                if (activePageId === pageId) {
+                    activePageId = pagesData[subject][0].id;
+                    localStorage.setItem('workspace_active_page', activePageId);
+                }
+                localStorage.setItem('workspace_pages', JSON.stringify(pagesData));
+                renderTabs();
+                if (window.deletePageFromCloud) {
+                    window.deletePageFromCloud(pageId);
+                }
+                showToast("Pagina eliminata.");
+            }
+        }
+
+        async function renamePage(pageId) {
+            const subject = selectEl.value;
+            const page = (pagesData[subject] || []).find(p => p.id === pageId);
+            if (!page) return;
+            const newName = await openCustomDialog({
+                title: '✏️ Rinomina Pagina',
+                description: 'Inserisci il nuovo titolo per questa scheda di appunti.',
+                fields: [{ placeholder: 'Titolo pagina...', value: page.name }],
+                confirmText: 'Salva'
+            });
+            if (newName && newName.trim()) {
+                page.name = newName.trim();
+                localStorage.setItem('workspace_pages', JSON.stringify(pagesData));
+                renderTabs();
+                if (window.savePageToCloud) {
+                    window.savePageToCloud(subject, page);
+                }
+                showToast("Pagina rinominata!");
+            }
+        }
+
+        function clearChatHistory() {
+            const subject = selectEl.value;
+            chatHistory = [];
+            const allChats = getSavedChats();
+            delete allChats[subject];
+            localStorage.setItem('workspace_chat_history', JSON.stringify(allChats));
+            document.getElementById('chat-messages').innerHTML = '<div class="chat-msg ai">Memoria azzerata per questa materia. Fai pure una nuova domanda!</div>';
+        }
+
+        let attachedFileData = null;
+        function handleFileSelection(event) {
+            const file = event.target.files[0]; if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                attachedFileData = { mimeType: file.type, data: e.target.result.split(',')[1], name: file.name };
+                document.getElementById('attached-file-name').textContent = file.name;
+                document.getElementById('attached-file-badge').style.display = 'inline-flex';
+            };
+            reader.readAsDataURL(file);
+        }
+        function clearAttachedFile() { attachedFileData = null; document.getElementById('ai-media-input').value = ""; document.getElementById('attached-file-badge').style.display = 'none'; }
+
+        if (localStorage.getItem('workspace_gemini_model')) document.getElementById('model-select').value = localStorage.getItem('workspace_gemini_model');
+        function saveModelSelection() { localStorage.setItem('workspace_gemini_model', document.getElementById('model-select').value); }
+
+        async function sendAIChat(customPrompt = null, isAnalysis = false) {
+            const apiKeys = getStoredKeys();
+            const selectedIdx = getSelectedKeyIndex();
+            const selectedModel = document.getElementById('model-select').value;
+            const inputEl = document.getElementById('user-chat-input');
+            const userText = customPrompt || inputEl.value.trim();
+            const messagesContainer = document.getElementById('chat-messages');
+
+            if (!userText && !attachedFileData) return;
+            if (apiKeys.length === 0) { 
+                showToast("Nessuna API Key salvata! Aggiungine almeno una per usare Gemini.", "error"); 
+                openKeysModal();
+                return; 
+            }
+
+            let orderedKeys = [];
+            if (apiKeys[selectedIdx]) orderedKeys.push(apiKeys[selectedIdx]);
+            apiKeys.forEach((k, idx) => { if (idx !== selectedIdx) orderedKeys.push(k); });
+
+            const userMsgDiv = document.createElement('div');
+            userMsgDiv.className = 'chat-msg user';
+            userMsgDiv.dataset.rawText = userText || "";
+            let displayMsg = isAnalysis ? (inputEl.value.trim() ? `🔍 <b>Istruzione:</b> "${inputEl.value.trim()}"` : `🔍 <b>Analisi note...</b>`) : (userText || "Analizza allegato.");
+            if (attachedFileData) displayMsg += `<br><small style="opacity:0.8;">📎 Allegato: ${attachedFileData.name}</small>`;
+            
+            userMsgDiv.innerHTML = displayMsg + `<button class="msg-action-btn" title="Reinvia" onclick="resendUserMessage(this)">🔄</button>`;
+            messagesContainer.appendChild(userMsgDiv);
+            if (!customPrompt) inputEl.value = "";
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+            const userParts = [];
+            if (userText) userParts.push({ text: userText });
+            if (attachedFileData && attachedFileData.data) userParts.push({ inlineData: { mimeType: attachedFileData.mimeType, data: attachedFileData.data } });
+            
+            chatHistory.push({ role: "user", parts: userParts });
+
+            const currentSubject = selectEl.value;
+            const systemContext = textareaEl.innerText.trim() 
+                ? `Sei un assistente ITS per "${currentSubject}". Appunti della lezione:\n\n${textareaEl.innerText.trim()}`
+                : `Sei un assistente ITS per "${currentSubject}".`;
+
+            let success = false;
+            let lastErrorMessage = "";
+
+            for (let i = 0; i < orderedKeys.length; i++) {
+                const currentKey = orderedKeys[i];
+                try {
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${currentKey}`, {
+                        method: 'POST', 
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ systemInstruction: { parts: [{ text: systemContext }] }, contents: chatHistory })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.error) {
+                        const errMsg = data.error.message || "";
+                        if (errMsg.includes("high demand") || data.error.status === "UNAVAILABLE" || data.error.code === 503) {
+                            lastErrorMessage = "Traffico elevato sui server Gemini. Riprova tra poco.";
+                            break;
+                        }
+                        if (data.error.code === 429 || data.error.status === "RESOURCE_EXHAUSTED" || errMsg.includes("quota")) {
+                            console.warn(`Chiave #${i + 1} quota esaurita. Tento con la chiave successiva...`);
+                            lastErrorMessage = "Quota esaurita per la chiave attiva. Tento le chiavi di riserva...";
+                            continue;
+                        } else {
+                            throw new Error(errMsg || "Errore durante la richiesta AI.");
+                        }
+                    }
+
+                    if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+                        const aiText = data.candidates[0].content.parts[0].text;
+                        lastAIResponse = aiText;
+                        chatHistory.push({ role: "model", parts: [{ text: aiText }] });
+
+                        saveChatHistoryForSubject();
+
+                        const aiMsgDiv = document.createElement('div'); 
+                        aiMsgDiv.className = 'chat-msg ai';
+                        aiMsgDiv.dataset.rawText = aiText;
+                        aiMsgDiv.innerHTML = marked.parse(aiText) + `<button class="msg-action-btn" title="Copia" onclick="copyAiMessage(this)">📋</button>`; 
+                        messagesContainer.appendChild(aiMsgDiv);
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                        clearAttachedFile();
+                        
+                        success = true;
+                        break;
+                    }
+
+                } catch (err) {
+                    lastErrorMessage = err.message;
+                }
+            }
+
+            if (!success) {
+                const errDiv = document.createElement('div');
+                errDiv.className = 'chat-msg ai';
+                errDiv.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+                errDiv.innerHTML = `⚠️ <b>Attenzione:</b> ${lastErrorMessage || "Impossibile completare la richiesta. Verificare le API keys."}`;
+                messagesContainer.appendChild(errDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                chatHistory.pop();
+            }
+        }
+
+        function analyzeCurrentNotes() {
+            const currentNotes = textareaEl.innerText.trim(); 
+            const customInstruction = document.getElementById('user-chat-input').value.trim(); 
+            let prompt = "";
+            if (attachedFileData) { prompt = customInstruction ? `Analizza l'allegato e rispondi: "${customInstruction}"` : `Estrai le informazioni chiave dall'allegato.`; }
+            else if (currentNotes) { prompt = customInstruction ? `Applica questa ISTRUZIONE agli appunti: "${customInstruction}"` : `Correggi e riorganizza gli appunti attuali.`; }
+            else { showToast("Scrivi degli appunti o allega un file prima di analizzare!", "error"); return; }
+            sendAIChat(prompt, true);
+        }
+
+        function appendLastResponseToNotes() {
+            if (!lastAIResponse) return;
+            switchTab('notes');
+            textareaEl.innerHTML += (textareaEl.innerHTML ? '<br><br>' : '') + marked.parse(lastAIResponse);
+            saveCurrentNote();
+        }
+
+        function copyAiMessage(btn) {
+            const msgDiv = btn.closest('.chat-msg');
+            if (!msgDiv) return;
+            const text = msgDiv.dataset.rawText || "";
+            if (!text) return;
+            navigator.clipboard.writeText(text);
+            const oldIcon = btn.innerText;
+            btn.innerText = '✅';
+            setTimeout(() => btn.innerText = oldIcon, 2000);
+        }
+
+        function resendUserMessage(btn) {
+            const msgDiv = btn.closest('.chat-msg');
+            if (!msgDiv) return;
+            const text = msgDiv.dataset.rawText || "";
+            document.getElementById('user-chat-input').value = text;
+            sendAIChat();
+        }
+
+        // Context menu
+        const contextMenu = document.getElementById('ai-context-menu');
+        let currentSelectedText = "";
+        let savedCursorRange = null;
+
+        textareaEl.addEventListener('contextmenu', (e) => {
+            const sel = window.getSelection();
+            currentSelectedText = sel.toString().trim();
+            
+            if (document.caretRangeFromPoint) {
+                savedCursorRange = document.caretRangeFromPoint(e.clientX, e.clientY);
+            } else if (sel.rangeCount > 0) {
+                savedCursorRange = sel.getRangeAt(0).cloneRange();
+            }
+
+            e.preventDefault();
+            
+            const textActions = document.querySelectorAll('.text-action');
+            const emptyActions = document.querySelectorAll('.empty-action');
+            const pasteBtn = document.getElementById('menu-paste-ai');
+            
+            if (currentSelectedText) {
+                textActions.forEach(el => el.style.display = 'flex');
+                emptyActions.forEach(el => el.style.display = 'none');
+            } else {
+                textActions.forEach(el => el.style.display = 'none');
+                emptyActions.forEach(el => el.style.display = 'flex');
+                pasteBtn.innerHTML = lastAIResponse ? '📋 Incolla ultima risposta AI' : '📋 Nessuna risposta AI';
+            }
+            
+            let x = e.pageX;
+            let y = e.pageY;
+            contextMenu.style.left = `${x}px`;
+            contextMenu.style.top = `${y}px`;
+            contextMenu.style.display = 'flex';
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!contextMenu.contains(e.target)) {
+                contextMenu.style.display = 'none';
+            }
+        });
+
+        function handleAiMenuAction(actionType) {
+            contextMenu.style.display = 'none';
+            if (!currentSelectedText && actionType !== 'incolla_ai') return;
+            
+            let prompt = "";
+            switch (actionType) {
+                case 'correggi': prompt = `Correggi grammatica e sintassi di: "${currentSelectedText}"`; break;
+                case 'migliora': prompt = `Migliora la scrittura di: "${currentSelectedText}"`; break;
+                case 'riassumi': prompt = `Riassumi concisamente a punti: "${currentSelectedText}"`; break;
+                case 'spiega': prompt = `Spiega chiaramente questo concetto: "${currentSelectedText}"`; break;
+                case 'traduci': prompt = `Dizionario bilingue conciso. Traduci e spiega: "${currentSelectedText}"`; break;
+                case 'incolla_ai':
+                    if (lastAIResponse && savedCursorRange) {
+                        textareaEl.focus({ preventScroll: true });
+                        const sel = window.getSelection();
+                        sel.removeAllRanges();
+                        sel.addRange(savedCursorRange);
+                        document.execCommand('insertHTML', false, marked.parse(lastAIResponse));
+                        saveCurrentNote();
+                    }
+                    return;
+            }
+            if (isChatCollapsed) toggleChat();
+            sendAIChat(prompt, true);
+        }
+
+        populateSelect();
+        const savedSubject = localStorage.getItem('workspace_active_subject');
+        if (savedSubject && (pagesData[savedSubject] || notesData[savedSubject])) {
+            selectEl.value = savedSubject;
+        }
+        loadSubjectData();
+    </script>
+</body>
+</html>

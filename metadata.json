@@ -1,0 +1,6 @@
+{
+  "name": "Workspace ITS",
+  "description": "Dashboard per studenti ITS con gestione appunti a schede, libreria materiali, sincronizzazione cloud Firestore e assistente Gemini Copilot integrato.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
