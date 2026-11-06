@@ -95,7 +95,8 @@ service cloud.firestore {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
       allow create: if isOwner(userId) && incoming().userId == userId;
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin() || (isOwner(userId) && incoming().userId == userId && incoming().status == 'pending');
+      allow delete: if isAdmin();
     }
 
     // Approved Users: Admin manages approvals; User can check their own approval status

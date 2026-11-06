@@ -36,6 +36,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [cloudSyncActive, setCloudSyncActive] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const activeListenersCleanupRef = useRef<(() => void) | null>(null);
 
   // Preferences & Layout
   const [bgIndex, setBgIndex] = useState<number>(0);
@@ -261,102 +262,117 @@ export default function App() {
   // Firebase Auth State Listener & Cloud Sync Setup
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async user => {
+      // 1. Immediately clean up previous user's listeners to prevent permission-denied errors on teardown
+      if (activeListenersCleanupRef.current) {
+        activeListenersCleanupRef.current();
+        activeListenersCleanupRef.current = null;
+      }
+
       setCurrentUser(user);
       setAuthLoading(false);
 
-      if (user) {
-        const isUserSuperAdmin = WorkspaceService.isSuperAdmin(user.email);
-        setIsAdmin(isUserSuperAdmin);
-
-        let userIsApproved = isUserSuperAdmin;
-        if (!isUserSuperAdmin) {
-          userIsApproved = await WorkspaceService.checkUserApproval(user.uid, user.email);
-          if (!userIsApproved) {
-            setIsApproved(false);
-            setCloudSyncActive(false);
-            await WorkspaceService.submitAccessRequest(user);
-            return;
-          }
-        }
-
+      if (!user) {
+        setIsAdmin(false);
         setIsApproved(true);
-        setCloudSyncActive(true);
-        showToast(`Benvenuto, ${user.displayName || user.email}! Sincronizzazione cloud attiva.`, 'info');
-
-        let unsubAdminReq: (() => void) | null = null;
-        let unsubAdminAppr: (() => void) | null = null;
-
-        if (isUserSuperAdmin) {
-          unsubAdminReq = WorkspaceService.subscribeToAccessRequests(setAccessRequests);
-          unsubAdminAppr = WorkspaceService.subscribeToApprovedUsers(setApprovedUsers);
-        }
-
-        // Check if cloud has existing pages; if not, check if local has notes and offer migration
-        const hasCloudData = await WorkspaceService.checkHasCloudData(user.uid);
-        const localPages = WorkspaceService.getLocalPages();
-        const hasLocalData = Object.keys(localPages).some(sub => (localPages[sub] || []).length > 0);
-
-        if (!hasCloudData && hasLocalData) {
-          // Offer migration
-          const shouldMigrate = await openCustomDialog({
-            title: '☁️ Sincronizza Dati Locali',
-            description:
-              'Abbiamo rilevato i tuoi appunti e corsi locali. Vuoi caricarli sul tuo database Cloud Firestore personale per averli disponibili su tutti i dispositivi?',
-            confirmText: 'Sincronizza su Cloud',
-            cancelText: 'Più tardi'
-          });
-          if (shouldMigrate) {
-            const result = await WorkspaceService.migrateLocalDataToCloud(user.uid);
-            showToast(`Sincronizzati ${result.subjectsCount} corsi e ${result.pagesCount} pagine su Firestore!`);
-          }
-        }
-
-        // Subscribe to Realtime Firestore updates
-        const unsubFirestore = WorkspaceService.subscribeToUserData(user.uid, {
-          onPreferences: pref => {
-            if (pref.bgIndex !== undefined) setBgIndex(pref.bgIndex);
-            if (pref.isImmersion !== undefined) setIsImmersion(pref.isImmersion);
-            if (pref.isSidebarCollapsed !== undefined) setIsSidebarCollapsed(pref.isSidebarCollapsed);
-            if (pref.isChatCollapsed !== undefined) setIsChatCollapsed(pref.isChatCollapsed);
-            if (pref.selectedModel !== undefined) setSelectedModel(pref.selectedModel);
-            if (pref.activeSubject !== undefined) {
-              setActiveSubject(prev => pref.activeSubject || prev);
-            }
-          },
-          onSubjects: subs => {
-            if (subs.length > 0) {
-              setSubjects(subs);
-              setActiveSubject(prev => (subs.some(s => s.id === prev) ? prev : subs[0].id));
-            }
-          },
-          onPages: pagesBySub => {
-            if (Object.keys(pagesBySub).length > 0) {
-              setPages(prev => ({ ...prev, ...pagesBySub }));
-            }
-          },
-          onMaterials: matBySub => {
-            setMaterials(matBySub);
-          },
-          onChats: chatsBySub => {
-            setChats(chatsBySub);
-          },
-          onKeys: (keys, idx) => {
-            setApiKeys(keys);
-            setSelectedKeyIndex(idx);
-          }
-        });
-
-        return () => {
-          unsubFirestore();
-          if (unsubAdminReq) unsubAdminReq();
-          if (unsubAdminAppr) unsubAdminAppr();
-        };
-      } else {
         setCloudSyncActive(false);
+        return;
       }
+
+      const isUserSuperAdmin = WorkspaceService.isSuperAdmin(user.email);
+      setIsAdmin(isUserSuperAdmin);
+
+      let userIsApproved = isUserSuperAdmin;
+      if (!isUserSuperAdmin) {
+        userIsApproved = await WorkspaceService.checkUserApproval(user.uid, user.email);
+        if (!userIsApproved) {
+          setIsApproved(false);
+          setCloudSyncActive(false);
+          await WorkspaceService.submitAccessRequest(user);
+          return;
+        }
+      }
+
+      setIsApproved(true);
+      setCloudSyncActive(true);
+      showToast(`Benvenuto, ${user.displayName || user.email}! Sincronizzazione cloud attiva.`, 'info');
+
+      let unsubAdminReq: (() => void) | null = null;
+      let unsubAdminAppr: (() => void) | null = null;
+
+      if (isUserSuperAdmin) {
+        unsubAdminReq = WorkspaceService.subscribeToAccessRequests(setAccessRequests);
+        unsubAdminAppr = WorkspaceService.subscribeToApprovedUsers(setApprovedUsers);
+      }
+
+      // Check if cloud has existing pages; if not, check if local has notes and offer migration
+      const hasCloudData = await WorkspaceService.checkHasCloudData(user.uid);
+      const localPages = WorkspaceService.getLocalPages();
+      const hasLocalData = Object.keys(localPages).some(sub => (localPages[sub] || []).length > 0);
+
+      if (!hasCloudData && hasLocalData) {
+        // Offer migration
+        const shouldMigrate = await openCustomDialog({
+          title: '☁️ Sincronizza Dati Locali',
+          description:
+            'Abbiamo rilevato i tuoi appunti e corsi locali. Vuoi caricarli sul tuo database Cloud Firestore personale per averli disponibili su tutti i dispositivi?',
+          confirmText: 'Sincronizza su Cloud',
+          cancelText: 'Più tardi'
+        });
+        if (shouldMigrate) {
+          const result = await WorkspaceService.migrateLocalDataToCloud(user.uid);
+          showToast(`Sincronizzati ${result.subjectsCount} corsi e ${result.pagesCount} pagine su Firestore!`);
+        }
+      }
+
+      // Subscribe to Realtime Firestore updates
+      const unsubFirestore = WorkspaceService.subscribeToUserData(user.uid, {
+        onPreferences: pref => {
+          if (pref.bgIndex !== undefined) setBgIndex(pref.bgIndex);
+          if (pref.isImmersion !== undefined) setIsImmersion(pref.isImmersion);
+          if (pref.isSidebarCollapsed !== undefined) setIsSidebarCollapsed(pref.isSidebarCollapsed);
+          if (pref.isChatCollapsed !== undefined) setIsChatCollapsed(pref.isChatCollapsed);
+          if (pref.selectedModel !== undefined) setSelectedModel(pref.selectedModel);
+          if (pref.activeSubject !== undefined) {
+            setActiveSubject(prev => pref.activeSubject || prev);
+          }
+        },
+        onSubjects: subs => {
+          if (subs.length > 0) {
+            setSubjects(subs);
+            setActiveSubject(prev => (subs.some(s => s.id === prev) ? prev : subs[0].id));
+          }
+        },
+        onPages: pagesBySub => {
+          if (Object.keys(pagesBySub).length > 0) {
+            setPages(prev => ({ ...prev, ...pagesBySub }));
+          }
+        },
+        onMaterials: matBySub => {
+          setMaterials(matBySub);
+        },
+        onChats: chatsBySub => {
+          setChats(chatsBySub);
+        },
+        onKeys: (keys, idx) => {
+          setApiKeys(keys);
+          setSelectedKeyIndex(idx);
+        }
+      });
+
+      activeListenersCleanupRef.current = () => {
+        unsubFirestore();
+        if (unsubAdminReq) unsubAdminReq();
+        if (unsubAdminAppr) unsubAdminAppr();
+      };
     });
 
-    return () => unsubscribe();
+    return () => {
+      if (activeListenersCleanupRef.current) {
+        activeListenersCleanupRef.current();
+        activeListenersCleanupRef.current = null;
+      }
+      unsubscribe();
+    };
   }, [openCustomDialog, showToast]);
 
   // Sync active page content into editor whenever activePageId or activeSubject changes
@@ -424,6 +440,10 @@ export default function App() {
       danger: true
     });
     if (confirmed) {
+      if (activeListenersCleanupRef.current) {
+        activeListenersCleanupRef.current();
+        activeListenersCleanupRef.current = null;
+      }
       await signOut(auth);
       showToast('Disconnesso con successo.');
     }

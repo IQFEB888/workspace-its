@@ -185,7 +185,10 @@ export class WorkspaceService {
             }
           }
         },
-        error => handleFirestoreError(error, OperationType.GET, `users/${userId}`)
+        error => {
+          if (!auth.currentUser) return;
+          handleFirestoreError(error, OperationType.GET, `users/${userId}`);
+        }
       )
     );
 
@@ -206,7 +209,10 @@ export class WorkspaceService {
           });
           if (callbacks.onSubjects) callbacks.onSubjects(subs);
         },
-        error => handleFirestoreError(error, OperationType.LIST, `users/${userId}/subjects`)
+        error => {
+          if (!auth.currentUser) return;
+          handleFirestoreError(error, OperationType.LIST, `users/${userId}/subjects`);
+        }
       )
     );
 
@@ -234,7 +240,10 @@ export class WorkspaceService {
           }
           if (callbacks.onPages) callbacks.onPages(pagesBySubject);
         },
-        error => handleFirestoreError(error, OperationType.LIST, `users/${userId}/pages`)
+        error => {
+          if (!auth.currentUser) return;
+          handleFirestoreError(error, OperationType.LIST, `users/${userId}/pages`);
+        }
       )
     );
 
@@ -264,7 +273,10 @@ export class WorkspaceService {
           });
           if (callbacks.onMaterials) callbacks.onMaterials(matBySubject);
         },
-        error => handleFirestoreError(error, OperationType.LIST, `users/${userId}/materials`)
+        error => {
+          if (!auth.currentUser) return;
+          handleFirestoreError(error, OperationType.LIST, `users/${userId}/materials`);
+        }
       )
     );
 
@@ -282,7 +294,10 @@ export class WorkspaceService {
           });
           if (callbacks.onChats) callbacks.onChats(chatsBySubject);
         },
-        error => handleFirestoreError(error, OperationType.LIST, `users/${userId}/chats`)
+        error => {
+          if (!auth.currentUser) return;
+          handleFirestoreError(error, OperationType.LIST, `users/${userId}/chats`);
+        }
       )
     );
 
@@ -299,7 +314,10 @@ export class WorkspaceService {
             }
           }
         },
-        error => handleFirestoreError(error, OperationType.GET, `users/${userId}/settings/keys`)
+        error => {
+          if (!auth.currentUser) return;
+          handleFirestoreError(error, OperationType.GET, `users/${userId}/settings/keys`);
+        }
       )
     );
 
