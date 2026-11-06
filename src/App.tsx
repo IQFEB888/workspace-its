@@ -555,6 +555,83 @@ export default function App() {
     }
   };
 
+  // Delete Subject with Cascade Cleanup
+  const handleDeleteSubject = async (subjectToDelete: string) => {
+    if (subjects.length <= 1) {
+      showToast("Non puoi eliminare l'unica materia presente!", 'error');
+      return;
+    }
+
+    const confirmed = await openCustomDialog({
+      title: '🗑️ Elimina Materia',
+      description: `Sei sicuro di voler eliminare la materia <b>"${subjectToDelete}"</b>?<br/><br/><span style="color: #ef4444; font-size: 0.82rem;">⚠️ Verranno rimossi tutti gli appunti, le pagine e i materiali di questo corso.</span>`,
+      confirmText: 'Elimina Definitivamente',
+      danger: true
+    });
+
+    if (!confirmed) return;
+
+    // Determine the next active subject
+    const remainingSubjects = subjects.filter(s => s.id !== subjectToDelete);
+    const nextSubject = remainingSubjects[0].id;
+
+    // Clean up local pages, materials, and chats
+    const updatedPages = { ...pages };
+    delete updatedPages[subjectToDelete];
+
+    const updatedMaterials = { ...materials };
+    delete updatedMaterials[subjectToDelete];
+
+    const updatedChats = { ...chats };
+    delete updatedChats[subjectToDelete];
+
+    const nextPages = updatedPages[nextSubject] || [];
+    const nextActivePageId = nextPages.length > 0 ? nextPages[0].id : '';
+
+    setSubjects(remainingSubjects);
+    setPages(updatedPages);
+    setMaterials(updatedMaterials);
+    setChats(updatedChats);
+    setActiveSubject(nextSubject);
+    setActivePageId(nextActivePageId);
+
+    if (chatSelectedMaterial && (materials[subjectToDelete] || []).some(m => m.id === chatSelectedMaterial.id)) {
+      setChatSelectedMaterial(null);
+    }
+
+    // Save to local storage
+    WorkspaceService.saveLocalPages(updatedPages);
+    WorkspaceService.saveLocalMaterials(updatedMaterials);
+    WorkspaceService.saveLocalPreferences({
+      activeSubject: nextSubject,
+      activePageId: nextActivePageId
+    });
+
+    // Cloud Firestore deletion
+    if (currentUser) {
+      await WorkspaceService.deleteSubjectFromCloud(currentUser.uid, subjectToDelete);
+
+      // Clean up pages for this subject in cloud
+      const oldPages = pages[subjectToDelete] || [];
+      for (const p of oldPages) {
+        await WorkspaceService.deletePageFromCloud(currentUser.uid, p.id);
+      }
+
+      // Clean up materials for this subject in cloud
+      const oldMats = materials[subjectToDelete] || [];
+      for (const m of oldMats) {
+        await WorkspaceService.deleteMaterialFromCloud(currentUser.uid, m.id);
+      }
+
+      await WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, {
+        activeSubject: nextSubject,
+        activePageId: nextActivePageId
+      });
+    }
+
+    showToast(`Materia "${subjectToDelete}" eliminata con successo.`);
+  };
+
   // Save current note content (debounced to cloud, instant to local)
   const handleEditorInput = () => {
     if (!notesAreaRef.current) return;
@@ -1537,9 +1614,19 @@ export default function App() {
               </select>
             </div>
             <div className="notes-header-right">
-              <button className="header-btn" onClick={handleAddNewSubject}>
+              <button className="header-btn" onClick={handleAddNewSubject} title="Crea una nuova materia">
                 + Nuova
               </button>
+              {subjects.length > 1 && (
+                <button
+                  className="header-btn"
+                  onClick={() => handleDeleteSubject(activeSubject)}
+                  title={`Elimina definitivamente la materia "${activeSubject}"`}
+                  style={{ color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.35)' }}
+                >
+                  🗑️ Elimina
+                </button>
+              )}
               <button className="header-btn" id="fullscreen-btn" onClick={handleToggleFullscreenNotes}>
                 {isNotesMaximized ? 'Riduci' : 'Massimizza'}
               </button>
