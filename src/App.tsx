@@ -363,7 +363,18 @@ export default function App() {
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
       console.error('Google Sign In Error:', error);
-      showToast('Accesso Google non riuscito o annullato.', 'error');
+      const code = error?.code || '';
+      if (code === 'auth/unauthorized-domain') {
+        showToast('Dominio non autorizzato! Aggiungi "iqfeb888.github.io" nei Domini autorizzati su Firebase Console.', 'error');
+      } else if (code === 'auth/operation-not-allowed') {
+        showToast('Provider Google non abilitato! Abilitalo in Firebase Console > Authentication > Sign-in method.', 'error');
+      } else if (code === 'auth/popup-blocked') {
+        showToast('Finestra popup bloccata dal browser. Consenti i popup per accedere con Google.', 'error');
+      } else if (code === 'auth/popup-closed-by-user') {
+        showToast('Accesso annullato dalla chiusura della finestra.', 'info');
+      } else {
+        showToast(`Errore accesso (${code || 'sconosciuto'}): ${error?.message || 'Riprova'}`, 'error');
+      }
     }
   };
 
