@@ -71,6 +71,8 @@ export default function App() {
   // Modals & Popups
   const [isKeysModalOpen, setIsKeysModalOpen] = useState<boolean>(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState<boolean>(false);
+  const [backupPasteText, setBackupPasteText] = useState<string>('');
   const [modalKeysDraft, setModalKeysDraft] = useState<string[]>([]);
   const [modalSelectedKeyDraft, setModalSelectedKeyDraft] = useState<number>(0);
 
@@ -140,6 +142,7 @@ export default function App() {
   const notesAreaRef = useRef<HTMLDivElement>(null);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const backupFileInputRef = useRef<HTMLInputElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Helper for Toasts
@@ -1381,6 +1384,155 @@ export default function App() {
     showToast('Backup JSON scaricato con successo.');
   };
 
+  // Import backup data (supports both structured export, raw localStorage dump, and legacy notes)
+  const handleImportBackupData = async (data: any) => {
+    try {
+      let parsed = data;
+      if (typeof parsed === 'string') {
+        parsed = JSON.parse(parsed.trim());
+      }
+
+      let importedPages: Record<string, PageItem[]> = {};
+      let importedSubjects: SubjectItem[] = [];
+      let importedMaterials: Record<string, MaterialItem[]> = {};
+      let importedChats: Record<string, ChatMessage[]> = {};
+
+      // Case 1: Structured backup exported from this app
+      if (parsed.subjects && parsed.pages) {
+        importedSubjects = parsed.subjects || [];
+        importedPages = parsed.pages || {};
+        importedMaterials = parsed.materials || {};
+        importedChats = parsed.chats || {};
+      }
+      // Case 2: Raw localStorage dump { workspace_pages, workspace_notes, etc. }
+      else if (parsed.workspace_pages || parsed.workspace_notes) {
+        if (parsed.workspace_pages) {
+          importedPages = typeof parsed.workspace_pages === 'string'
+            ? JSON.parse(parsed.workspace_pages)
+            : parsed.workspace_pages;
+        }
+        if (parsed.workspace_notes) {
+          const oldNotes = typeof parsed.workspace_notes === 'string'
+            ? JSON.parse(parsed.workspace_notes)
+            : parsed.workspace_notes;
+          for (const sub in oldNotes) {
+            if (!importedPages[sub] || importedPages[sub].length === 0) {
+              importedPages[sub] = [{
+                id: 'page_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+                name: 'Appunti Principali',
+                content: oldNotes[sub] || ''
+              }];
+            }
+          }
+        }
+        if (parsed.workspace_materials) {
+          importedMaterials = typeof parsed.workspace_materials === 'string'
+            ? JSON.parse(parsed.workspace_materials)
+            : parsed.workspace_materials;
+        }
+        if (parsed.workspace_chats) {
+          importedChats = typeof parsed.workspace_chats === 'string'
+            ? JSON.parse(parsed.workspace_chats)
+            : parsed.workspace_chats;
+        }
+        const driveLinks = parsed.workspace_drive_links
+          ? (typeof parsed.workspace_drive_links === 'string' ? JSON.parse(parsed.workspace_drive_links) : parsed.workspace_drive_links)
+          : {};
+        importedSubjects = Object.keys(importedPages).map(name => ({
+          id: name,
+          name,
+          driveLink: driveLinks[name] || ''
+        }));
+      }
+      // Case 3: Simple notes dictionary { "Database": "content...", "Reti": "..." }
+      else if (typeof parsed === 'object' && !Array.isArray(parsed)) {
+        for (const sub in parsed) {
+          const content = typeof parsed[sub] === 'string' ? parsed[sub] : JSON.stringify(parsed[sub]);
+          importedPages[sub] = [{
+            id: 'page_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+            name: 'Appunti Principali',
+            content
+          }];
+          importedSubjects.push({ id: sub, name: sub, driveLink: '' });
+        }
+      }
+
+      if (Object.keys(importedPages).length === 0) {
+        throw new Error('Nessun dato di appunti o materie trovato nel file o testo fornito.');
+      }
+
+      if (importedSubjects.length === 0) {
+        importedSubjects = Object.keys(importedPages).map(s => ({ id: s, name: s, driveLink: '' }));
+      }
+
+      const firstSub = importedSubjects[0].id;
+      const firstPageId = importedPages[firstSub]?.[0]?.id || '';
+
+      // Update React state
+      setSubjects(importedSubjects);
+      setPages(importedPages);
+      setMaterials(importedMaterials);
+      setChats(importedChats);
+      setActiveSubject(firstSub);
+      setActivePageId(firstPageId);
+
+      // Save to localStorage
+      WorkspaceService.saveLocalPages(importedPages);
+      WorkspaceService.saveLocalMaterials(importedMaterials);
+      WorkspaceService.saveLocalChats(importedChats);
+      WorkspaceService.saveLocalPreferences({
+        activeSubject: firstSub,
+        activePageId: firstPageId
+      });
+
+      // If user is currently signed in, also sync immediately to Cloud Firestore!
+      if (currentUser) {
+        for (const sub of importedSubjects) {
+          await WorkspaceService.saveSubjectToCloud(currentUser.uid, sub);
+          const pList = importedPages[sub.id] || [];
+          for (const page of pList) {
+            await WorkspaceService.savePageToCloud(currentUser.uid, sub.id, page);
+          }
+          const mList = importedMaterials[sub.id] || [];
+          for (const mat of mList) {
+            await WorkspaceService.saveMaterialToCloud(currentUser.uid, sub.id, mat);
+          }
+          const cList = importedChats[sub.id] || [];
+          if (cList.length > 0) {
+            await WorkspaceService.saveChatToCloud(currentUser.uid, sub.id, cList);
+          }
+        }
+        await WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, {
+          activeSubject: firstSub,
+          activePageId: firstPageId
+        });
+      }
+
+      setIsBackupModalOpen(false);
+      setBackupPasteText('');
+      showToast(`Backup ripristinato con successo: ${importedSubjects.length} materie caricate!`);
+    } catch (err: any) {
+      console.error('Backup import error:', err);
+      showToast('Errore importazione backup: ' + (err.message || 'Formato non valido'), 'error');
+    }
+  };
+
+  const handleBackupFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        await handleImportBackupData(text);
+      } catch (err: any) {
+        showToast('Errore durante la lettura del file: ' + err.message, 'error');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
   // Active Subject Pages
   const currentSubPages = pages[activeSubject] || [];
   const currentSubMaterials = materials[activeSubject] || [];
@@ -1485,6 +1637,14 @@ export default function App() {
           </button>
         )}
 
+        <button
+          className="top-btn"
+          onClick={() => setIsBackupModalOpen(true)}
+          title="Salva o Ripristina il backup dei tuoi appunti e corsi"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+        >
+          💾 Backup
+        </button>
         <button className="top-btn" id="immersion-btn" onClick={handleToggleImmersion}>
           {isImmersion ? 'Esci da Focus' : 'Focus Mode'}
         </button>
@@ -2217,9 +2377,12 @@ export default function App() {
               <button
                 className="dialog-btn"
                 style={{ width: '100%', padding: '10px' }}
-                onClick={handleExportBackup}
+                onClick={() => {
+                  setIsSyncModalOpen(false);
+                  setIsBackupModalOpen(true);
+                }}
               >
-                💾 Esporta Backup Completo (JSON)
+                📂 Gestione Backup (Importa / Esporta)
               </button>
             </div>
 
@@ -2229,6 +2392,86 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* MODALE BACKUP & RIPRISTINO COMPLETO */}
+      {isBackupModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-box" style={{ maxWidth: '520px' }}>
+            <div className="modal-header">
+              <span className="modal-title">💾 Backup & Ripristino Workspace</span>
+              <button className="modal-close" onClick={() => setIsBackupModalOpen(false)}>
+                ✕
+              </button>
+            </div>
+
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: '4px 0 12px 0' }}>
+              Salva una copia completa dei tuoi appunti, materie, materiali e conversazioni, oppure ripristina un backup fatto su un altro PC.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <button
+                className="dialog-btn primary"
+                style={{ width: '100%', padding: '12px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                onClick={() => backupFileInputRef.current?.click()}
+              >
+                📂 Seleziona File Backup (.json) da Ripristinare
+              </button>
+
+              <button
+                className="dialog-btn"
+                style={{ width: '100%', padding: '10px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                onClick={handleExportBackup}
+              >
+                📥 Scarica Backup Completo di questo PC (.json)
+              </button>
+            </div>
+
+            <div style={{ margin: '14px 0 8px 0', borderTop: '1px solid var(--panel-border)', paddingTop: '12px' }}>
+              <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+                📋 Oppure incolla direttamente qui il testo o codice del backup:
+              </label>
+              <textarea
+                placeholder="Incolla qui il contenuto JSON del backup..."
+                value={backupPasteText}
+                onChange={e => setBackupPasteText(e.target.value)}
+                style={{
+                  width: '100%',
+                  height: '80px',
+                  background: 'rgba(0, 0, 0, 0.25)',
+                  border: '1px solid var(--panel-border)',
+                  borderRadius: '8px',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.75rem',
+                  fontFamily: 'monospace',
+                  padding: '8px',
+                  resize: 'vertical'
+                }}
+              />
+              <button
+                className="dialog-btn"
+                disabled={!backupPasteText.trim()}
+                style={{ width: '100%', marginTop: '8px', padding: '8px', opacity: backupPasteText.trim() ? 1 : 0.5 }}
+                onClick={() => handleImportBackupData(backupPasteText)}
+              >
+                ✨ Ripristina da Testo Incollato
+              </button>
+            </div>
+
+            <button className="modal-save-btn" onClick={() => setIsBackupModalOpen(false)} style={{ marginTop: '12px' }}>
+              Chiudi
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden File Input for Backup Restoration */}
+      <input
+        type="file"
+        ref={backupFileInputRef}
+        accept=".json"
+        style={{ display: 'none' }}
+        onChange={handleBackupFileSelect}
+      />
 
       {/* MODALE AMMINISTRATORE GESTIONE ACCESSI */}
       {isAdminModalOpen && (
