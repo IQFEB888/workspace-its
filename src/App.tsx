@@ -16,6 +16,7 @@ import {
   DialogOptions
 } from './types';
 import { WorkspaceService, DEFAULT_SUBJECTS, DEFAULT_PAGES } from './services/workspaceService';
+import { saveFileToIndexedDB, getFileFromIndexedDB, deleteFileFromIndexedDB } from './services/fileStorage';
 
 const BACKGROUNDS = [
   'url("https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=2564")',
@@ -70,6 +71,29 @@ export default function App() {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
   const [modalKeysDraft, setModalKeysDraft] = useState<string[]>([]);
   const [modalSelectedKeyDraft, setModalSelectedKeyDraft] = useState<number>(0);
+
+  // Material Preview & PDF Inspection
+  const [previewMaterial, setPreviewMaterial] = useState<MaterialItem | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string>('');
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState<boolean>(false);
+
+  // AI Chat Active Document Source
+  const [chatSelectedMaterial, setChatSelectedMaterial] = useState<MaterialItem | null>(null);
+
+  // Add Material Modal & File Upload State
+  const [isAddMaterialModalOpen, setIsAddMaterialModalOpen] = useState<boolean>(false);
+  const [addMaterialTab, setAddMaterialTab] = useState<'file' | 'link'>('file');
+  const [uploadingFile, setUploadingFile] = useState<{
+    name: string;
+    originalName: string;
+    size: number;
+    base64: string;
+    mimeType: string;
+    fileType: 'pdf' | 'image' | 'doc';
+  } | null>(null);
+  const [customMaterialName, setCustomMaterialName] = useState<string>('');
+  const [customMaterialCategory, setCustomMaterialCategory] = useState<string>('Lezioni');
+  const [customMaterialUrl, setCustomMaterialUrl] = useState<string>('');
 
   // Access Control & Admin Gate
   const [isApproved, setIsApproved] = useState<boolean>(true);
@@ -663,47 +687,161 @@ export default function App() {
     handleEditorInput();
   };
 
-  // Materials: Add Resource
-  const handleAddMaterial = async () => {
-    const result = await openCustomDialog({
-      title: '📎 Aggiungi Risorsa',
-      description: `Aggiungi un nuovo file, PDF o link per <b>${activeSubject}</b>.`,
-      fields: [
-        { id: 'name', label: 'Nome della risorsa', placeholder: 'Es. Slide Lezione 1' },
-        { id: 'url', label: 'Link (Drive, YouTube, PDF, Sito web)', placeholder: 'https://...' },
-        { id: 'category', label: 'Categoria', placeholder: 'Es. Lezioni, Esercizi, Immagini', value: 'Lezioni' }
-      ],
-      confirmText: 'Salva Risorsa'
-    });
+  // Materials: Open Add Modal
+  const handleOpenAddMaterialModal = () => {
+    setUploadingFile(null);
+    setCustomMaterialName('');
+    setCustomMaterialUrl('');
+    setCustomMaterialCategory('Lezioni');
+    setAddMaterialTab('file');
+    setIsAddMaterialModalOpen(true);
+  };
 
-    if (!result || !result.name || !result.name.trim() || !result.url || !result.url.trim()) return;
+  // Materials: File Upload Handler
+  const handleMaterialFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    let url = result.url.trim();
-    const driveMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-    if (driveMatch && driveMatch[1]) {
-      url = `https://drive.google.com/uc?export=download&id=${driveMatch[1]}`;
+    if (file.size > 25 * 1024 * 1024) {
+      showToast('Il file supera i 25MB. Ti consigliamo di caricarlo su Google Drive e incollare il link.', 'error');
+      return;
     }
 
-    const newMaterial: MaterialItem = {
-      id: 'mat_' + Date.now(),
-      name: result.name.trim(),
-      url,
-      category: (result.category || 'Lezioni').trim(),
-      createdAt: new Date().toISOString()
-    };
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64Url = reader.result as string;
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      const isImg = file.type.startsWith('image/');
+      const cleanName = file.name.replace(/\.[^/.]+$/, '');
 
-    const currentSubMaterials = materials[activeSubject] || [];
-    const updated = {
-      ...materials,
-      [activeSubject]: [...currentSubMaterials, newMaterial]
+      setUploadingFile({
+        name: cleanName,
+        originalName: file.name,
+        size: file.size,
+        base64: base64Url,
+        mimeType: file.type || (isPdf ? 'application/pdf' : 'application/octet-stream'),
+        fileType: isPdf ? 'pdf' : isImg ? 'image' : 'doc'
+      });
+      if (!customMaterialName) {
+        setCustomMaterialName(cleanName);
+      }
     };
-    setMaterials(updated);
-    WorkspaceService.saveLocalMaterials(updated);
+    reader.readAsDataURL(file);
+  };
 
-    if (currentUser) {
-      await WorkspaceService.saveMaterialToCloud(currentUser.uid, activeSubject, newMaterial);
+  // Materials: Save Resource (File or Link)
+  const handleSaveMaterial = async () => {
+    if (addMaterialTab === 'file') {
+      if (!uploadingFile) {
+        showToast('Seleziona prima un file da caricare.', 'error');
+        return;
+      }
+      const matId = 'mat_' + Date.now();
+      const name = customMaterialName.trim() || uploadingFile.name;
+      const newMaterial: MaterialItem = {
+        id: matId,
+        name,
+        url: uploadingFile.base64.length < 500000 ? uploadingFile.base64 : 'local_storage',
+        category: (customMaterialCategory || 'Lezioni').trim(),
+        createdAt: new Date().toISOString(),
+        fileType: uploadingFile.fileType,
+        fileSize: uploadingFile.size,
+        mimeType: uploadingFile.mimeType,
+        fileData: uploadingFile.base64.length < 500000 ? uploadingFile.base64 : '',
+        hasLocalFile: true
+      };
+
+      // Store in IndexedDB for offline & preview availability
+      await saveFileToIndexedDB(matId, uploadingFile.base64);
+
+      const currentSubMaterials = materials[activeSubject] || [];
+      const updated = {
+        ...materials,
+        [activeSubject]: [...currentSubMaterials, newMaterial]
+      };
+      setMaterials(updated);
+      WorkspaceService.saveLocalMaterials(updated);
+
+      if (currentUser) {
+        await WorkspaceService.saveMaterialToCloud(currentUser.uid, activeSubject, newMaterial);
+      }
+      setIsAddMaterialModalOpen(false);
+      setUploadingFile(null);
+      showToast(`Documento "${newMaterial.name}" salvato!`);
+    } else {
+      // Link Tab
+      if (!customMaterialName.trim() || !customMaterialUrl.trim()) {
+        showToast('Inserisci sia il nome che il link.', 'error');
+        return;
+      }
+      let url = customMaterialUrl.trim();
+      const driveMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+      if (driveMatch && driveMatch[1]) {
+        url = `https://drive.google.com/uc?export=download&id=${driveMatch[1]}`;
+      }
+      const isDrive = url.includes('drive.google.com');
+      const isPdf = url.toLowerCase().includes('.pdf');
+      const matId = 'mat_' + Date.now();
+      const newMaterial: MaterialItem = {
+        id: matId,
+        name: customMaterialName.trim(),
+        url,
+        category: (customMaterialCategory || 'Lezioni').trim(),
+        createdAt: new Date().toISOString(),
+        fileType: isDrive ? 'link' : isPdf ? 'pdf' : 'link',
+        hasLocalFile: false
+      };
+
+      const currentSubMaterials = materials[activeSubject] || [];
+      const updated = {
+        ...materials,
+        [activeSubject]: [...currentSubMaterials, newMaterial]
+      };
+      setMaterials(updated);
+      WorkspaceService.saveLocalMaterials(updated);
+
+      if (currentUser) {
+        await WorkspaceService.saveMaterialToCloud(currentUser.uid, activeSubject, newMaterial);
+      }
+      setIsAddMaterialModalOpen(false);
+      showToast(`Risorsa "${newMaterial.name}" salvata!`);
     }
-    showToast(`Risorsa "${newMaterial.name}" aggiunta!`);
+  };
+
+  // Materials: Open Preview Modal
+  const handleOpenPreview = async (material: MaterialItem) => {
+    setPreviewMaterial(material);
+    let resolvedUrl = material.url;
+
+    if (material.hasLocalFile || material.fileData) {
+      if (material.fileData && material.fileData.startsWith('data:')) {
+        resolvedUrl = material.fileData;
+      } else {
+        const localData = await getFileFromIndexedDB(String(material.id));
+        if (localData) {
+          if (typeof localData === 'string' && localData.startsWith('data:')) {
+            resolvedUrl = localData;
+          } else if (localData instanceof Blob) {
+            resolvedUrl = URL.createObjectURL(localData);
+          }
+        }
+      }
+    } else if (material.url.includes('drive.google.com/file/d/')) {
+      const match = material.url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        resolvedUrl = `https://drive.google.com/file/d/${match[1]}/preview`;
+      }
+    }
+    setPreviewUrl(resolvedUrl);
+    setIsPreviewModalOpen(true);
+  };
+
+  // Materials: Select as Active Source for Gemini Chat
+  const handleSelectMaterialForChat = (mat: MaterialItem) => {
+    setChatSelectedMaterial(mat);
+    setIsPreviewModalOpen(false);
+    setIsChatCollapsed(false);
+    showToast(`Fonte collegata: "${mat.name}". Chiedi a Gemini!`);
   };
 
   // Materials: Delete Resource
@@ -716,6 +854,10 @@ export default function App() {
     });
 
     if (confirmed) {
+      await deleteFileFromIndexedDB(String(materialId));
+      if (chatSelectedMaterial && String(chatSelectedMaterial.id) === String(materialId)) {
+        setChatSelectedMaterial(null);
+      }
       const currentSubMaterials = materials[activeSubject] || [];
       const filtered = currentSubMaterials.filter(m => m.id !== materialId);
       const updated = { ...materials, [activeSubject]: filtered };
@@ -730,20 +872,21 @@ export default function App() {
   };
 
   // Helper to determine icon, color, and badge for materials
-  const getFileMeta = (name: string, url: string) => {
+  const getFileMeta = (name: string, url: string, fileType?: string) => {
     const n = name.toLowerCase();
     const u = url.toLowerCase();
+    const ft = (fileType || '').toLowerCase();
 
-    if (n.includes('pdf') || n.includes('slide') || u.includes('.pdf') || u.includes('export=download')) {
+    if (ft === 'pdf' || n.includes('.pdf') || u.includes('.pdf') || u.includes('export=download') || n.includes('dispensa') || n.includes('slide')) {
       return { icon: '📄', color: 'rgba(239, 68, 68, 0.2)', border: 'rgba(239, 68, 68, 0.4)', type: 'Documento PDF' };
+    }
+    if (ft === 'image' || n.includes('foto') || n.includes('img') || u.includes('.png') || u.includes('.jpg') || u.includes('.jpeg')) {
+      return { icon: '🖼️', color: 'rgba(56, 189, 248, 0.2)', border: 'rgba(56, 189, 248, 0.4)', type: 'Immagine' };
     }
     if (u.includes('youtube.com') || u.includes('youtu.be') || n.includes('video') || n.includes('rec')) {
       return { icon: '🎥', color: 'rgba(244, 63, 94, 0.2)', border: 'rgba(244, 63, 94, 0.4)', type: 'Video / Media' };
     }
-    if (n.includes('foto') || n.includes('img') || u.includes('.png') || u.includes('.jpg') || u.includes('.jpeg')) {
-      return { icon: '🖼️', color: 'rgba(56, 189, 248, 0.2)', border: 'rgba(56, 189, 248, 0.4)', type: 'Immagine' };
-    }
-    if (n.includes('doc') || n.includes('txt') || u.includes('docs.google.com')) {
+    if (ft === 'doc' || n.includes('doc') || n.includes('txt') || u.includes('docs.google.com')) {
       return { icon: '📝', color: 'rgba(34, 197, 94, 0.2)', border: 'rgba(34, 197, 94, 0.4)', type: 'Testo' };
     }
     if (u.includes('drive.google.com')) {
@@ -752,10 +895,10 @@ export default function App() {
     return { icon: '🔗', color: 'rgba(168, 85, 247, 0.2)', border: 'rgba(168, 85, 247, 0.4)', type: 'Risorsa Web' };
   };
 
-  // Gemini AI Chat Execution with Keys Auto-Rotation
+  // Gemini AI Chat Execution with Keys Auto-Rotation & Document Grounding
   const handleSendAIChat = async (customPrompt: string | null = null, isAnalysis: boolean = false) => {
     const userText = customPrompt || chatInput.trim();
-    if (!userText && !attachedFile) return;
+    if (!userText && !attachedFile && !chatSelectedMaterial) return;
 
     if (apiKeys.length === 0) {
       showToast('Nessuna API Key salvata! Aggiungi almeno una chiave per Gemini.', 'error');
@@ -773,6 +916,8 @@ export default function App() {
     const currentSubChats = chats[activeSubject] || [];
     const userParts: any[] = [];
     if (userText) userParts.push({ text: userText });
+
+    // 1. Transient manual attached image/file
     if (attachedFile) {
       userParts.push({
         inlineData: {
@@ -782,10 +927,38 @@ export default function App() {
       });
     }
 
+    // 2. Active Course Material / PDF attached to Chat
+    if (chatSelectedMaterial) {
+      let base64Data = '';
+      if (chatSelectedMaterial.fileData && chatSelectedMaterial.fileData.includes(',')) {
+        base64Data = chatSelectedMaterial.fileData.split(',')[1];
+      } else {
+        const localData = await getFileFromIndexedDB(String(chatSelectedMaterial.id));
+        if (typeof localData === 'string' && localData.includes(',')) {
+          base64Data = localData.split(',')[1];
+        }
+      }
+
+      const isPdfOrImg =
+        chatSelectedMaterial.fileType === 'pdf' ||
+        chatSelectedMaterial.fileType === 'image' ||
+        chatSelectedMaterial.mimeType?.includes('pdf') ||
+        chatSelectedMaterial.mimeType?.includes('image');
+
+      if (base64Data && isPdfOrImg) {
+        userParts.push({
+          inlineData: {
+            mimeType: chatSelectedMaterial.mimeType || 'application/pdf',
+            data: base64Data
+          }
+        });
+      }
+    }
+
     const newUserMsg: ChatMessage = {
       role: 'user',
       parts: userParts,
-      rawText: isAnalysis ? `🔍 ${userText}` : userText,
+      rawText: isAnalysis ? `🔍 ${userText}` : chatSelectedMaterial ? `[📎 ${chatSelectedMaterial.name}] ${userText}` : userText,
       timestamp: Date.now()
     };
 
@@ -795,9 +968,13 @@ export default function App() {
     setIsAILoading(true);
 
     const noteText = notesAreaRef.current?.innerText.trim() || '';
-    const systemContext = noteText
+    let systemContext = noteText
       ? `Sei un assistente ITS per "${activeSubject}". Appunti della lezione:\n\n${noteText}`
       : `Sei un assistente ITS per "${activeSubject}".`;
+
+    if (chatSelectedMaterial) {
+      systemContext += `\n\n[FONTE COLLEGATA DALL'UTENTE]: "${chatSelectedMaterial.name}" (${chatSelectedMaterial.category}). Rispondi in modo esaustivo facendo riferimento e spiegando accuratamente i contenuti di questo materiale.`;
+    }
 
     let success = false;
     let lastErrorMessage = '';
@@ -1461,15 +1638,15 @@ export default function App() {
             ) : (
               <div id="materials-area">
                 <div className="materials-header-bar">
-                  <span className="materials-header-title">Libreria File</span>
-                  <button className="add-material-btn" onClick={handleAddMaterial}>
-                    + Aggiungi Risorsa
+                  <span className="materials-header-title">Libreria File & PDF</span>
+                  <button className="add-material-btn" onClick={handleOpenAddMaterialModal}>
+                    + Aggiungi File / Link
                   </button>
                 </div>
 
                 {Object.keys(groupedMaterials).length === 0 ? (
                   <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', padding: '16px 0' }}>
-                    Nessuna risorsa salvata per questa materia. Clicca su "+ Aggiungi Risorsa".
+                    Nessuna risorsa salvata per questa materia. Clicca su "+ Aggiungi File / Link" per caricare dispense, PDF o link.
                   </div>
                 ) : (
                   Object.entries(groupedMaterials).map(([cat, items]) => (
@@ -1477,7 +1654,7 @@ export default function App() {
                       <div className="material-category-title">{cat}</div>
                       <div className="materials-grid">
                         {items.map(f => {
-                          const meta = getFileMeta(f.name, f.url);
+                          const meta = getFileMeta(f.name, f.url, f.fileType);
                           return (
                             <div key={f.id} className="material-card">
                               <div className="material-info">
@@ -1491,18 +1668,40 @@ export default function App() {
                                   <div className="material-name" title={f.name}>
                                     {f.name}
                                   </div>
-                                  <div className="material-sub">{meta.type}</div>
+                                  <div className="material-sub">
+                                    {meta.type} {f.fileSize ? `• ${(f.fileSize / 1024).toFixed(0)} KB` : ''}
+                                  </div>
                                 </div>
                               </div>
                               <div className="material-actions">
+                                <button
+                                  className="material-preview-btn"
+                                  onClick={() => handleOpenPreview(f)}
+                                  title="Visualizza anteprima documento o PDF"
+                                >
+                                  👁️ Anteprima
+                                </button>
+                                <button
+                                  className="material-ai-btn"
+                                  onClick={() => handleSelectMaterialForChat(f)}
+                                  title="Chiedi spiegazioni a Gemini su questo materiale"
+                                >
+                                  🧠 AI
+                                </button>
                                 <a
-                                  href={f.url}
+                                  href={f.url && f.url.startsWith('http') ? f.url : '#'}
+                                  onClick={e => {
+                                    if (!f.url || !f.url.startsWith('http')) {
+                                      e.preventDefault();
+                                      handleOpenPreview(f);
+                                    }
+                                  }}
                                   target="_blank"
                                   rel="noreferrer"
                                   className="material-dl-btn"
                                   title="Apri o Scarica file"
                                 >
-                                  Scarica
+                                  Apri
                                 </a>
                                 <button
                                   className="material-del-btn"
@@ -1628,6 +1827,79 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            {/* Active Document Source & Selector */}
+            {chatSelectedMaterial ? (
+              <div className="chat-source-banner">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                  <span>📎</span>
+                  <span className="chat-source-name" title={chatSelectedMaterial.name}>
+                    {chatSelectedMaterial.name}
+                  </span>
+                </div>
+                <button
+                  className="chat-source-clear"
+                  onClick={() => setChatSelectedMaterial(null)}
+                  title="Scollega documento"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              (materials[activeSubject] || []).length > 0 && (
+                <div className="chat-source-select-bar">
+                  <select
+                    value=""
+                    onChange={e => {
+                      const mat = (materials[activeSubject] || []).find(m => String(m.id) === e.target.value);
+                      if (mat) {
+                        handleSelectMaterialForChat(mat);
+                      }
+                    }}
+                    className="chat-source-dropdown"
+                  >
+                    <option value="" disabled>
+                      📎 Collega un file/PDF alla chat...
+                    </option>
+                    {(materials[activeSubject] || []).map(m => (
+                      <option key={m.id} value={String(m.id)}>
+                        {m.fileType === 'pdf' ? '📄' : '🔗'} {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )
+            )}
+
+            {/* Quick Prompts when document is active */}
+            {chatSelectedMaterial && (
+              <div className="chat-quick-chips">
+                <button
+                  className="chat-chip"
+                  onClick={() =>
+                    handleSendAIChat(`Riassumi in 5 punti chiave il documento "${chatSelectedMaterial.name}"`)
+                  }
+                >
+                  📝 Riassumi
+                </button>
+                <button
+                  className="chat-chip"
+                  onClick={() =>
+                    handleSendAIChat(`Fammi 3 domande d'esame basate sul documento "${chatSelectedMaterial.name}"`)
+                  }
+                >
+                  ❓ Interrogami
+                </button>
+                <button
+                  className="chat-chip"
+                  onClick={() =>
+                    handleSendAIChat(`Spiegami i concetti più complessi di "${chatSelectedMaterial.name}"`)
+                  }
+                >
+                  💡 Spiega concetti
+                </button>
+              </div>
+            )}
 
             {/* API Keys & Model Selector */}
             <div className="chat-input-row">
@@ -2028,6 +2300,195 @@ export default function App() {
               📋 {lastAIResponse ? 'Incolla ultima risposta AI' : 'Nessuna risposta AI da incollare'}
             </div>
           )}
+        </div>
+      )}
+
+      {/* MODALE ANTEPRIMA FILE & PDF */}
+      {isPreviewModalOpen && previewMaterial && (
+        <div className="modal-overlay">
+          <div className="preview-modal-dialog">
+            <div className="preview-modal-header">
+              <div className="preview-modal-title">
+                <span>{previewMaterial.fileType === 'pdf' ? '📄' : '📎'}</span>
+                <span>{previewMaterial.name}</span>
+                <span className="material-sub" style={{ marginLeft: '8px' }}>
+                  ({previewMaterial.category})
+                </span>
+              </div>
+              <div className="preview-modal-actions">
+                <button
+                  className="material-ai-btn"
+                  onClick={() => handleSelectMaterialForChat(previewMaterial)}
+                  title="Collega questo documento alla chat AI per fare domande"
+                >
+                  🧠 Chiedi a Gemini
+                </button>
+                {previewUrl && (
+                  <a
+                    href={previewUrl}
+                    download={previewMaterial.name}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="material-dl-btn"
+                  >
+                    Scarica / Apri ↗
+                  </a>
+                )}
+                <button className="modal-close" onClick={() => setIsPreviewModalOpen(false)}>
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="preview-modal-body">
+              {previewUrl ? (
+                previewMaterial.fileType === 'image' || previewMaterial.mimeType?.includes('image') ? (
+                  <img
+                    src={previewUrl}
+                    alt={previewMaterial.name}
+                    style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }}
+                  />
+                ) : (
+                  <iframe
+                    src={previewUrl}
+                    className="preview-modal-iframe"
+                    title={`Anteprima ${previewMaterial.name}`}
+                  />
+                )
+              ) : (
+                <div style={{ color: 'var(--text-secondary)', padding: '30px', textAlign: 'center' }}>
+                  Caricamento anteprima non disponibile per questo file o formato.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE AGGIUNGI MATERIALE (FILE / LINK) */}
+      {isAddMaterialModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-box" style={{ maxWidth: '520px' }}>
+            <div className="modal-header">
+              <span className="modal-title">📎 Aggiungi Materiale / PDF</span>
+              <button className="modal-close" onClick={() => setIsAddMaterialModalOpen(false)}>
+                ✕
+              </button>
+            </div>
+
+            {/* Tab switch: File vs Link */}
+            <div style={{ display: 'flex', gap: '8px', background: 'rgba(0,0,0,0.3)', padding: '4px', borderRadius: '10px' }}>
+              <button
+                className={`upload-tab-btn ${addMaterialTab === 'file' ? 'active' : ''}`}
+                onClick={() => setAddMaterialTab('file')}
+              >
+                📄 Carica File / PDF dal PC
+              </button>
+              <button
+                className={`upload-tab-btn ${addMaterialTab === 'link' ? 'active' : ''}`}
+                onClick={() => setAddMaterialTab('link')}
+              >
+                🔗 Link Web / Google Drive
+              </button>
+            </div>
+
+            {addMaterialTab === 'file' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '10px' }}>
+                <input
+                  type="file"
+                  id="material-file-upload-input"
+                  accept=".pdf,.png,.jpg,.jpeg,.txt,.md,.doc,.docx"
+                  onChange={handleMaterialFileChange}
+                  style={{ display: 'none' }}
+                />
+                <label htmlFor="material-file-upload-input" className="drop-zone">
+                  {uploadingFile ? (
+                    <div>
+                      <div style={{ fontSize: '1.8rem', marginBottom: '6px' }}>
+                        {uploadingFile.fileType === 'pdf' ? '📄' : '🖼️'}
+                      </div>
+                      <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.9rem' }}>
+                        {uploadingFile.originalName}
+                      </div>
+                      <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', marginTop: '4px' }}>
+                        {(uploadingFile.size / 1024).toFixed(1)} KB • Clicca per sostituire
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ fontSize: '2rem', marginBottom: '6px' }}>📥</div>
+                      <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.88rem' }}>
+                        Clicca qui per selezionare un PDF, dispensa o immagine
+                      </div>
+                      <div style={{ color: 'var(--text-secondary)', fontSize: '0.74rem', marginTop: '4px' }}>
+                        Supporta PDF, PNG, JPG, TXT (fino a 25MB)
+                      </div>
+                    </div>
+                  )}
+                </label>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>Titolo risorsa</label>
+                  <input
+                    type="text"
+                    placeholder="Es. Slide Lezione 1"
+                    value={customMaterialName}
+                    onChange={e => setCustomMaterialName(e.target.value)}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>Categoria</label>
+                  <input
+                    type="text"
+                    placeholder="Es. Lezioni, Esercizi, Dispense"
+                    value={customMaterialCategory}
+                    onChange={e => setCustomMaterialCategory(e.target.value)}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '10px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>Nome della risorsa</label>
+                  <input
+                    type="text"
+                    placeholder="Es. Cartella Drive Docente, Link YouTube"
+                    value={customMaterialName}
+                    onChange={e => setCustomMaterialName(e.target.value)}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>Link (URL)</label>
+                  <input
+                    type="text"
+                    placeholder="https://drive.google.com/..."
+                    value={customMaterialUrl}
+                    onChange={e => setCustomMaterialUrl(e.target.value)}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>Categoria</label>
+                  <input
+                    type="text"
+                    placeholder="Es. Lezioni, Esercizi, Immagini"
+                    value={customMaterialCategory}
+                    onChange={e => setCustomMaterialCategory(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
+              <button className="dialog-btn" onClick={() => setIsAddMaterialModalOpen(false)}>
+                Annulla
+              </button>
+              <button className="dialog-btn primary" onClick={handleSaveMaterial}>
+                Salva Risorsa
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

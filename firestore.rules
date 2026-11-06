@@ -76,7 +76,12 @@ service cloud.firestore {
              data.subjectId is string && data.subjectId.size() > 0 && data.subjectId.size() <= 128 &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
              data.url is string && data.url.size() > 0 && data.url.size() <= 2048 &&
-             (!('category' in data) || (data.category is string && data.category.size() <= 80));
+             (!('category' in data) || (data.category is string && data.category.size() <= 80)) &&
+             (!('fileType' in data) || (data.fileType is string && data.fileType.size() <= 32)) &&
+             (!('fileSize' in data) || (data.fileSize is number)) &&
+             (!('mimeType' in data) || (data.mimeType is string && data.mimeType.size() <= 128)) &&
+             (!('fileData' in data) || (data.fileData is string && data.fileData.size() <= 600000)) &&
+             (!('hasLocalFile' in data) || (data.hasLocalFile is bool));
     }
 
     function isValidChatSession(data, userId) {

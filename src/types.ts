@@ -11,6 +11,11 @@ export interface MaterialItem {
   url: string;
   category: string;
   createdAt?: string;
+  fileType?: 'pdf' | 'doc' | 'image' | 'video' | 'link';
+  fileSize?: number;
+  mimeType?: string;
+  fileData?: string;
+  hasLocalFile?: boolean;
 }
 
 export interface ChatMessagePart {

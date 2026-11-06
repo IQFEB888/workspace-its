@@ -173,6 +173,29 @@
         "createdAt": {
           "type": "string",
           "description": "Creation timestamp"
+        },
+        "fileType": {
+          "type": "string",
+          "description": "Type of file (pdf, image, doc, link)",
+          "maxLength": 32
+        },
+        "fileSize": {
+          "type": "number",
+          "description": "Size in bytes"
+        },
+        "mimeType": {
+          "type": "string",
+          "description": "MIME type (e.g. application/pdf)",
+          "maxLength": 128
+        },
+        "fileData": {
+          "type": "string",
+          "description": "Optional inline data url or excerpt",
+          "maxLength": 600000
+        },
+        "hasLocalFile": {
+          "type": "boolean",
+          "description": "Whether file is stored in browser IndexedDB"
         }
       },
       "required": ["id", "userId", "subjectId", "name", "url"]

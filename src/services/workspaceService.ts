@@ -254,7 +254,12 @@ export class WorkspaceService {
               name: d.name,
               url: d.url,
               category: d.category || 'Lezioni',
-              createdAt: d.createdAt
+              createdAt: d.createdAt,
+              fileType: d.fileType || 'link',
+              fileSize: d.fileSize || 0,
+              mimeType: d.mimeType || '',
+              fileData: d.fileData || '',
+              hasLocalFile: !!d.hasLocalFile
             });
           });
           if (callbacks.onMaterials) callbacks.onMaterials(matBySubject);
@@ -378,6 +383,8 @@ export class WorkspaceService {
     try {
       const matIdStr = String(material.id);
       const matDocRef = doc(db, 'users', userId, 'materials', matIdStr);
+      // If fileData is large (>500KB), prevent exceeding doc limits by storing metadata and local IndexedDB
+      const fileDataToSave = material.fileData && material.fileData.length < 500000 ? material.fileData : '';
       await setDoc(matDocRef, {
         id: matIdStr,
         userId,
@@ -385,7 +392,12 @@ export class WorkspaceService {
         name: material.name,
         url: material.url,
         category: material.category || 'Lezioni',
-        createdAt: material.createdAt || new Date().toISOString()
+        createdAt: material.createdAt || new Date().toISOString(),
+        fileType: material.fileType || 'link',
+        fileSize: material.fileSize || 0,
+        mimeType: material.mimeType || '',
+        fileData: fileDataToSave,
+        hasLocalFile: !!material.hasLocalFile
       });
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `users/${userId}/materials/${material.id}`);
