@@ -57,6 +57,7 @@ export default function App() {
   const [pages, setPages] = useState<Record<string, PageItem[]>>(DEFAULT_PAGES);
   const [activePageId, setActivePageId] = useState<string>('');
   const [materials, setMaterials] = useState<Record<string, MaterialItem[]>>({});
+  const [mobileTab, setMobileTab] = useState<'notes' | 'materials' | 'chat' | 'tools'>('notes');
 
   // Gemini Copilot & Keys
   const [apiKeys, setApiKeys] = useState<string[]>([]);
@@ -1546,96 +1547,230 @@ export default function App() {
     groupedMaterials[cat].push(m);
   });
 
+  // 1. Loading screen while Firebase Auth initializes
+  if (authLoading) {
+    return (
+      <div className="auth-loading-screen">
+        <div className="auth-loading-spinner"></div>
+        <p>Caricamento Workspace ITS...</p>
+      </div>
+    );
+  }
+
+  // 2. Auth Gate: Until the user logs in, they cannot write notes, view or do anything
+  if (!currentUser) {
+    return (
+      <div className="auth-gate-container">
+        {/* Top Header */}
+        <div className="auth-gate-header">
+          <div className="auth-gate-brand">
+            <span style={{ fontSize: '1.4rem' }}>📚</span>
+            <span>Workspace ITS</span>
+          </div>
+          <button
+            className="top-btn"
+            onClick={() => setIsBackupModalOpen(true)}
+            title="Importa backup dati offline"
+          >
+            💾 Ripristina Backup
+          </button>
+        </div>
+
+        {/* Center Hero Card */}
+        <div className="auth-gate-card">
+          <div className="auth-gate-badge">
+            <span className="auth-gate-dot"></span> Piattaforma Studenti ITS
+          </div>
+
+          <h1 className="auth-gate-title">
+            Il tuo hub di studio <br className="mobile-hide" />
+            <span className="gradient-text">intelligente e sincronizzato</span>
+          </h1>
+
+          <p className="auth-gate-subtitle">
+            Tutti i tuoi appunti a schede, le dispense PDF e l'assistente AI Gemini riuniti in un unico workspace. Accedi con il tuo account Google per visualizzare o scrivere note su qualsiasi dispositivo.
+          </p>
+
+          <button
+            className="auth-gate-google-btn"
+            onClick={handleGoogleLogin}
+            disabled={isLoggingIn}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+            </svg>
+            <span>{isLoggingIn ? 'Accesso in corso...' : 'Accedi con Google'}</span>
+          </button>
+
+          {/* Features Grid */}
+          <div className="auth-gate-features">
+            <div className="auth-gate-feature-card">
+              <div className="feature-icon">📝</div>
+              <div className="feature-title">Appunti a Schede Cloud</div>
+              <div className="feature-desc">Scrivi e formatta le tue lezioni, con salvataggio istantaneo su Cloud Firestore.</div>
+            </div>
+            <div className="auth-gate-feature-card">
+              <div className="feature-icon">📁</div>
+              <div className="feature-title">Libreria Dispense & PDF</div>
+              <div className="feature-desc">Carica file, slide e link Drive del corso con anteprima immediata a schermo intero.</div>
+            </div>
+            <div className="auth-gate-feature-card">
+              <div className="feature-icon">🤖</div>
+              <div className="feature-title">Gemini AI Copilot</div>
+              <div className="feature-desc">Interroga l'AI sui tuoi appunti e sui tuoi PDF per chiarimenti, sintesi ed esercizi.</div>
+            </div>
+          </div>
+
+          <div className="auth-gate-footer-note">
+            🔒 Sincronizzazione protetta con Firebase Cloud • Accesso sicuro per studenti
+          </div>
+        </div>
+
+        {/* Modal Backup in Auth Gate */}
+        {isBackupModalOpen && (
+          <div className="modal-overlay">
+            <div className="modal-box" style={{ maxWidth: '520px' }}>
+              <div className="modal-header">
+                <span className="modal-title">💾 Backup & Ripristino Workspace</span>
+                <button className="modal-close" onClick={() => setIsBackupModalOpen(false)}>
+                  ✕
+                </button>
+              </div>
+
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: '4px 0 12px 0' }}>
+                Se hai un file di backup precedente o desideri ripristinare i tuoi appunti, caricalo qui sotto:
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <button
+                  className="dialog-btn primary"
+                  style={{ width: '100%', padding: '12px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                  onClick={() => backupFileInputRef.current?.click()}
+                >
+                  📂 Seleziona File Backup (.json) da Ripristinare
+                </button>
+              </div>
+
+              <div style={{ margin: '14px 0 8px 0', borderTop: '1px solid var(--panel-border)', paddingTop: '12px' }}>
+                <label style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+                  📋 Oppure incolla direttamente qui il testo del backup:
+                </label>
+                <textarea
+                  placeholder="Incolla qui il contenuto JSON del backup..."
+                  value={backupPasteText}
+                  onChange={e => setBackupPasteText(e.target.value)}
+                  style={{
+                    width: '100%',
+                    height: '80px',
+                    background: 'rgba(0, 0, 0, 0.25)',
+                    border: '1px solid var(--panel-border)',
+                    borderRadius: '8px',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.75rem',
+                    fontFamily: 'monospace',
+                    padding: '8px',
+                    resize: 'vertical'
+                  }}
+                />
+                <button
+                  className="dialog-btn"
+                  disabled={!backupPasteText.trim()}
+                  style={{ width: '100%', marginTop: '8px', padding: '8px', opacity: backupPasteText.trim() ? 1 : 0.5 }}
+                  onClick={() => handleImportBackupData(backupPasteText)}
+                >
+                  ✨ Ripristina da Testo Incollato
+                </button>
+              </div>
+
+              <button className="modal-save-btn" onClick={() => setIsBackupModalOpen(false)} style={{ marginTop: '12px' }}>
+                Chiudi
+              </button>
+            </div>
+          </div>
+        )}
+
+        <input
+          type="file"
+          ref={backupFileInputRef}
+          accept=".json"
+          style={{ display: 'none' }}
+          onChange={handleBackupFileSelect}
+        />
+
+        {/* Toasts container in Auth Gate */}
+        <div className="toast-container" id="toast-container">
+          {toasts.map(t => (
+            <div key={t.id} className={`toast-item ${t.type === 'error' ? 'error' : ''}`}>
+              <span>{t.type === 'error' ? '⚠️' : '✨'}</span>
+              <span>{t.message}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // 3. Authenticated Workspace (When currentUser is present)
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       {/* Top Floating Controls */}
       <div className="top-controls">
-        {/* Auth / Cloud Sync Status Button */}
-        {authLoading ? (
-          <span className="top-btn" style={{ opacity: 0.6 }}>Caricamento...</span>
-        ) : currentUser ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {isAdmin && (
-              <button
-                className="top-btn"
-                style={{
-                  background: 'rgba(234, 179, 8, 0.15)',
-                  border: '1px solid rgba(234, 179, 8, 0.4)',
-                  color: '#fde047'
-                }}
-                onClick={() => setIsAdminModalOpen(true)}
-                title="Gestione Accessi e Approvazione Utenti"
-              >
-                👑 Utenti
-                {accessRequests.filter(r => r.status === 'pending').length > 0 && (
-                  <span
-                    style={{
-                      background: '#f43f5e',
-                      color: '#fff',
-                      borderRadius: '999px',
-                      padding: '1px 6px',
-                      fontSize: '0.68rem',
-                      fontWeight: 700
-                    }}
-                  >
-                    {accessRequests.filter(r => r.status === 'pending').length}
-                  </span>
-                )}
-              </button>
-            )}
-            <button
-              className="top-btn top-btn-auth"
-              onClick={() => setIsSyncModalOpen(true)}
-              title="Gestisci stato di sincronizzazione Cloud e backup"
-            >
-              <div className="sync-dot"></div>
-              <span>Cloud Sync</span>
-              {currentUser.photoURL && (
-                <img
-                  src={currentUser.photoURL}
-                  alt="Avatar"
-                  style={{ width: '16px', height: '16px', borderRadius: '50%' }}
-                />
-              )}
-            </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {isAdmin && (
             <button
               className="top-btn"
-              onClick={handleLogout}
-              title="Disconnetti account Google"
-              style={{ padding: '6px 10px' }}
+              style={{
+                background: 'rgba(234, 179, 8, 0.15)',
+                border: '1px solid rgba(234, 179, 8, 0.4)',
+                color: '#fde047'
+              }}
+              onClick={() => setIsAdminModalOpen(true)}
+              title="Gestione Accessi e Approvazione Utenti"
             >
-              Esci
+              👑 Utenti
+              {accessRequests.filter(r => r.status === 'pending').length > 0 && (
+                <span
+                  style={{
+                    background: '#f43f5e',
+                    color: '#fff',
+                    borderRadius: '999px',
+                    padding: '1px 6px',
+                    fontSize: '0.68rem',
+                    fontWeight: 700
+                  }}
+                >
+                  {accessRequests.filter(r => r.status === 'pending').length}
+                </span>
+              )}
             </button>
-          </div>
-        ) : (
+          )}
           <button
             className="top-btn top-btn-auth"
-            onClick={handleGoogleLogin}
-            disabled={isLoggingIn}
-            style={{ opacity: isLoggingIn ? 0.7 : 1, cursor: isLoggingIn ? 'wait' : 'pointer' }}
-            title="Accedi con Google per sincronizzare i tuoi dati su Cloud Firestore"
+            onClick={() => setIsSyncModalOpen(true)}
+            title="Gestisci stato di sincronizzazione Cloud e backup"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24">
-              <path
-                fill="#4285F4"
-                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+            <div className="sync-dot"></div>
+            <span>Cloud Sync</span>
+            {currentUser.photoURL && (
+              <img
+                src={currentUser.photoURL}
+                alt="Avatar"
+                style={{ width: '16px', height: '16px', borderRadius: '50%' }}
               />
-              <path
-                fill="#34A853"
-                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-              />
-              <path
-                fill="#EA4335"
-                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-              />
-            </svg>
-            <span>Accedi con Google</span>
+            )}
           </button>
-        )}
+          <button
+            className="top-btn"
+            onClick={handleLogout}
+            title="Disconnetti account Google"
+            style={{ padding: '6px 10px' }}
+          >
+            Esci
+          </button>
+        </div>
 
         <button
           className="top-btn"
@@ -1661,7 +1796,7 @@ export default function App() {
         id="main-container"
       >
         {/* Left Column: Tools & Quick Launch */}
-        <div className="panel tools-column">
+        <div className={`panel tools-column ${mobileTab === 'tools' ? 'mobile-active' : ''}`}>
           <div className="sidebar-top-row">
             <div className="datetime-header">
               <div id="clock">{currentTime}</div>
@@ -1751,7 +1886,7 @@ export default function App() {
         </div>
 
         {/* Center Column: Workspace Notes & Materials */}
-        <div className={`panel ${isNotesMaximized ? 'notes-maximized' : ''}`} id="notes-panel">
+        <div className={`panel ${isNotesMaximized ? 'notes-maximized' : ''} ${mobileTab === 'notes' || mobileTab === 'materials' ? 'mobile-active' : ''}`} id="notes-panel">
           <div className="notes-header">
             <div className="notes-header-left">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--text-secondary)' }}>
@@ -2021,7 +2156,7 @@ export default function App() {
         </div>
 
         {/* Right Column: AI Copilot Panel */}
-        <div className="panel chat-column" id="chat-column">
+        <div className={`panel chat-column ${mobileTab === 'chat' ? 'mobile-active' : ''}`} id="chat-column">
           <div className="ai-chat-panel">
             <div className="chat-header-bar">
               <button
@@ -2259,6 +2394,51 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* Mobile Bottom Navigation Bar (< 1024px) */}
+      <nav className="mobile-bottom-nav" aria-label="Navigazione mobile">
+        <button
+          type="button"
+          className={`mobile-nav-item ${mobileTab === 'notes' ? 'active' : ''}`}
+          onClick={() => {
+            setMobileTab('notes');
+            setActiveTab('notes');
+          }}
+        >
+          <span className="mobile-nav-icon">📝</span>
+          <span>Appunti</span>
+        </button>
+
+        <button
+          type="button"
+          className={`mobile-nav-item ${mobileTab === 'materials' ? 'active' : ''}`}
+          onClick={() => {
+            setMobileTab('materials');
+            setActiveTab('materials');
+          }}
+        >
+          <span className="mobile-nav-icon">📁</span>
+          <span>Materiali</span>
+        </button>
+
+        <button
+          type="button"
+          className={`mobile-nav-item ${mobileTab === 'chat' ? 'active' : ''}`}
+          onClick={() => setMobileTab('chat')}
+        >
+          <span className="mobile-nav-icon">🤖</span>
+          <span>AI Chat</span>
+        </button>
+
+        <button
+          type="button"
+          className={`mobile-nav-item ${mobileTab === 'tools' ? 'active' : ''}`}
+          onClick={() => setMobileTab('tools')}
+        >
+          <span className="mobile-nav-icon">🛠️</span>
+          <span>Strumenti</span>
+        </button>
+      </nav>
 
       {/* MODALE GESTIONE API KEYS */}
       {isKeysModalOpen && (
