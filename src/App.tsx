@@ -558,7 +558,7 @@ export default function App() {
   // Delete Subject with Cascade Cleanup
   const handleDeleteSubject = async (subjectToDelete: string) => {
     if (subjects.length <= 1) {
-      showToast("Non puoi eliminare l'unica materia presente!", 'error');
+      showToast("Non puoi eliminare l'unica materia rimasta! Creane prima un'altra con '+ Nuova' per poter eliminare questa.", 'error');
       return;
     }
 
@@ -1612,21 +1612,35 @@ export default function App() {
                   </option>
                 ))}
               </select>
+
+              <button
+                type="button"
+                className="header-btn"
+                onClick={() => handleDeleteSubject(activeSubject)}
+                title={subjects.length > 1 ? `Elimina la materia "${activeSubject}"` : "Non puoi eliminare l'unica materia presente (creane prima un'altra con '+ Nuova')"}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  color: '#f87171',
+                  borderColor: 'rgba(239, 68, 68, 0.45)',
+                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                  padding: '5px 10px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  marginLeft: '8px',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  opacity: subjects.length > 1 ? 1 : 0.65
+                }}
+              >
+                🗑️ Elimina
+              </button>
             </div>
             <div className="notes-header-right">
               <button className="header-btn" onClick={handleAddNewSubject} title="Crea una nuova materia">
                 + Nuova
               </button>
-              {subjects.length > 1 && (
-                <button
-                  className="header-btn"
-                  onClick={() => handleDeleteSubject(activeSubject)}
-                  title={`Elimina definitivamente la materia "${activeSubject}"`}
-                  style={{ color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.35)' }}
-                >
-                  🗑️ Elimina
-                </button>
-              )}
               <button className="header-btn" id="fullscreen-btn" onClick={handleToggleFullscreenNotes}>
                 {isNotesMaximized ? 'Riduci' : 'Massimizza'}
               </button>
