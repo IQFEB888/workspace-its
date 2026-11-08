@@ -70,3 +70,33 @@ export interface DialogOptions {
   hideCancel?: boolean;
   danger?: boolean;
 }
+
+export interface SharedRoomMember {
+  uid: string;
+  displayName: string;
+  photoURL?: string;
+  email?: string;
+  joinedAt: string;
+  lastActive?: string;
+}
+
+export interface SharedRoom {
+  id: string;
+  name: string;
+  code: string;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  members: Record<string, SharedRoomMember>;
+}
+
+export interface SharedChatMessage {
+  id: string;
+  role: 'user' | 'model';
+  senderId?: string;
+  senderName?: string;
+  senderPhoto?: string;
+  parts: ChatMessagePart[];
+  rawText?: string;
+  timestamp: number;
+}

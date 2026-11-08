@@ -10,10 +10,22 @@ import {
   onSnapshot,
   getDocs,
   getDoc,
+  query,
+  where,
+  orderBy,
   Unsubscribe
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
-import { PageItem, MaterialItem, ChatMessage, SubjectItem, UserPreferences } from '../types';
+import {
+  PageItem,
+  MaterialItem,
+  ChatMessage,
+  SubjectItem,
+  UserPreferences,
+  SharedRoom,
+  SharedRoomMember,
+  SharedChatMessage
+} from '../types';
 
 export const DEFAULT_SUBJECTS: SubjectItem[] = [
   { id: 'Database', name: 'Database' }
@@ -608,5 +620,223 @@ export class WorkspaceService {
     await deleteDoc(approvedRef);
     const reqRef = doc(db, 'access_requests', userId);
     await deleteDoc(reqRef).catch(() => {});
+  }
+
+  // ==========================================================================
+  // SHARED ROOMS & REAL-TIME MULTI-USER COLLABORATION
+  // ==========================================================================
+
+  static async createSharedRoom(
+    user: { uid: string; displayName?: string | null; email?: string | null; photoURL?: string | null },
+    roomName: string
+  ): Promise<SharedRoom> {
+    const roomId = 'room_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const code = 'ITS-' + Math.floor(1000 + Math.random() * 9000);
+    const member: SharedRoomMember = {
+      uid: user.uid,
+      displayName: user.displayName || user.email?.split('@')[0] || 'Studente',
+      email: user.email || '',
+      photoURL: user.photoURL || '',
+      joinedAt: new Date().toISOString()
+    };
+
+    const newRoom: SharedRoom = {
+      id: roomId,
+      name: roomName.trim(),
+      code,
+      createdBy: user.uid,
+      createdByName: member.displayName,
+      createdAt: new Date().toISOString(),
+      members: {
+        [user.uid]: member
+      }
+    };
+
+    const roomRef = doc(db, 'shared_rooms', roomId);
+    await setDoc(roomRef, newRoom);
+
+    // Initial default shared page
+    const pageRef = doc(db, 'shared_rooms', roomId, 'pages', 'page_main');
+    await setDoc(pageRef, {
+      id: 'page_main',
+      name: 'Appunti Condivisi',
+      content: `<h1>Benvenuti nella Stanza: ${roomName.trim()}</h1><p>Questo è lo spazio di lavoro condiviso. Tutti i partecipanti possono scrivere, formattare gli appunti e fare domande all'AI nella chat laterale in tempo reale!</p>`,
+      order: 0,
+      updatedAt: new Date().toISOString()
+    });
+
+    return newRoom;
+  }
+
+  static async joinSharedRoomByCode(
+    user: { uid: string; displayName?: string | null; email?: string | null; photoURL?: string | null },
+    codeToSearch: string
+  ): Promise<SharedRoom> {
+    const cleanCode = codeToSearch.trim().toUpperCase();
+    const roomsCol = collection(db, 'shared_rooms');
+    const q = query(roomsCol, where('code', '==', cleanCode));
+    const snap = await getDocs(q);
+
+    if (snap.empty) {
+      throw new Error(`Nessuna stanza trovata con il codice "${cleanCode}". Verifica il codice e riprova.`);
+    }
+
+    const roomDoc = snap.docs[0];
+    const roomData = roomDoc.data() as SharedRoom;
+
+    const member: SharedRoomMember = {
+      uid: user.uid,
+      displayName: user.displayName || user.email?.split('@')[0] || 'Studente',
+      email: user.email || '',
+      photoURL: user.photoURL || '',
+      joinedAt: new Date().toISOString()
+    };
+
+    const updatedMembers = { ...(roomData.members || {}), [user.uid]: member };
+    await setDoc(roomDoc.ref, { members: updatedMembers }, { merge: true });
+
+    return { ...roomData, members: updatedMembers };
+  }
+
+  static subscribeToUserRooms(
+    uid: string,
+    callback: (rooms: SharedRoom[]) => void
+  ): Unsubscribe {
+    const roomsCol = collection(db, 'shared_rooms');
+    return onSnapshot(roomsCol, (snap) => {
+      if (!auth.currentUser) return;
+      const userRooms: SharedRoom[] = [];
+      snap.forEach(d => {
+        const data = d.data() as SharedRoom;
+        if (data.members && data.members[uid]) {
+          userRooms.push(data);
+        }
+      });
+      callback(userRooms);
+    }, err => {
+      if (!auth.currentUser) return;
+      console.warn('Rooms listener:', err);
+    });
+  }
+
+  static subscribeToRoomPages(
+    roomId: string,
+    callback: (pages: PageItem[]) => void
+  ): Unsubscribe {
+    const colRef = collection(db, 'shared_rooms', roomId, 'pages');
+    return onSnapshot(colRef, (snap) => {
+      if (!auth.currentUser) return;
+      const pages: PageItem[] = [];
+      snap.forEach(d => {
+        const data = d.data();
+        pages.push({
+          id: d.id,
+          name: data.name || 'Senza titolo',
+          content: data.content || '',
+          order: data.order ?? 0
+        });
+      });
+      pages.sort((a, b) => (a.order || 0) - (b.order || 0));
+      callback(pages);
+    }, err => {
+      if (!auth.currentUser) return;
+      console.warn('Room pages listener:', err);
+    });
+  }
+
+  static async saveRoomPage(roomId: string, page: PageItem): Promise<void> {
+    const pageRef = doc(db, 'shared_rooms', roomId, 'pages', page.id);
+    await setDoc(pageRef, {
+      id: page.id,
+      name: page.name,
+      content: page.content,
+      order: page.order ?? 0,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+  }
+
+  static async deleteRoomPage(roomId: string, pageId: string): Promise<void> {
+    const pageRef = doc(db, 'shared_rooms', roomId, 'pages', pageId);
+    await deleteDoc(pageRef);
+  }
+
+  static subscribeToRoomMessages(
+    roomId: string,
+    callback: (messages: SharedChatMessage[]) => void
+  ): Unsubscribe {
+    const colRef = collection(db, 'shared_rooms', roomId, 'messages');
+    const q = query(colRef, orderBy('timestamp', 'asc'));
+    return onSnapshot(q, (snap) => {
+      if (!auth.currentUser) return;
+      const msgs: SharedChatMessage[] = [];
+      snap.forEach(d => {
+        const data = d.data();
+        msgs.push({
+          id: d.id,
+          role: data.role || 'user',
+          senderId: data.senderId,
+          senderName: data.senderName,
+          senderPhoto: data.senderPhoto,
+          parts: data.parts || [{ text: data.rawText || '' }],
+          rawText: data.rawText || (data.parts?.[0]?.text || ''),
+          timestamp: data.timestamp || Date.now()
+        });
+      });
+      callback(msgs);
+    }, err => {
+      if (!auth.currentUser) return;
+      console.warn('Room messages listener:', err);
+    });
+  }
+
+  static async sendRoomMessage(roomId: string, message: SharedChatMessage): Promise<void> {
+    const msgRef = doc(db, 'shared_rooms', roomId, 'messages', message.id);
+    await setDoc(msgRef, {
+      ...message,
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  static subscribeToRoomMaterials(
+    roomId: string,
+    callback: (materials: MaterialItem[]) => void
+  ): Unsubscribe {
+    const colRef = collection(db, 'shared_rooms', roomId, 'materials');
+    return onSnapshot(colRef, (snap) => {
+      if (!auth.currentUser) return;
+      const mats: MaterialItem[] = [];
+      snap.forEach(d => mats.push(d.data() as MaterialItem));
+      callback(mats);
+    }, err => {
+      if (!auth.currentUser) return;
+      console.warn('Room materials listener:', err);
+    });
+  }
+
+  static async saveRoomMaterial(roomId: string, material: MaterialItem): Promise<void> {
+    const matRef = doc(db, 'shared_rooms', roomId, 'materials', String(material.id));
+    await setDoc(matRef, {
+      ...material,
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  static async deleteRoomMaterial(roomId: string, materialId: string | number): Promise<void> {
+    const matRef = doc(db, 'shared_rooms', roomId, 'materials', String(materialId));
+    await deleteDoc(matRef);
+  }
+
+  static async leaveSharedRoom(roomId: string, uid: string): Promise<void> {
+    const roomRef = doc(db, 'shared_rooms', roomId);
+    const snap = await getDoc(roomRef);
+    if (!snap.exists()) return;
+    const data = snap.data() as SharedRoom;
+    const updatedMembers = { ...data.members };
+    delete updatedMembers[uid];
+    if (Object.keys(updatedMembers).length === 0) {
+      await deleteDoc(roomRef);
+    } else {
+      await setDoc(roomRef, { members: updatedMembers }, { merge: true });
+    }
   }
 }

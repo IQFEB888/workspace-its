@@ -13,7 +13,10 @@ import {
   SubjectItem,
   UserPreferences,
   AttachedFile,
-  DialogOptions
+  DialogOptions,
+  SharedRoom,
+  SharedRoomMember,
+  SharedChatMessage
 } from './types';
 import { WorkspaceService, DEFAULT_SUBJECTS, DEFAULT_PAGES } from './services/workspaceService';
 import { saveFileToIndexedDB, getFileFromIndexedDB, deleteFileFromIndexedDB } from './services/fileStorage';
@@ -58,6 +61,20 @@ export default function App() {
   const [activePageId, setActivePageId] = useState<string>('');
   const [materials, setMaterials] = useState<Record<string, MaterialItem[]>>({});
   const [mobileTab, setMobileTab] = useState<'notes' | 'materials' | 'chat' | 'tools'>('notes');
+
+  // Collaboration / Shared Rooms State
+  const [workspaceMode, setWorkspaceMode] = useState<'personal' | 'shared'>('personal');
+  const [userRooms, setUserRooms] = useState<SharedRoom[]>([]);
+  const [activeRoomId, setActiveRoomId] = useState<string>('');
+  const [activeRoomPages, setActiveRoomPages] = useState<PageItem[]>([]);
+  const [activeRoomPageId, setActiveRoomPageId] = useState<string>('');
+  const [activeRoomMessages, setActiveRoomMessages] = useState<SharedChatMessage[]>([]);
+  const [activeRoomMaterials, setActiveRoomMaterials] = useState<MaterialItem[]>([]);
+  const [isRoomModalOpen, setIsRoomModalOpen] = useState<boolean>(false);
+  const [roomModalTab, setRoomModalTab] = useState<'create' | 'join'>('create');
+  const [newRoomName, setNewRoomName] = useState<string>('');
+  const [joinRoomCode, setJoinRoomCode] = useState<string>('');
+  const [roomActionLoading, setRoomActionLoading] = useState<boolean>(false);
 
   // Gemini Copilot & Keys
   const [apiKeys, setApiKeys] = useState<string[]>([]);
@@ -379,28 +396,81 @@ export default function App() {
     };
   }, [openCustomDialog, showToast]);
 
-  // Sync active page content into editor whenever activePageId or activeSubject changes
+  // Subscribe to user's joined rooms
   useEffect(() => {
+    if (!currentUser) {
+      setUserRooms([]);
+      return;
+    }
+    const unsub = WorkspaceService.subscribeToUserRooms(currentUser.uid, (rooms) => {
+      setUserRooms(rooms);
+      if (rooms.length > 0 && (!activeRoomId || !rooms.some(r => r.id === activeRoomId))) {
+        setActiveRoomId(rooms[0].id);
+      }
+    });
+    return () => unsub();
+  }, [currentUser, activeRoomId]);
+
+  // Subscribe to active room data (pages, messages, materials)
+  useEffect(() => {
+    if (workspaceMode !== 'shared' || !activeRoomId || !currentUser) {
+      return;
+    }
+    const unsubPages = WorkspaceService.subscribeToRoomPages(activeRoomId, (rPages) => {
+      setActiveRoomPages(rPages);
+      if (rPages.length > 0 && (!activeRoomPageId || !rPages.some(p => p.id === activeRoomPageId))) {
+        setActiveRoomPageId(rPages[0].id);
+      }
+    });
+    const unsubMsgs = WorkspaceService.subscribeToRoomMessages(activeRoomId, (msgs) => {
+      setActiveRoomMessages(msgs);
+    });
+    const unsubMats = WorkspaceService.subscribeToRoomMaterials(activeRoomId, (mats) => {
+      setActiveRoomMaterials(mats);
+    });
+    return () => {
+      unsubPages();
+      unsubMsgs();
+      unsubMats();
+    };
+  }, [workspaceMode, activeRoomId, currentUser, activeRoomPageId]);
+
+  // Sync active page content into editor (handles both personal workspace and shared room modes)
+  useEffect(() => {
+    if (workspaceMode === 'shared') {
+      let currentRoomPage = activeRoomPages.find(p => p.id === activeRoomPageId);
+      if (!currentRoomPage && activeRoomPages.length > 0) {
+        currentRoomPage = activeRoomPages[0];
+        setActiveRoomPageId(currentRoomPage.id);
+      }
+      const targetContent = currentRoomPage ? currentRoomPage.content : '';
+      if (notesAreaRef.current && notesAreaRef.current.innerHTML !== targetContent) {
+        notesAreaRef.current.innerHTML = targetContent;
+      }
+      return;
+    }
+
     const currentSubPages = pages[activeSubject] || [];
     let currentPage = currentSubPages.find(p => p.id === activePageId);
     if (!currentPage && currentSubPages.length > 0) {
       currentPage = currentSubPages[0];
       setActivePageId(currentPage.id);
     }
-    if (notesAreaRef.current) {
-      notesAreaRef.current.innerHTML = currentPage ? currentPage.content : '';
+    const targetContent = currentPage ? currentPage.content : '';
+    if (notesAreaRef.current && notesAreaRef.current.innerHTML !== targetContent) {
+      notesAreaRef.current.innerHTML = targetContent;
     }
     // Update drive link for active subject
     const currentSub = subjects.find(s => s.id === activeSubject);
     setDriveLink(currentSub?.driveLink || '');
-  }, [activeSubject, activePageId, pages, subjects]);
+  }, [workspaceMode, activeSubject, activePageId, pages, subjects, activeRoomPages, activeRoomPageId]);
 
   // Scroll chat messages to bottom on new message or tab opening
   useEffect(() => {
     if (chatMessagesRef.current) {
       chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
     }
-  }, [chats, activeSubject, isChatCollapsed]);
+  }, [chats, activeSubject, isChatCollapsed, activeRoomMessages, workspaceMode]);
 
   // Google Login Handler
   const handleGoogleLogin = async () => {
@@ -636,12 +706,32 @@ export default function App() {
     showToast(`Materia "${subjectToDelete}" eliminata con successo.`);
   };
 
-  // Save current note content (debounced to cloud, instant to local)
+  // Save current note content (debounced to cloud, instant to local or shared room)
   const handleEditorInput = () => {
     if (!notesAreaRef.current) return;
     const content = notesAreaRef.current.innerHTML;
 
-    // Update local state immediately
+    if (workspaceMode === 'shared') {
+      if (!activeRoomId || !activeRoomPageId) return;
+      // Update local room state immediately
+      setActiveRoomPages(prev =>
+        prev.map(p => (p.id === activeRoomPageId ? { ...p, content } : p))
+      );
+      // Debounce real-time write to shared room
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = setTimeout(async () => {
+        const page = activeRoomPages.find(p => p.id === activeRoomPageId);
+        if (page) {
+          await WorkspaceService.saveRoomPage(activeRoomId, {
+            ...page,
+            content
+          });
+        }
+      }, 500);
+      return;
+    }
+
+    // Update local personal state immediately
     setPages(prev => {
       const currentSubPages = prev[activeSubject] || [];
       const updated = currentSubPages.map(p => (p.id === activePageId ? { ...p, content } : p));
@@ -790,6 +880,148 @@ export default function App() {
         });
       }
       showToast('Pagina rinominata!');
+    }
+  };
+
+  // ==========================================
+  // SHARED ROOMS & COLLABORATION HANDLERS
+  // ==========================================
+
+  const handleCreateRoom = async () => {
+    if (!currentUser) return;
+    if (!newRoomName.trim()) {
+      showToast('Inserisci un nome per la stanza di gruppo.', 'error');
+      return;
+    }
+    setRoomActionLoading(true);
+    try {
+      const room = await WorkspaceService.createSharedRoom(currentUser, newRoomName.trim());
+      setActiveRoomId(room.id);
+      setWorkspaceMode('shared');
+      setIsRoomModalOpen(false);
+      setNewRoomName('');
+      showToast(`Stanza "${room.name}" creata! Codice invito: ${room.code}`);
+    } catch (e: any) {
+      showToast('Errore creazione stanza: ' + (e.message || 'Riprova'), 'error');
+    } finally {
+      setRoomActionLoading(false);
+    }
+  };
+
+  const handleJoinRoom = async () => {
+    if (!currentUser) return;
+    if (!joinRoomCode.trim()) {
+      showToast('Inserisci il codice della stanza (es. ITS-1234).', 'error');
+      return;
+    }
+    setRoomActionLoading(true);
+    try {
+      const room = await WorkspaceService.joinSharedRoomByCode(currentUser, joinRoomCode.trim());
+      setActiveRoomId(room.id);
+      setWorkspaceMode('shared');
+      setIsRoomModalOpen(false);
+      setJoinRoomCode('');
+      showToast(`Ti sei unito alla stanza "${room.name}"!`);
+    } catch (e: any) {
+      showToast(e.message || 'Errore durante l\'accesso alla stanza.', 'error');
+    } finally {
+      setRoomActionLoading(false);
+    }
+  };
+
+  const handleLeaveRoom = async () => {
+    if (!currentUser || !activeRoomId) return;
+    const room = userRooms.find(r => r.id === activeRoomId);
+    const confirmed = await openCustomDialog({
+      title: '🚪 Abbandona Stanza',
+      description: `Sei sicuro di voler uscire dalla stanza di gruppo <b>"${room?.name || 'questa stanza'}"</b>?`,
+      confirmText: 'Abbandona',
+      danger: true
+    });
+    if (confirmed) {
+      await WorkspaceService.leaveSharedRoom(activeRoomId, currentUser.uid);
+      showToast('Sei uscito dalla stanza di gruppo.');
+      const remaining = userRooms.filter(r => r.id !== activeRoomId);
+      if (remaining.length > 0) {
+        setActiveRoomId(remaining[0].id);
+      } else {
+        setActiveRoomId('');
+        setWorkspaceMode('personal');
+      }
+    }
+  };
+
+  const handleCopyRoomCode = (code: string) => {
+    navigator.clipboard.writeText(code);
+    showToast(`Codice "${code}" copiato negli appunti! Condividilo con i compagni.`);
+  };
+
+  const handleAddNewRoomPage = async () => {
+    if (!activeRoomId) return;
+    const pageName = await openCustomDialog({
+      title: '📝 Nuova Scheda di Gruppo',
+      description: 'Crea una nuova scheda di appunti visibile a tutti i membri della stanza.',
+      fields: [{ placeholder: 'Titolo scheda...', value: `Pagina ${activeRoomPages.length + 1}` }],
+      confirmText: 'Crea Scheda'
+    });
+
+    if (pageName && pageName.trim()) {
+      const newPage: PageItem = {
+        id: 'rpage_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        name: pageName.trim(),
+        content: `<h3>${pageName.trim()}</h3><p>Inizia a scrivere con i tuoi compagni...</p>`,
+        order: activeRoomPages.length
+      };
+
+      await WorkspaceService.saveRoomPage(activeRoomId, newPage);
+      setActiveRoomPageId(newPage.id);
+      showToast(`Scheda "${pageName.trim()}" aggiunta alla stanza!`);
+    }
+  };
+
+  const handleDeleteRoomPage = async (pageId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!activeRoomId) return;
+    if (activeRoomPages.length <= 1) {
+      showToast("Impossibile eliminare l'unica scheda rimasta nella stanza.", 'error');
+      return;
+    }
+    const targetPage = activeRoomPages.find(p => p.id === pageId);
+    const confirmed = await openCustomDialog({
+      title: '🗑️ Elimina Scheda Condivisa',
+      description: `Vuoi davvero eliminare la scheda <b>"${targetPage?.name || ''}"</b> per tutti i partecipanti?`,
+      confirmText: 'Elimina Scheda',
+      danger: true
+    });
+
+    if (confirmed) {
+      await WorkspaceService.deleteRoomPage(activeRoomId, pageId);
+      const remaining = activeRoomPages.filter(p => p.id !== pageId);
+      if (activeRoomPageId === pageId) {
+        setActiveRoomPageId(remaining[0]?.id || '');
+      }
+      showToast('Scheda condivisa eliminata.');
+    }
+  };
+
+  const handleRenameRoomPage = async (pageId: string) => {
+    if (!activeRoomId) return;
+    const page = activeRoomPages.find(p => p.id === pageId);
+    if (!page) return;
+
+    const newName = await openCustomDialog({
+      title: '✏️ Rinomina Scheda Condivisa',
+      description: 'Inserisci il nuovo titolo per questa scheda visibile a tutti.',
+      fields: [{ placeholder: 'Titolo scheda...', value: page.name }],
+      confirmText: 'Salva'
+    });
+
+    if (newName && newName.trim()) {
+      await WorkspaceService.saveRoomPage(activeRoomId, {
+        ...page,
+        name: newName.trim()
+      });
+      showToast('Scheda rinominata per il gruppo!');
     }
   };
 
@@ -1068,6 +1300,127 @@ export default function App() {
           }
         });
       }
+    }
+
+    // If in Shared Room Mode, send message to room and broadcast Gemini's response to all participants
+    if (workspaceMode === 'shared') {
+      if (!activeRoomId) {
+        showToast('Seleziona o crea prima una stanza di gruppo!', 'error');
+        return;
+      }
+      const currentRoom = userRooms.find(r => r.id === activeRoomId);
+      const userMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+      const rawMsgText = isAnalysis ? `🔍 ${userText}` : chatSelectedMaterial ? `[📎 ${chatSelectedMaterial.name}] ${userText}` : userText;
+
+      const sharedUserMsg: SharedChatMessage = {
+        id: userMsgId,
+        role: 'user',
+        senderId: currentUser?.uid || 'anon',
+        senderName: currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Studente',
+        senderPhoto: currentUser?.photoURL || '',
+        parts: userParts,
+        rawText: rawMsgText,
+        timestamp: Date.now()
+      };
+
+      // Broadcast user question to all members in the room
+      await WorkspaceService.sendRoomMessage(activeRoomId, sharedUserMsg);
+      if (!customPrompt) setChatInput('');
+      setIsAILoading(true);
+
+      const noteText = notesAreaRef.current?.innerText.trim() || '';
+      let systemContext = `Sei l'assistente AI ITS del gruppo di studio "${currentRoom?.name || 'Stanza ITS'}". Rispondi in italiano in modo chiaro, utile e accademico.`;
+      if (noteText) {
+        systemContext += `\n\nAppunti condivisi della stanza:\n${noteText}`;
+      }
+      if (chatSelectedMaterial) {
+        systemContext += `\n\n[FONTE CONDIVISA COLLEGATA]: "${chatSelectedMaterial.name}". Rispondi facendo riferimento a questa fonte.`;
+      }
+
+      // Context history for AI: recent messages from room
+      const recentRoomMsgs = activeRoomMessages.slice(-10);
+      const promptContents = [
+        ...recentRoomMsgs.map(m => ({
+          role: m.role === 'model' ? 'model' : 'user',
+          parts: m.parts || [{ text: m.rawText || '' }]
+        })),
+        {
+          role: 'user',
+          parts: userParts
+        }
+      ];
+
+      let success = false;
+      let lastErrorMessage = '';
+
+      for (let i = 0; i < orderedKeys.length; i++) {
+        const currentKey = orderedKeys[i];
+        try {
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${currentKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                systemInstruction: { parts: [{ text: systemContext }] },
+                contents: promptContents
+              })
+            }
+          );
+          const data = await response.json();
+          if (data.error) {
+            const errMsg = data.error.message || '';
+            if (errMsg.includes('high demand') || data.error.status === 'UNAVAILABLE' || data.error.code === 503) {
+              lastErrorMessage = 'Traffico elevato sui server Gemini. Riprova tra poco.';
+              break;
+            }
+            if (data.error.code === 429 || data.error.status === 'RESOURCE_EXHAUSTED' || errMsg.includes('quota')) {
+              continue;
+            }
+            throw new Error(errMsg || 'Errore durante la richiesta AI.');
+          }
+
+          if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+            const aiText = data.candidates[0].content.parts[0].text;
+            setLastAIResponse(aiText);
+
+            const aiMsgId = 'ai_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+            const sharedAiMsg: SharedChatMessage = {
+              id: aiMsgId,
+              role: 'model',
+              senderId: 'gemini',
+              senderName: 'Gemini Copilot ✦',
+              parts: [{ text: aiText }],
+              rawText: aiText,
+              timestamp: Date.now()
+            };
+
+            // Broadcast AI response to the room for all students to see!
+            await WorkspaceService.sendRoomMessage(activeRoomId, sharedAiMsg);
+            setAttachedFile(null);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            success = true;
+            break;
+          }
+        } catch (err: any) {
+          lastErrorMessage = err.message || 'Errore di connessione.';
+        }
+      }
+
+      setIsAILoading(false);
+      if (!success) {
+        const errorMsgId = 'err_' + Date.now();
+        await WorkspaceService.sendRoomMessage(activeRoomId, {
+          id: errorMsgId,
+          role: 'model',
+          senderId: 'system',
+          senderName: 'Avviso di Sistema',
+          parts: [{ text: `⚠️ **Attenzione:** ${lastErrorMessage || 'Impossibile completare la richiesta AI.'}` }],
+          rawText: lastErrorMessage,
+          timestamp: Date.now()
+        });
+      }
+      return;
     }
 
     const newUserMsg: ChatMessage = {
@@ -1539,6 +1892,10 @@ export default function App() {
   const currentSubMaterials = materials[activeSubject] || [];
   const currentSubChats = chats[activeSubject] || [];
 
+  // Active Shared Room derivation
+  const activeRoom = userRooms.find(r => r.id === activeRoomId) || null;
+  const activeRoomMemberList = activeRoom && activeRoom.members ? Object.values(activeRoom.members) : [];
+
   // Group materials by category
   const groupedMaterials: Record<string, MaterialItem[]> = {};
   currentSubMaterials.forEach(m => {
@@ -1887,123 +2244,320 @@ export default function App() {
 
         {/* Center Column: Workspace Notes & Materials */}
         <div className={`panel ${isNotesMaximized ? 'notes-maximized' : ''} ${mobileTab === 'notes' || mobileTab === 'materials' ? 'mobile-active' : ''}`} id="notes-panel">
-          <div className="notes-header">
-            <div className="notes-header-left">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--text-secondary)' }}>
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-                <polyline points="10 9 9 9 8 9" />
-              </svg>
-              <select
-                id="subject-select"
-                value={activeSubject}
-                onChange={e => handleSelectSubject(e.target.value)}
-              >
-                {subjects.map(sub => (
-                  <option key={sub.id} value={sub.id}>
-                    {sub.name}
-                  </option>
-                ))}
-              </select>
-
+          
+          {/* Top Workspace Mode Switcher (Personal vs Shared Study Rooms) */}
+          <div className="workspace-mode-bar">
+            <div className="workspace-mode-selector">
               <button
                 type="button"
-                className="header-btn"
-                onClick={() => handleDeleteSubject(activeSubject)}
-                title={subjects.length > 1 ? `Elimina la materia "${activeSubject}"` : "Non puoi eliminare l'unica materia presente (creane prima un'altra con '+ Nuova')"}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  color: '#f87171',
-                  borderColor: 'rgba(239, 68, 68, 0.45)',
-                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                  padding: '5px 10px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  marginLeft: '8px',
-                  fontSize: '0.82rem',
-                  fontWeight: 600,
-                  opacity: subjects.length > 1 ? 1 : 0.65
+                className={`workspace-mode-btn ${workspaceMode === 'personal' ? 'active' : ''}`}
+                onClick={() => setWorkspaceMode('personal')}
+              >
+                🔒 Personale
+              </button>
+              <button
+                type="button"
+                className={`workspace-mode-btn ${workspaceMode === 'shared' ? 'active' : ''}`}
+                onClick={() => {
+                  setWorkspaceMode('shared');
+                  if (userRooms.length === 0) {
+                    setIsRoomModalOpen(true);
+                  }
                 }}
               >
-                🗑️ Elimina
+                👥 Stanze di Gruppo
+                {userRooms.length > 0 && (
+                  <span className="mode-badge">{userRooms.length}</span>
+                )}
               </button>
             </div>
-            <div className="notes-header-right">
-              <button className="header-btn" onClick={handleAddNewSubject} title="Crea una nuova materia">
-                + Nuova
-              </button>
-              <button className="header-btn" id="fullscreen-btn" onClick={handleToggleFullscreenNotes}>
-                {isNotesMaximized ? 'Riduci' : 'Massimizza'}
-              </button>
+
+            {workspaceMode === 'shared' && (
+              <div className="shared-actions-bar">
+                <button
+                  type="button"
+                  className="room-btn primary"
+                  onClick={() => {
+                    setRoomModalTab('create');
+                    setIsRoomModalOpen(true);
+                  }}
+                  title="Crea una nuova stanza di studio"
+                >
+                  + Nuova Stanza
+                </button>
+                <button
+                  type="button"
+                  className="room-btn"
+                  onClick={() => {
+                    setRoomModalTab('join');
+                    setIsRoomModalOpen(true);
+                  }}
+                  title="Entra con codice invito (es. ITS-1234)"
+                >
+                  🔑 Entra con Codice
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Header depending on mode */}
+          {workspaceMode === 'personal' ? (
+            <>
+              <div className="notes-header">
+                <div className="notes-header-left">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--text-secondary)' }}>
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                    <polyline points="10 9 9 9 8 9" />
+                  </svg>
+                  <select
+                    id="subject-select"
+                    value={activeSubject}
+                    onChange={e => handleSelectSubject(e.target.value)}
+                  >
+                    {subjects.map(sub => (
+                      <option key={sub.id} value={sub.id}>
+                        {sub.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    type="button"
+                    className="header-btn"
+                    onClick={() => handleDeleteSubject(activeSubject)}
+                    title={subjects.length > 1 ? `Elimina la materia "${activeSubject}"` : "Non puoi eliminare l'unica materia presente (creane prima un'altra con '+ Nuova')"}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      color: '#f87171',
+                      borderColor: 'rgba(239, 68, 68, 0.45)',
+                      backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                      padding: '5px 10px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      marginLeft: '8px',
+                      fontSize: '0.82rem',
+                      fontWeight: 600,
+                      opacity: subjects.length > 1 ? 1 : 0.65
+                    }}
+                  >
+                    🗑️ Elimina
+                  </button>
+                </div>
+                <div className="notes-header-right">
+                  <button className="header-btn" onClick={handleAddNewSubject} title="Crea una nuova materia">
+                    + Nuova
+                  </button>
+                  <button className="header-btn" id="fullscreen-btn" onClick={handleToggleFullscreenNotes}>
+                    {isNotesMaximized ? 'Riduci' : 'Massimizza'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Drive Bar */}
+              <div className="drive-bar">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M22 12H12l-5 9h10l5-9z" /><path d="M6 12L2 5h10l4 7-10 9z" />
+                </svg>
+                <input
+                  type="url"
+                  placeholder="Incolla qui il link della cartella Drive del corso..."
+                  value={driveLink}
+                  onChange={handleDriveLinkChange}
+                />
+                <button className="drive-btn" onClick={handleOpenDrive}>
+                  🔗 Apri Drive
+                </button>
+              </div>
+
+              {/* Segmented Control Tabs */}
+              <div className="tabs-container">
+                <button
+                  className={`tab-btn ${activeTab === 'notes' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('notes')}
+                >
+                  📝 Appunti
+                </button>
+                <button
+                  className={`tab-btn ${activeTab === 'materials' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('materials')}
+                >
+                  📚 Materiali (PDF/Link)
+                </button>
+              </div>
+            </>
+          ) : (
+            /* Shared Room Header */
+            <div className="notes-header shared-room-header">
+              <div className="notes-header-left" style={{ flexWrap: 'wrap', gap: '8px' }}>
+                <span style={{ fontSize: '1.2rem' }}>👥</span>
+                {userRooms.length > 0 ? (
+                  <>
+                    <select
+                      id="room-select"
+                      value={activeRoomId}
+                      onChange={e => setActiveRoomId(e.target.value)}
+                      style={{ maxWidth: '200px' }}
+                    >
+                      {userRooms.map(r => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+
+                    {activeRoom && (
+                      <div
+                        className="room-code-badge"
+                        onClick={() => handleCopyRoomCode(activeRoom.code)}
+                        title="Clicca per copiare il codice invito"
+                      >
+                        <span className="room-code-label">Codice:</span>
+                        <span className="room-code-value">{activeRoom.code}</span>
+                        <span className="room-code-copy-icon">📋</span>
+                      </div>
+                    )}
+
+                    {activeRoomMemberList.length > 0 && (
+                      <div className="room-members-cluster" title={`${activeRoomMemberList.length} partecipanti nella stanza`}>
+                        {activeRoomMemberList.slice(0, 4).map(m => (
+                          <div
+                            key={m.uid}
+                            className="member-avatar-pill"
+                            title={m.displayName || m.email}
+                          >
+                            {m.photoURL ? (
+                              <img src={m.photoURL} alt={m.displayName} />
+                            ) : (
+                              <span>{(m.displayName || 'S').charAt(0).toUpperCase()}</span>
+                            )}
+                          </div>
+                        ))}
+                        <span className="members-count-tag">
+                          {activeRoomMemberList.length} {activeRoomMemberList.length === 1 ? 'membro' : 'membri'}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <span style={{ fontSize: '0.86rem', color: 'var(--text-secondary)' }}>
+                    Nessuna stanza attiva. Creane una o entra con un codice!
+                  </span>
+                )}
+              </div>
+
+              <div className="notes-header-right">
+                {activeRoom && (
+                  <button
+                    className="header-btn"
+                    onClick={handleLeaveRoom}
+                    title="Esci da questa stanza di gruppo"
+                    style={{
+                      color: '#f87171',
+                      borderColor: 'rgba(239, 68, 68, 0.4)',
+                      background: 'rgba(239, 68, 68, 0.1)'
+                    }}
+                  >
+                    🚪 Esci
+                  </button>
+                )}
+                <button className="header-btn" id="fullscreen-btn" onClick={handleToggleFullscreenNotes}>
+                  {isNotesMaximized ? 'Riduci' : 'Massimizza'}
+                </button>
+              </div>
             </div>
-          </div>
-
-          {/* Drive Bar */}
-          <div className="drive-bar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M22 12H12l-5 9h10l5-9z" /><path d="M6 12L2 5h10l4 7-10 9z" />
-            </svg>
-            <input
-              type="url"
-              placeholder="Incolla qui il link della cartella Drive del corso..."
-              value={driveLink}
-              onChange={handleDriveLinkChange}
-            />
-            <button className="drive-btn" onClick={handleOpenDrive}>
-              🔗 Apri Drive
-            </button>
-          </div>
-
-          {/* Segmented Control Tabs */}
-          <div className="tabs-container">
-            <button
-              className={`tab-btn ${activeTab === 'notes' ? 'active' : ''}`}
-              onClick={() => setActiveTab('notes')}
-            >
-              📝 Appunti
-            </button>
-            <button
-              className={`tab-btn ${activeTab === 'materials' ? 'active' : ''}`}
-              onClick={() => setActiveTab('materials')}
-            >
-              📚 Materiali (PDF/Link)
-            </button>
-          </div>
+          )}
 
           {/* Content Area */}
           <div className="content-area">
-            {activeTab === 'notes' ? (
+            {workspaceMode === 'shared' && userRooms.length === 0 ? (
+              <div className="empty-room-placeholder">
+                <div style={{ fontSize: '2.5rem', marginBottom: '10px' }}>👥</div>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 600, color: '#fff' }}>Collaborazione in Tempo Reale</h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', maxWidth: '420px', lineHeight: 1.5, margin: '8px 0 20px 0' }}>
+                  Crea una Stanza di Gruppo per lavorare insieme sui medesimi appunti con i tuoi compagni di classe, condividere file e porre domande all'AI visibili a tutti!
+                </p>
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                  <button
+                    className="dialog-btn primary"
+                    onClick={() => {
+                      setRoomModalTab('create');
+                      setIsRoomModalOpen(true);
+                    }}
+                  >
+                    + Crea Nuova Stanza
+                  </button>
+                  <button
+                    className="dialog-btn"
+                    onClick={() => {
+                      setRoomModalTab('join');
+                      setIsRoomModalOpen(true);
+                    }}
+                  >
+                    🔑 Entra con Codice
+                  </button>
+                </div>
+              </div>
+            ) : activeTab === 'notes' || workspaceMode === 'shared' ? (
               <div id="notes-area-container">
                 {/* VS Code Style Tabs Bar */}
                 <div className="vscode-tabs-bar">
-                  <div style={{ display: 'flex', gap: '4px' }}>
-                    {currentSubPages.map(page => (
-                      <div
-                        key={page.id}
-                        className={`vscode-tab ${page.id === activePageId ? 'active' : ''}`}
-                        onClick={() => setActivePageId(page.id)}
-                        onContextMenu={e => {
-                          e.preventDefault();
-                          handleRenamePage(page.id);
-                        }}
-                        title="Clicca per aprire, clic destro per rinominare"
-                      >
-                        <span>{page.name}</span>
-                        <span
-                          className="close-tab"
-                          onClick={e => handleDeletePage(page.id, e)}
-                          title="Chiudi"
+                  <div style={{ display: 'flex', gap: '4px', overflowX: 'auto' }}>
+                    {workspaceMode === 'shared' ? (
+                      activeRoomPages.map(page => (
+                        <div
+                          key={page.id}
+                          className={`vscode-tab ${page.id === activeRoomPageId ? 'active' : ''}`}
+                          onClick={() => setActiveRoomPageId(page.id)}
+                          onContextMenu={e => {
+                            e.preventDefault();
+                            handleRenameRoomPage(page.id);
+                          }}
+                          title="Clicca per aprire, clic destro per rinominare (condiviso)"
                         >
-                          ✕
-                        </span>
-                      </div>
-                    ))}
+                          <span>{page.name}</span>
+                          <span
+                            className="close-tab"
+                            onClick={e => handleDeleteRoomPage(page.id, e)}
+                            title="Elimina scheda"
+                          >
+                            ✕
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      currentSubPages.map(page => (
+                        <div
+                          key={page.id}
+                          className={`vscode-tab ${page.id === activePageId ? 'active' : ''}`}
+                          onClick={() => setActivePageId(page.id)}
+                          onContextMenu={e => {
+                            e.preventDefault();
+                            handleRenamePage(page.id);
+                          }}
+                          title="Clicca per aprire, clic destro per rinominare"
+                        >
+                          <span>{page.name}</span>
+                          <span
+                            className="close-tab"
+                            onClick={e => handleDeletePage(page.id, e)}
+                            title="Chiudi"
+                          >
+                            ✕
+                          </span>
+                        </div>
+                      ))
+                    )}
                   </div>
-                  <button className="add-tab-btn" onClick={handleAddNewPage} title="Nuova Pagina">
+                  <button
+                    className="add-tab-btn"
+                    onClick={workspaceMode === 'shared' ? handleAddNewRoomPage : handleAddNewPage}
+                    title={workspaceMode === 'shared' ? "Nuova Scheda di Gruppo" : "Nuova Pagina"}
+                  >
                     +
                   </button>
                 </div>
@@ -2167,11 +2721,22 @@ export default function App() {
               >
                 {isChatCollapsed ? '◀' : '▶'}
               </button>
-              <span className="chat-title">Gemini Copilot</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                <span className="chat-title">
+                  {workspaceMode === 'shared' ? '👥 Chat di Gruppo' : 'Gemini Copilot'}
+                </span>
+                {workspaceMode === 'shared' && activeRoom && (
+                  <span className="chat-room-badge" title={`Stanza: ${activeRoom.name}`}>
+                    {activeRoom.name}
+                  </span>
+                )}
+              </div>
               <div className="chat-controls-hide">
-                <button className="expand-btn" onClick={handleClearChatHistory} title="Pulisci cronologia chat">
-                  🧹 Pulisci
-                </button>
+                {workspaceMode === 'personal' && (
+                  <button className="expand-btn" onClick={handleClearChatHistory} title="Pulisci cronologia chat">
+                    🧹 Pulisci
+                  </button>
+                )}
               </div>
             </div>
 
@@ -2179,7 +2744,71 @@ export default function App() {
 
             {/* Chat Messages */}
             <div className="chat-messages" ref={chatMessagesRef}>
-              {currentSubChats.length === 0 ? (
+              {workspaceMode === 'shared' ? (
+                activeRoomMessages.length === 0 ? (
+                  <div className="chat-msg ai">
+                    <div style={{ fontWeight: 600, marginBottom: '4px' }}>
+                      👥 Chat Condivisa: {activeRoom?.name || 'Stanza di Gruppo'}
+                    </div>
+                    <p style={{ margin: 0, fontSize: '0.82rem', opacity: 0.9, lineHeight: 1.5 }}>
+                      Qualsiasi studente nella stanza può porre domande a Gemini: sia la richiesta con il tuo nome che la risposta dell'AI appariranno qui dal vivo per tutti i compagni!
+                    </p>
+                  </div>
+                ) : (
+                  activeRoomMessages.map((msg) => {
+                    const text = msg.parts?.[0]?.text || msg.rawText || '';
+                    const isMe = msg.senderId === currentUser?.uid;
+
+                    if (msg.role === 'model') {
+                      return (
+                        <div key={msg.id} className="chat-msg ai shared-ai-msg">
+                          <div className="shared-msg-header">
+                            <span className="ai-gemini-tag">✦ Gemini Copilot</span>
+                            <span className="shared-msg-time">
+                              {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <div
+                            dangerouslySetInnerHTML={{
+                              __html: marked.parse(text) as string
+                            }}
+                          />
+                          <button
+                            className="msg-action-btn"
+                            title="Copia risposta"
+                            onClick={() => handleCopyAiMessage(text)}
+                          >
+                            📋
+                          </button>
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div key={msg.id} className={`chat-msg user ${isMe ? 'my-msg' : 'other-member-msg'}`}>
+                          <div className="shared-msg-header">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                              {msg.senderPhoto ? (
+                                <img src={msg.senderPhoto} alt="" className="shared-avatar-small" />
+                              ) : (
+                                <span className="shared-avatar-initial">
+                                  {(msg.senderName || 'S').charAt(0).toUpperCase()}
+                                </span>
+                              )}
+                              <span className="shared-sender-name">
+                                {isMe ? 'Tu' : msg.senderName || 'Studente'}
+                              </span>
+                            </div>
+                            <span className="shared-msg-time">
+                              {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <div style={{ marginTop: '3px' }}>{text}</div>
+                        </div>
+                      );
+                    }
+                  })
+                )
+              ) : currentSubChats.length === 0 ? (
                 <div className="chat-msg ai">
                   Chiedi qualcosa, dai istruzioni o premi <b>🔍 Analizza Note</b> per lavorare sugli appunti di{' '}
                   <b>{activeSubject}</b>!
@@ -2439,6 +3068,96 @@ export default function App() {
           <span>Strumenti</span>
         </button>
       </nav>
+
+      {/* MODALE STANZE DI GRUPPO / COLLABORAZIONE */}
+      {isRoomModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-box" style={{ maxWidth: '480px' }}>
+            <div className="modal-header">
+              <span className="modal-title">👥 Stanze di Studio Condivise</span>
+              <button className="modal-close" onClick={() => setIsRoomModalOpen(false)}>
+                ✕
+              </button>
+            </div>
+
+            <div className="tabs-container" style={{ margin: '8px 0 16px 0' }}>
+              <button
+                type="button"
+                className={`tab-btn ${roomModalTab === 'create' ? 'active' : ''}`}
+                onClick={() => setRoomModalTab('create')}
+              >
+                ✨ Crea Nuova Stanza
+              </button>
+              <button
+                type="button"
+                className={`tab-btn ${roomModalTab === 'join' ? 'active' : ''}`}
+                onClick={() => setRoomModalTab('join')}
+              >
+                🔑 Entra con Codice
+              </button>
+            </div>
+
+            {roomModalTab === 'create' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                  Crea uno spazio condiviso con un codice invito univoco a 6 caratteri (es. <code>ITS-4892</code>). I tuoi compagni potranno unirsi all'istante per scrivere insieme e chattare con l'AI.
+                </p>
+                <div className="dialog-field">
+                  <label>Nome della Stanza / Gruppo:</label>
+                  <input
+                    type="text"
+                    placeholder="Es. Progetto Cloud, Esercitazione Java..."
+                    value={newRoomName}
+                    onChange={e => setNewRoomName(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleCreateRoom();
+                    }}
+                    autoFocus
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="dialog-btn primary"
+                  disabled={roomActionLoading || !newRoomName.trim()}
+                  onClick={handleCreateRoom}
+                  style={{ marginTop: '8px', padding: '10px' }}
+                >
+                  {roomActionLoading ? 'Creazione in corso...' : 'Crea Stanza & Genera Codice'}
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                  Inserisci il codice fornito dal tuo compagno di classe per accedere alla stanza e partecipare alla sessione di studio comune:
+                </p>
+                <div className="dialog-field">
+                  <label>Codice Stanza:</label>
+                  <input
+                    type="text"
+                    placeholder="Es. ITS-8492"
+                    value={joinRoomCode}
+                    onChange={e => setJoinRoomCode(e.target.value.toUpperCase())}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleJoinRoom();
+                    }}
+                    style={{ textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}
+                    autoFocus
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="dialog-btn primary"
+                  disabled={roomActionLoading || !joinRoomCode.trim()}
+                  onClick={handleJoinRoom}
+                  style={{ marginTop: '8px', padding: '10px' }}
+                >
+                  {roomActionLoading ? 'Accesso in corso...' : 'Partecipa alla Stanza'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* MODALE GESTIONE API KEYS */}
       {isKeysModalOpen && (

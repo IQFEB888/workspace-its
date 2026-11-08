@@ -145,5 +145,34 @@ service cloud.firestore {
         allow create, update: if isOwner(userId) && isApprovedUser(userId) && isValidId(settingId) && incoming().userId == userId;
       }
     }
+
+    // Shared Collaboration Rooms & Group Study
+    match /shared_rooms/{roomId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && incoming().createdBy == request.auth.uid;
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn() && (existing().createdBy == request.auth.uid || isAdmin());
+
+      // Shared Room Pages
+      match /pages/{pageId} {
+        allow read, write, delete: if isSignedIn();
+      }
+
+      // Shared Room Messages (Real-time Gemini & Student Chat)
+      match /messages/{messageId} {
+        allow read, write, delete: if isSignedIn();
+      }
+
+      // Shared Room Materials
+      match /materials/{materialId} {
+        allow read, write, delete: if isSignedIn();
+      }
+
+      // Presence / Active typing
+      match /presence/{userId} {
+        allow read: if isSignedIn();
+        allow write, delete: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
   }
 }
