@@ -7,6 +7,8 @@ import {
   doc,
   setDoc,
   deleteDoc,
+  updateDoc,
+  deleteField,
   onSnapshot,
   getDocs,
   getDoc,
@@ -814,29 +816,70 @@ export class WorkspaceService {
   }
 
   static async saveRoomMaterial(roomId: string, material: MaterialItem): Promise<void> {
-    const matRef = doc(db, 'shared_rooms', roomId, 'materials', String(material.id));
-    await setDoc(matRef, {
-      ...material,
-      updatedAt: new Date().toISOString()
-    });
+    try {
+      const matIdStr = String(material.id);
+      const matRef = doc(db, 'shared_rooms', roomId, 'materials', matIdStr);
+      const fileDataToSave = material.fileData && material.fileData.length < 500000 ? material.fileData : '';
+      await setDoc(matRef, {
+        id: matIdStr,
+        name: material.name,
+        url: material.url,
+        category: material.category || 'Lezioni',
+        createdAt: material.createdAt || new Date().toISOString(),
+        fileType: material.fileType || 'link',
+        fileSize: material.fileSize || 0,
+        mimeType: material.mimeType || '',
+        fileData: fileDataToSave,
+        hasLocalFile: !!material.hasLocalFile,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `shared_rooms/${roomId}/materials/${material.id}`);
+    }
   }
 
   static async deleteRoomMaterial(roomId: string, materialId: string | number): Promise<void> {
-    const matRef = doc(db, 'shared_rooms', roomId, 'materials', String(materialId));
-    await deleteDoc(matRef);
+    try {
+      const matRef = doc(db, 'shared_rooms', roomId, 'materials', String(materialId));
+      await deleteDoc(matRef);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.DELETE, `shared_rooms/${roomId}/materials/${materialId}`);
+    }
   }
 
   static async leaveSharedRoom(roomId: string, uid: string): Promise<void> {
-    const roomRef = doc(db, 'shared_rooms', roomId);
-    const snap = await getDoc(roomRef);
-    if (!snap.exists()) return;
-    const data = snap.data() as SharedRoom;
-    const updatedMembers = { ...data.members };
-    delete updatedMembers[uid];
-    if (Object.keys(updatedMembers).length === 0) {
-      await deleteDoc(roomRef);
-    } else {
-      await setDoc(roomRef, { members: updatedMembers }, { merge: true });
+    try {
+      const roomRef = doc(db, 'shared_rooms', roomId);
+      await updateDoc(roomRef, {
+        [`members.${uid}`]: deleteField()
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `shared_rooms/${roomId}`);
+    }
+  }
+
+  static async deleteSharedRoom(roomId: string): Promise<void> {
+    try {
+      // 1. Delete all subcollection docs
+      const pagesSnap = await getDocs(collection(db, 'shared_rooms', roomId, 'pages'));
+      for (const d of pagesSnap.docs) {
+        await deleteDoc(d.ref).catch(() => {});
+      }
+
+      const msgsSnap = await getDocs(collection(db, 'shared_rooms', roomId, 'messages'));
+      for (const d of msgsSnap.docs) {
+        await deleteDoc(d.ref).catch(() => {});
+      }
+
+      const matsSnap = await getDocs(collection(db, 'shared_rooms', roomId, 'materials'));
+      for (const d of matsSnap.docs) {
+        await deleteDoc(d.ref).catch(() => {});
+      }
+
+      // 2. Delete the room doc
+      await deleteDoc(doc(db, 'shared_rooms', roomId));
+    } catch (e) {
+      handleFirestoreError(e, OperationType.DELETE, `shared_rooms/${roomId}`);
     }
   }
 }

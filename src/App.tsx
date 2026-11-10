@@ -939,9 +939,38 @@ export default function App() {
       danger: true
     });
     if (confirmed) {
-      await WorkspaceService.leaveSharedRoom(activeRoomId, currentUser.uid);
+      const leavingId = activeRoomId;
+      await WorkspaceService.leaveSharedRoom(leavingId, currentUser.uid);
       showToast('Sei uscito dalla stanza di gruppo.');
-      const remaining = userRooms.filter(r => r.id !== activeRoomId);
+      const remaining = userRooms.filter(r => r.id !== leavingId);
+      setUserRooms(remaining);
+      if (remaining.length > 0) {
+        setActiveRoomId(remaining[0].id);
+      } else {
+        setActiveRoomId('');
+        setWorkspaceMode('personal');
+      }
+    }
+  };
+
+  const handleDeleteRoom = async () => {
+    if (!currentUser || !activeRoomId || !activeRoom) return;
+    if (activeRoom.createdBy !== currentUser.uid && !isAdmin) {
+      showToast('Solo il creatore della stanza può eliminarla.', 'error');
+      return;
+    }
+    const confirmed = await openCustomDialog({
+      title: '🗑️ Elimina Stanza di Gruppo',
+      description: `Sei il creatore di <b>"${activeRoom.name}"</b>.<br/><br/><span style="color: #ef4444; font-size: 0.85rem;">⚠️ Vuoi eliminare definitivamente questa stanza e tutti i suoi appunti, materiali e messaggi per tutti i partecipanti? L'azione non è reversibile.</span>`,
+      confirmText: 'Elimina Definitivamente',
+      danger: true
+    });
+    if (confirmed) {
+      const deletingId = activeRoomId;
+      await WorkspaceService.deleteSharedRoom(deletingId);
+      showToast(`Stanza "${activeRoom.name}" eliminata con successo.`);
+      const remaining = userRooms.filter(r => r.id !== deletingId);
+      setUserRooms(remaining);
       if (remaining.length > 0) {
         setActiveRoomId(remaining[0].id);
       } else {
@@ -1076,7 +1105,7 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  // Materials: Save Resource (File or Link)
+  // Materials: Save Resource (File or Link) - Works for Personal & Shared Room
   const handleSaveMaterial = async () => {
     if (addMaterialTab === 'file') {
       if (!uploadingFile) {
@@ -1085,11 +1114,12 @@ export default function App() {
       }
       const matId = 'mat_' + Date.now();
       const name = customMaterialName.trim() || uploadingFile.name;
+      // CRITICAL FIX: url MUST be a small identifier (like 'local_storage') so it does not exceed Firestore's 2048-char security rule
       const newMaterial: MaterialItem = {
         id: matId,
         name,
-        url: uploadingFile.base64.length < 500000 ? uploadingFile.base64 : 'local_storage',
-        category: (customMaterialCategory || 'Lezioni').trim(),
+        url: 'local_storage',
+        category: (customMaterialCategory || (workspaceMode === 'shared' ? 'Condivisi' : 'Lezioni')).trim(),
         createdAt: new Date().toISOString(),
         fileType: uploadingFile.fileType,
         fileSize: uploadingFile.size,
@@ -1098,9 +1128,23 @@ export default function App() {
         hasLocalFile: true
       };
 
-      // Store in IndexedDB for offline & preview availability
+      // Store complete file in IndexedDB for instant preview & offline availability
       await saveFileToIndexedDB(matId, uploadingFile.base64);
 
+      if (workspaceMode === 'shared') {
+        if (!activeRoomId) {
+          showToast('Nessuna stanza selezionata.', 'error');
+          return;
+        }
+        setActiveRoomMaterials(prev => [...prev, newMaterial]);
+        await WorkspaceService.saveRoomMaterial(activeRoomId, newMaterial);
+        setIsAddMaterialModalOpen(false);
+        setUploadingFile(null);
+        showToast(`Documento "${newMaterial.name}" condiviso con il gruppo!`);
+        return;
+      }
+
+      // Personal workspace save
       const currentSubMaterials = materials[activeSubject] || [];
       const updated = {
         ...materials,
@@ -1114,7 +1158,7 @@ export default function App() {
       }
       setIsAddMaterialModalOpen(false);
       setUploadingFile(null);
-      showToast(`Documento "${newMaterial.name}" salvato!`);
+      showToast(`Documento "${newMaterial.name}" salvato nei tuoi materiali!`);
     } else {
       // Link Tab
       if (!customMaterialName.trim() || !customMaterialUrl.trim()) {
@@ -1133,11 +1177,23 @@ export default function App() {
         id: matId,
         name: customMaterialName.trim(),
         url,
-        category: (customMaterialCategory || 'Lezioni').trim(),
+        category: (customMaterialCategory || (workspaceMode === 'shared' ? 'Condivisi' : 'Lezioni')).trim(),
         createdAt: new Date().toISOString(),
         fileType: isDrive ? 'link' : isPdf ? 'pdf' : 'link',
         hasLocalFile: false
       };
+
+      if (workspaceMode === 'shared') {
+        if (!activeRoomId) {
+          showToast('Nessuna stanza selezionata.', 'error');
+          return;
+        }
+        setActiveRoomMaterials(prev => [...prev, newMaterial]);
+        await WorkspaceService.saveRoomMaterial(activeRoomId, newMaterial);
+        setIsAddMaterialModalOpen(false);
+        showToast(`Risorsa "${newMaterial.name}" condivisa con il gruppo!`);
+        return;
+      }
 
       const currentSubMaterials = materials[activeSubject] || [];
       const updated = {
@@ -1160,25 +1216,30 @@ export default function App() {
     setPreviewMaterial(material);
     let resolvedUrl = material.url;
 
-    if (material.hasLocalFile || material.fileData) {
-      if (material.fileData && material.fileData.startsWith('data:')) {
-        resolvedUrl = material.fileData;
-      } else {
-        const localData = await getFileFromIndexedDB(String(material.id));
-        if (localData) {
-          if (typeof localData === 'string' && localData.startsWith('data:')) {
-            resolvedUrl = localData;
-          } else if (localData instanceof Blob) {
-            resolvedUrl = URL.createObjectURL(localData);
-          }
+    // Check if we have fileData in Firestore
+    if (material.fileData && material.fileData.startsWith('data:')) {
+      resolvedUrl = material.fileData;
+    } else {
+      // Check IndexedDB
+      const localData = await getFileFromIndexedDB(String(material.id));
+      if (localData) {
+        if (typeof localData === 'string' && localData.startsWith('data:')) {
+          resolvedUrl = localData;
+        } else if (localData instanceof Blob) {
+          resolvedUrl = URL.createObjectURL(localData);
         }
       }
-    } else if (material.url.includes('drive.google.com/file/d/')) {
-      const match = material.url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-      if (match && match[1]) {
-        resolvedUrl = `https://drive.google.com/file/d/${match[1]}/preview`;
+    }
+
+    if (!resolvedUrl || resolvedUrl === 'local_storage') {
+      if (material.url.includes('drive.google.com/file/d/')) {
+        const match = material.url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+        if (match && match[1]) {
+          resolvedUrl = `https://drive.google.com/file/d/${match[1]}/preview`;
+        }
       }
     }
+
     setPreviewUrl(resolvedUrl);
     setIsPreviewModalOpen(true);
   };
@@ -1195,7 +1256,7 @@ export default function App() {
   const handleDeleteMaterial = async (materialId: string | number) => {
     const confirmed = await openCustomDialog({
       title: '🗑️ Rimuovi Risorsa',
-      description: 'Sei sicuro di voler rimuovere questo file dalla libreria della materia?',
+      description: 'Sei sicuro di voler rimuovere questo file dalla libreria?',
       confirmText: 'Elimina',
       danger: true
     });
@@ -1205,6 +1266,16 @@ export default function App() {
       if (chatSelectedMaterial && String(chatSelectedMaterial.id) === String(materialId)) {
         setChatSelectedMaterial(null);
       }
+
+      if (workspaceMode === 'shared') {
+        if (activeRoomId) {
+          setActiveRoomMaterials(prev => prev.filter(m => String(m.id) !== String(materialId)));
+          await WorkspaceService.deleteRoomMaterial(activeRoomId, materialId);
+        }
+        showToast('Risorsa rimossa dalla stanza.');
+        return;
+      }
+
       const currentSubMaterials = materials[activeSubject] || [];
       const filtered = currentSubMaterials.filter(m => m.id !== materialId);
       const updated = { ...materials, [activeSubject]: filtered };
@@ -1896,13 +1967,23 @@ export default function App() {
   const activeRoom = userRooms.find(r => r.id === activeRoomId) || null;
   const activeRoomMemberList = activeRoom && activeRoom.members ? Object.values(activeRoom.members) : [];
 
-  // Group materials by category
-  const groupedMaterials: Record<string, MaterialItem[]> = {};
+  // Group materials by category (Personal vs Shared Room)
+  const groupedPersonalMaterials: Record<string, MaterialItem[]> = {};
   currentSubMaterials.forEach(m => {
     const cat = m.category || 'Lezioni';
-    if (!groupedMaterials[cat]) groupedMaterials[cat] = [];
-    groupedMaterials[cat].push(m);
+    if (!groupedPersonalMaterials[cat]) groupedPersonalMaterials[cat] = [];
+    groupedPersonalMaterials[cat].push(m);
   });
+
+  const groupedRoomMaterials: Record<string, MaterialItem[]> = {};
+  activeRoomMaterials.forEach(m => {
+    const cat = m.category || 'Condivisi';
+    if (!groupedRoomMaterials[cat]) groupedRoomMaterials[cat] = [];
+    groupedRoomMaterials[cat].push(m);
+  });
+
+  const activeDisplayMaterials = workspaceMode === 'shared' ? activeRoomMaterials : currentSubMaterials;
+  const activeGroupedMaterials = workspaceMode === 'shared' ? groupedRoomMaterials : groupedPersonalMaterials;
 
   // 1. Loading screen while Firebase Auth initializes
   if (authLoading) {
@@ -2373,22 +2454,6 @@ export default function App() {
                   🔗 Apri Drive
                 </button>
               </div>
-
-              {/* Segmented Control Tabs */}
-              <div className="tabs-container">
-                <button
-                  className={`tab-btn ${activeTab === 'notes' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('notes')}
-                >
-                  📝 Appunti
-                </button>
-                <button
-                  className={`tab-btn ${activeTab === 'materials' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('materials')}
-                >
-                  📚 Materiali (PDF/Link)
-                </button>
-              </div>
             </>
           ) : (
             /* Shared Room Header */
@@ -2465,12 +2530,46 @@ export default function App() {
                     🚪 Esci
                   </button>
                 )}
+                {activeRoom && (activeRoom.createdBy === currentUser?.uid || isAdmin) && (
+                  <button
+                    className="header-btn"
+                    onClick={handleDeleteRoom}
+                    title="Elimina definitivamente questa stanza (solo Creatore/Host)"
+                    style={{
+                      color: '#ef4444',
+                      borderColor: 'rgba(239, 68, 68, 0.6)',
+                      background: 'rgba(239, 68, 68, 0.2)',
+                      fontWeight: 700
+                    }}
+                  >
+                    👑🗑️ Elimina Stanza
+                  </button>
+                )}
                 <button className="header-btn" id="fullscreen-btn" onClick={handleToggleFullscreenNotes}>
                   {isNotesMaximized ? 'Riduci' : 'Massimizza'}
                 </button>
               </div>
             </div>
           )}
+
+          {/* Segmented Control Tabs - Available in both Personal and Shared Room modes */}
+          <div className="tabs-container">
+            <button
+              className={`tab-btn ${activeTab === 'notes' ? 'active' : ''}`}
+              onClick={() => setActiveTab('notes')}
+            >
+              📝 Appunti
+            </button>
+            <button
+              className={`tab-btn ${activeTab === 'materials' ? 'active' : ''}`}
+              onClick={() => setActiveTab('materials')}
+            >
+              📚 Materiali (PDF/Link)
+              {workspaceMode === 'shared' && activeRoomMaterials.length > 0 && (
+                <span className="mode-badge" style={{ marginLeft: '6px' }}>{activeRoomMaterials.length}</span>
+              )}
+            </button>
+          </div>
 
           {/* Content Area */}
           <div className="content-area">
@@ -2502,7 +2601,7 @@ export default function App() {
                   </button>
                 </div>
               </div>
-            ) : activeTab === 'notes' || workspaceMode === 'shared' ? (
+            ) : activeTab === 'notes' ? (
               <div id="notes-area-container">
                 {/* VS Code Style Tabs Bar */}
                 <div className="vscode-tabs-bar">
@@ -2624,18 +2723,24 @@ export default function App() {
             ) : (
               <div id="materials-area">
                 <div className="materials-header-bar">
-                  <span className="materials-header-title">Libreria File & PDF</span>
+                  <span className="materials-header-title">
+                    {workspaceMode === 'shared'
+                      ? `Libreria Condivisa • ${activeRoom?.name || 'Stanza'}`
+                      : `Libreria File & PDF • ${activeSubject}`}
+                  </span>
                   <button className="add-material-btn" onClick={handleOpenAddMaterialModal}>
-                    + Aggiungi File / Link
+                    {workspaceMode === 'shared' ? '+ Condividi File / Link' : '+ Aggiungi File / Link'}
                   </button>
                 </div>
 
-                {Object.keys(groupedMaterials).length === 0 ? (
+                {Object.keys(activeGroupedMaterials).length === 0 ? (
                   <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', padding: '16px 0' }}>
-                    Nessuna risorsa salvata per questa materia. Clicca su "+ Aggiungi File / Link" per caricare dispense, PDF o link.
+                    {workspaceMode === 'shared'
+                      ? 'Nessun file o PDF condiviso in questa stanza. Clicca su "+ Condividi File / Link" per caricare dispense, slide o documenti con il gruppo!'
+                      : 'Nessuna risorsa salvata per questa materia. Clicca su "+ Aggiungi File / Link" per caricare dispense, PDF o link.'}
                   </div>
                 ) : (
-                  Object.entries(groupedMaterials).map(([cat, items]) => (
+                  Object.entries(activeGroupedMaterials).map(([cat, items]) => (
                     <div key={cat} className="material-category">
                       <div className="material-category-title">{cat}</div>
                       <div className="materials-grid">
@@ -2907,12 +3012,12 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              (materials[activeSubject] || []).length > 0 && (
+              activeDisplayMaterials.length > 0 && (
                 <div className="chat-source-select-bar">
                   <select
                     value=""
                     onChange={e => {
-                      const mat = (materials[activeSubject] || []).find(m => String(m.id) === e.target.value);
+                      const mat = activeDisplayMaterials.find(m => String(m.id) === e.target.value);
                       if (mat) {
                         handleSelectMaterialForChat(mat);
                       }
@@ -2922,7 +3027,7 @@ export default function App() {
                     <option value="" disabled>
                       📎 Collega un file/PDF alla chat...
                     </option>
-                    {(materials[activeSubject] || []).map(m => (
+                    {activeDisplayMaterials.map(m => (
                       <option key={m.id} value={String(m.id)}>
                         {m.fileType === 'pdf' ? '📄' : '🔗'} {m.name}
                       </option>
