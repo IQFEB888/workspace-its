@@ -163,3 +163,52 @@ export function computeDriveMaterialsDiff(
     folderId
   };
 }
+
+/**
+ * Uploads a note from personal workspace to Google Drive as a real Google Doc or HTML document
+ */
+export async function uploadNoteToDrive(
+  accessToken: string,
+  noteTitle: string,
+  noteContentHtml: string,
+  subjectName: string
+): Promise<{ id: string; name: string; webViewLink?: string }> {
+  const boundary = '-------314159265358979323846';
+  const delimiter = '\r\n--' + boundary + '\r\n';
+  const close_delim = '\r\n--' + boundary + '--';
+
+  const fileName = `${subjectName} - ${noteTitle}`;
+  const metadata = {
+    name: fileName,
+    mimeType: 'application/vnd.google-apps.document',
+    description: `Appunti personali di ${subjectName} salvati da Workspace ITS il ${new Date().toLocaleDateString('it-IT')}`
+  };
+
+  const multipartRequestBody =
+    delimiter +
+    'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+    JSON.stringify(metadata) +
+    delimiter +
+    'Content-Type: text/html; charset=UTF-8\r\n\r\n' +
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${fileName}</title></head><body><h1>${fileName}</h1><p><i>Materia: ${subjectName} • Data: ${new Date().toLocaleString('it-IT')}</i></p><hr/>${noteContentHtml || '<p>Nessun contenuto</p>'}</body></html>` +
+    close_delim;
+
+  const res = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`
+      },
+      body: multipartRequestBody
+    }
+  );
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error?.message || `Errore salvataggio su Drive (${res.status})`);
+  }
+
+  return await res.json();
+}

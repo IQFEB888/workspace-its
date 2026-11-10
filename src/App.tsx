@@ -21,7 +21,7 @@ import {
 import { WorkspaceService, DEFAULT_SUBJECTS, DEFAULT_PAGES } from './services/workspaceService';
 import { saveFileToIndexedDB, getFileFromIndexedDB, deleteFileFromIndexedDB } from './services/fileStorage';
 import { WeatherModal } from './components/WeatherModal';
-import { DriveSyncModal } from './components/DriveSyncModal';
+import { uploadNoteToDrive } from './services/googleDriveService';
 import {
   FullWeatherData,
   CityLocation,
@@ -431,24 +431,17 @@ export default function App() {
         unsubAdminAppr = WorkspaceService.subscribeToApprovedUsers(setApprovedUsers);
       }
 
-      // Check if cloud has existing pages; if not, check if local has notes and offer migration
+      // Auto-sync local notes to Cloud Firestore in background without annoying popups
       const hasCloudData = await WorkspaceService.checkHasCloudData(user.uid);
       const localPages = WorkspaceService.getLocalPages();
       const hasLocalData = Object.keys(localPages).some(sub => (localPages[sub] || []).length > 0);
 
       if (!hasCloudData && hasLocalData) {
-        // Offer migration
-        const shouldMigrate = await openCustomDialog({
-          title: '☁️ Sincronizza Dati Locali',
-          description:
-            'Abbiamo rilevato i tuoi appunti e corsi locali. Vuoi caricarli sul tuo database Cloud Firestore personale per averli disponibili su tutti i dispositivi?',
-          confirmText: 'Sincronizza su Cloud',
-          cancelText: 'Più tardi'
-        });
-        if (shouldMigrate) {
-          const result = await WorkspaceService.migrateLocalDataToCloud(user.uid);
-          showToast(`Sincronizzati ${result.subjectsCount} corsi e ${result.pagesCount} pagine su Firestore!`);
-        }
+        WorkspaceService.migrateLocalDataToCloud(user.uid).then(result => {
+          if (result.pagesCount > 0) {
+            console.log(`Appunti auto-sincronizzati su Cloud Firestore (${result.pagesCount} pagine).`);
+          }
+        }).catch(err => console.warn('Auto cloud sync error:', err));
       }
 
       // Subscribe to Realtime Firestore updates
@@ -569,7 +562,7 @@ export default function App() {
     // Update drive link for active subject
     const currentSub = subjects.find(s => s.id === activeSubject);
     setDriveLink(currentSub?.driveLink || '');
-  }, [workspaceMode, activeSubject, activePageId, pages, subjects, activeRoomPages, activeRoomPageId]);
+  }, [workspaceMode, activeSubject, activePageId, pages, subjects, activeRoomPages, activeRoomPageId, authLoading, activeTab]);
 
   // Scroll chat messages to bottom on new message or tab opening
   useEffect(() => {
@@ -1447,11 +1440,13 @@ export default function App() {
     }
   };
 
-  // Request Google Drive OAuth token for protected/institutional folders
+  const [isSavingToDrive, setIsSavingToDrive] = useState(false);
+
+  // Request Google Drive OAuth token for saving notes to user's Drive
   const handleAuthorizeGoogleDrive = async (): Promise<string | null> => {
     try {
       const provider = new GoogleAuthProvider();
-      provider.addScope('https://www.googleapis.com/auth/drive.readonly');
+      provider.addScope('https://www.googleapis.com/auth/drive.file');
       provider.setCustomParameters({
         prompt: 'consent'
       });
@@ -1477,6 +1472,94 @@ export default function App() {
       }
     }
     return null;
+  };
+
+  // Save current note to personal Google Drive
+  const handleSaveNoteToGoogleDrive = async () => {
+    const currentSubPages = pages[activeSubject] || [];
+    const currentPage = currentSubPages.find(p => p.id === activePageId) || currentSubPages[0];
+    const noteTitle = workspaceMode === 'shared'
+      ? (activeRoomPages.find(p => p.id === activeRoomPageId)?.name || 'Appunti Condivisi')
+      : (currentPage?.name || 'Appunti');
+    const content = notesAreaRef.current?.innerHTML || (currentPage?.content || '');
+
+    if (!content.trim() || content === '<p><br></p>') {
+      showToast('L\'appunto è vuoto: scrivi del testo prima di salvarlo su Drive.', 'error');
+      return;
+    }
+
+    setIsSavingToDrive(true);
+    try {
+      let token = googleOAuthAccessToken;
+      if (!token) {
+        showToast('Connetti il tuo account Google personale per salvare l\'appunto...', 'info');
+        token = await handleAuthorizeGoogleDrive();
+      }
+
+      if (!token) {
+        showToast('Salvataggio su Drive annullato.', 'error');
+        return;
+      }
+
+      const subjectName = workspaceMode === 'shared' ? (activeRoom?.name || 'Stanza ITS') : activeSubject;
+      const res = await uploadNoteToDrive(token, noteTitle, content, subjectName);
+
+      if (res.webViewLink) {
+        showToast(`✨ Salvato su Google Drive: "${res.name}"!`);
+      } else {
+        showToast(`✨ Salvato con successo nel tuo Google Drive!`);
+      }
+    } catch (err: any) {
+      console.error('Save to Drive error:', err);
+      if (err.message && (err.message.includes('401') || err.message.includes('auth'))) {
+        setGoogleOAuthAccessToken(null);
+        showToast('Sessione Google scaduta. Riconnetti il tuo account e riprova.', 'error');
+      } else {
+        showToast(`Errore salvataggio su Drive: ${err.message}`, 'error');
+      }
+    } finally {
+      setIsSavingToDrive(false);
+    }
+  };
+
+  // Download note as HTML file
+  const handleDownloadNoteFile = () => {
+    const currentSubPages = pages[activeSubject] || [];
+    const currentPage = currentSubPages.find(p => p.id === activePageId) || currentSubPages[0];
+    const noteTitle = workspaceMode === 'shared'
+      ? (activeRoomPages.find(p => p.id === activeRoomPageId)?.name || 'Appunti_Condivisi')
+      : (currentPage?.name || 'Appunti');
+    const content = notesAreaRef.current?.innerHTML || (currentPage?.content || '');
+
+    const subjectName = workspaceMode === 'shared' ? (activeRoom?.name || 'Stanza_ITS') : activeSubject;
+    const cleanFileName = `${subjectName}_${noteTitle.replace(/[^a-zA-Z0-9_-]/g, '_')}.html`;
+
+    const fullHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${noteTitle} - ${subjectName}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #1e293b; background: #ffffff; }
+    h1 { color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+    .meta { font-size: 0.85rem; color: #64748b; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <h1>${noteTitle}</h1>
+  <div class="meta">Materia: <b>${subjectName}</b> • Esportato il ${new Date().toLocaleString('it-IT')} da Workspace ITS</div>
+  <div>${content}</div>
+</body>
+</html>`;
+
+    const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = cleanFileName;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Appunto "${noteTitle}" scaricato come file!`);
   };
 
   // Helper to determine icon, color, and badge for materials
@@ -2943,19 +3026,73 @@ export default function App() {
                     <option value="H3">Titolo 3 (H3)</option>
                     <option value="P">Paragrafo (Normale)</option>
                   </select>
-                  <button
-                    onClick={() => handleFormatText('removeFormat')}
-                    title="Rimuovi formattazione"
-                    style={{ marginLeft: 'auto' }}
-                  >
-                    ✕
-                  </button>
+                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <button
+                      type="button"
+                      onClick={handleSaveNoteToGoogleDrive}
+                      disabled={isSavingToDrive}
+                      title="Salva questa nota come documento nel tuo Google Drive personale"
+                      style={{
+                        background: 'rgba(56, 189, 248, 0.15)',
+                        border: '1px solid rgba(56, 189, 248, 0.35)',
+                        color: '#38bdf8',
+                        borderRadius: '6px',
+                        padding: '4px 9px',
+                        fontSize: '0.74rem',
+                        fontWeight: 600,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        cursor: isSavingToDrive ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      {isSavingToDrive ? '⏳...' : '☁️ Salva su Drive'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadNoteFile}
+                      title="Scarica questo appunto sul tuo computer (.html)"
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
+                        color: '#cbd5e1',
+                        borderRadius: '6px',
+                        padding: '4px 8px',
+                        fontSize: '0.74rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      💾 Scarica
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleFormatText('removeFormat')}
+                      title="Rimuovi formattazione"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
 
                 {/* Contenteditable Notes Area */}
                 <div
                   id="notes-area"
-                  ref={notesAreaRef}
+                  ref={el => {
+                    (notesAreaRef as any).current = el;
+                    if (el) {
+                      const currentSubPages = pages[activeSubject] || [];
+                      const currentPage = currentSubPages.find(p => p.id === activePageId) || currentSubPages[0];
+                      const targetContent = workspaceMode === 'shared'
+                        ? (activeRoomPages.find(p => p.id === activeRoomPageId) || activeRoomPages[0])?.content || ''
+                        : (currentPage?.content || '');
+                      if (el.innerHTML !== targetContent) {
+                        el.innerHTML = targetContent;
+                      }
+                    }
+                  }}
                   contentEditable
                   suppressContentEditableWarning
                   data-placeholder="Inizia a digitare o formatta usando i tasti sopra..."
@@ -2972,14 +3109,6 @@ export default function App() {
                       : `Libreria File & PDF • ${activeSubject}`}
                   </span>
                   <div className="materials-header-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      className="sync-drive-btn"
-                      onClick={() => setIsDriveSyncModalOpen(true)}
-                      title="Sincronizza in automatico i nuovi PDF dalla cartella Google Drive del docente"
-                    >
-                      🔄 Sincronizza Drive
-                    </button>
                     <button className="add-material-btn" onClick={handleOpenAddMaterialModal}>
                       {workspaceMode === 'shared' ? '+ Condividi File / Link' : '+ Aggiungi File / Link'}
                     </button>
@@ -4076,34 +4205,6 @@ export default function App() {
         }}
         onDetectLocation={handleDetectLocation}
         isLoading={isWeatherLoading}
-      />
-
-      {/* MODALE SINCRONIZZAZIONE CARTELLA GOOGLE DRIVE */}
-      <DriveSyncModal
-        isOpen={isDriveSyncModalOpen}
-        onClose={() => setIsDriveSyncModalOpen(false)}
-        apiKey={googleDriveApiKey}
-        onSaveApiKey={handleSaveGoogleDriveApiKey}
-        oAuthToken={googleOAuthAccessToken}
-        onAuthorizeGoogleDrive={handleAuthorizeGoogleDrive}
-        currentFolderUrl={
-          workspaceMode === 'personal'
-            ? subjects.find(s => s.id === activeSubject)?.driveLink || ''
-            : ''
-        }
-        existingMaterials={
-          workspaceMode === 'personal'
-            ? materials[activeSubject] || []
-            : activeRoomMaterials
-        }
-        workspaceMode={workspaceMode}
-        targetTitle={
-          workspaceMode === 'personal'
-            ? activeSubject
-            : activeRoom?.name || 'Stanza di Gruppo'
-        }
-        onImportMaterials={handleImportDriveMaterials}
-        showToast={showToast}
       />
 
       {/* MODALE AGGIUNGI MATERIALE (FILE / LINK) */}
