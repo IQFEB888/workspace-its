@@ -12,13 +12,20 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Super Admin: beccalli.fabio4@gmail.com or Fabio Beccalli's school/institutional account
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Super Admin check: safely inspect email claims
     function isAdmin() {
       return isSignedIn() &&
-             (request.auth.token.email == "beccalli.fabio4@gmail.com" ||
-              request.auth.token.email.matches('.*beccalli.*') ||
-              request.auth.token.email.matches('.*Beccalli.*') ||
-              (request.auth.token.name != null && request.auth.token.name.matches('.*Beccalli.*')));
+             (('email' in request.auth.token &&
+               (request.auth.token.email == "beccalli.fabio4@gmail.com" ||
+                request.auth.token.email.matches('.*beccalli.*') ||
+                request.auth.token.email.matches('.*Beccalli.*'))) ||
+              ('name' in request.auth.token &&
+               request.auth.token.name != null &&
+               request.auth.token.name.matches('.*Beccalli.*')));
     }
 
     // Checks whether the user is approved by the admin
@@ -26,10 +33,6 @@ service cloud.firestore {
       return isAdmin() ||
              (exists(/databases/$(database)/documents/approved_users/$(userId)) &&
               get(/databases/$(database)/documents/approved_users/$(userId)).data.status == 'active');
-    }
-
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
     }
 
     function isValidId(id) {
@@ -45,7 +48,7 @@ service cloud.firestore {
     }
 
     function isValidUserProfile(data) {
-      return data.userId is string && data.userId == request.auth.uid &&
+      return data.userId is string && (data.userId == request.auth.uid || isAdmin()) &&
              (!('email' in data) || (data.email is string && data.email.size() <= 256)) &&
              (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 128)) &&
              (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1024)) &&
@@ -54,19 +57,22 @@ service cloud.firestore {
              (!('isImmersion' in data) || (data.isImmersion is bool)) &&
              (!('isSidebarCollapsed' in data) || (data.isSidebarCollapsed is bool)) &&
              (!('isChatCollapsed' in data) || (data.isChatCollapsed is bool)) &&
-             (!('selectedModel' in data) || (data.selectedModel is string && data.selectedModel.size() <= 64));
+             (!('selectedModel' in data) || (data.selectedModel is string && data.selectedModel.size() <= 64)) &&
+             (!('fontFamily' in data) || (data.fontFamily is string && data.fontFamily.size() <= 64)) &&
+             (!('fontSize' in data) || (data.fontSize is number)) &&
+             (!('showWeatherWidget' in data) || (data.showWeatherWidget is bool));
     }
 
     function isValidSubject(data, userId) {
       return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
-             data.userId is string && data.userId == userId &&
+             data.userId is string && (data.userId == userId || data.userId == request.auth.uid) &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              (!('driveLink' in data) || (data.driveLink is string && data.driveLink.size() <= 1024));
     }
 
     function isValidPage(data, userId) {
       return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
-             data.userId is string && data.userId == userId &&
+             data.userId is string && (data.userId == userId || data.userId == request.auth.uid) &&
              data.subjectId is string && data.subjectId.size() > 0 && data.subjectId.size() <= 128 &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
              (!('content' in data) || (data.content is string && data.content.size() <= 1000000));
@@ -74,7 +80,7 @@ service cloud.firestore {
 
     function isValidMaterial(data, userId) {
       return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
-             data.userId is string && data.userId == userId &&
+             data.userId is string && (data.userId == userId || data.userId == request.auth.uid) &&
              data.subjectId is string && data.subjectId.size() > 0 && data.subjectId.size() <= 128 &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
              data.url is string && data.url.size() > 0 && data.url.size() <= 2048 &&
@@ -87,7 +93,7 @@ service cloud.firestore {
     }
 
     function isValidChatSession(data, userId) {
-      return data.userId is string && data.userId == userId &&
+      return data.userId is string && (data.userId == userId || data.userId == request.auth.uid) &&
              data.subjectId is string && data.subjectId.size() > 0 && data.subjectId.size() <= 128 &&
              (!('messages' in data) || (data.messages is list && data.messages.size() <= 100));
     }
@@ -97,58 +103,54 @@ service cloud.firestore {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
       allow create: if isOwner(userId) && incoming().userId == userId;
-      allow update: if isAdmin() || (isOwner(userId) && incoming().userId == userId && incoming().status == 'pending');
+      allow update: if isAdmin() || (isOwner(userId) && incoming().userId == userId);
       allow delete: if isAdmin();
     }
 
-    // Approved Users: Admin manages approvals; User can check their own approval status
+    // Approved Users: Admin manages approvals; User can check/set their own approval status
     match /approved_users/{userId} {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
-      allow write: if isAdmin() || (isOwner(userId) && (
-        request.auth.token.email == "beccalli.fabio4@gmail.com" ||
-        request.auth.token.email.matches('.*beccalli.*') ||
-        request.auth.token.email.matches('.*Beccalli.*')
-      ));
+      allow write: if isAdmin() || isOwner(userId);
     }
 
-    // Root User Profile (only accessible if user is approved or is Super Admin)
+    // Root User Profile & Personal Workspace
     match /users/{userId} {
-      allow read, delete: if isOwner(userId) && isApprovedUser(userId);
-      allow create: if isOwner(userId) && isApprovedUser(userId) && isValidUserProfile(incoming());
-      allow update: if isOwner(userId) && isApprovedUser(userId) && isValidUserProfile(incoming()) && incoming().userId == existing().userId;
+      allow read, delete: if isOwner(userId) || isAdmin();
+      allow create: if (isOwner(userId) || isAdmin()) && isValidUserProfile(incoming());
+      allow update: if (isOwner(userId) || isAdmin()) && isValidUserProfile(incoming()) && incoming().userId == existing().userId;
 
       // Subjects Subcollection
       match /subjects/{subjectId} {
-        allow read, delete: if isOwner(userId) && isApprovedUser(userId);
-        allow create: if isOwner(userId) && isApprovedUser(userId) && isValidId(subjectId) && isValidSubject(incoming(), userId);
-        allow update: if isOwner(userId) && isApprovedUser(userId) && isValidId(subjectId) && isValidSubject(incoming(), userId) && incoming().userId == existing().userId;
+        allow read, delete: if isOwner(userId) || isAdmin();
+        allow create: if (isOwner(userId) || isAdmin()) && isValidId(subjectId) && isValidSubject(incoming(), userId);
+        allow update: if (isOwner(userId) || isAdmin()) && isValidId(subjectId) && isValidSubject(incoming(), userId) && incoming().userId == existing().userId;
       }
 
       // Pages Subcollection
       match /pages/{pageId} {
-        allow read, delete: if isOwner(userId) && isApprovedUser(userId);
-        allow create: if isOwner(userId) && isApprovedUser(userId) && isValidId(pageId) && isValidPage(incoming(), userId);
-        allow update: if isOwner(userId) && isApprovedUser(userId) && isValidId(pageId) && isValidPage(incoming(), userId) && incoming().userId == existing().userId;
+        allow read, delete: if isOwner(userId) || isAdmin();
+        allow create: if (isOwner(userId) || isAdmin()) && isValidId(pageId) && isValidPage(incoming(), userId);
+        allow update: if (isOwner(userId) || isAdmin()) && isValidId(pageId) && isValidPage(incoming(), userId) && incoming().userId == existing().userId;
       }
 
       // Materials Subcollection
       match /materials/{materialId} {
-        allow read, delete: if isOwner(userId) && isApprovedUser(userId);
-        allow create: if isOwner(userId) && isApprovedUser(userId) && isValidId(materialId) && isValidMaterial(incoming(), userId);
-        allow update: if isOwner(userId) && isApprovedUser(userId) && isValidId(materialId) && isValidMaterial(incoming(), userId) && incoming().userId == existing().userId;
+        allow read, delete: if isOwner(userId) || isAdmin();
+        allow create: if (isOwner(userId) || isAdmin()) && isValidId(materialId) && isValidMaterial(incoming(), userId);
+        allow update: if (isOwner(userId) || isAdmin()) && isValidId(materialId) && isValidMaterial(incoming(), userId) && incoming().userId == existing().userId;
       }
 
       // Chat Sessions Subcollection
       match /chats/{subjectId} {
-        allow read, delete: if isOwner(userId) && isApprovedUser(userId);
-        allow create, update: if isOwner(userId) && isApprovedUser(userId) && isValidId(subjectId) && isValidChatSession(incoming(), userId);
+        allow read, delete: if isOwner(userId) || isAdmin();
+        allow create, update: if (isOwner(userId) || isAdmin()) && isValidId(subjectId) && isValidChatSession(incoming(), userId);
       }
 
       // Settings Subcollection (e.g. Gemini Keys)
       match /settings/{settingId} {
-        allow read, delete: if isOwner(userId) && isApprovedUser(userId);
-        allow create, update: if isOwner(userId) && isApprovedUser(userId) && isValidId(settingId) && incoming().userId == userId;
+        allow read, delete: if isOwner(userId) || isAdmin();
+        allow create, update: if (isOwner(userId) || isAdmin()) && isValidId(settingId);
       }
     }
 

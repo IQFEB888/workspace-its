@@ -47,6 +47,9 @@ export interface UserPreferences {
   activeSubject: string;
   activePageId: string;
   selectedModel: string;
+  fontFamily?: string;
+  fontSize?: number;
+  showWeatherWidget?: boolean;
 }
 
 export interface AttachedFile {

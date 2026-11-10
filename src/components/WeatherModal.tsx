@@ -29,13 +29,15 @@ export const WeatherModal: React.FC<WeatherModalProps> = ({
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1100 }}>
       <div
-        className="weather-modal-dialog"
+        className="weather-modal-dialog weather-scrollbar"
         onClick={e => e.stopPropagation()}
         style={{
           maxWidth: '680px',
           width: '95%',
           maxHeight: '90vh',
           overflowY: 'auto',
+          scrollbarWidth: 'thin',
+          scrollbarColor: 'rgba(255, 255, 255, 0.22) transparent',
           background: 'rgba(15, 17, 23, 0.95)',
           backdropFilter: 'blur(24px)',
           border: '1px solid rgba(255, 255, 255, 0.12)',
@@ -224,12 +226,14 @@ export const WeatherModal: React.FC<WeatherModalProps> = ({
                   🕒 Previsioni Orarie (Prossime Ore)
                 </div>
                 <div
+                  className="weather-hourly-scroll weather-scrollbar"
                   style={{
                     display: 'flex',
                     gap: '8px',
                     overflowX: 'auto',
                     paddingBottom: '8px',
-                    scrollbarWidth: 'thin'
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: 'rgba(255, 255, 255, 0.22) transparent'
                   }}
                 >
                   {weatherData.hourly.map((h, idx) => (

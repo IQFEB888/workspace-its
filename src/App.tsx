@@ -21,6 +21,7 @@ import {
 import { WorkspaceService, DEFAULT_SUBJECTS, DEFAULT_PAGES } from './services/workspaceService';
 import { saveFileToIndexedDB, getFileFromIndexedDB, deleteFileFromIndexedDB } from './services/fileStorage';
 import { WeatherModal } from './components/WeatherModal';
+import { SettingsModal, BACKGROUND_THEMES } from './components/SettingsModal';
 import { uploadNoteToDrive } from './services/googleDriveService';
 import {
   FullWeatherData,
@@ -59,11 +60,7 @@ function base64ToBlobUrl(base64Data: string, mimeType = 'application/pdf'): stri
   }
 }
 
-const BACKGROUNDS = [
-  'url("https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=2564")',
-  'url("https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=2564")',
-  'url("https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564")'
-];
+const BACKGROUNDS = BACKGROUND_THEMES.map(t => t.cssUrl);
 
 interface ToastItem {
   id: number;
@@ -86,6 +83,10 @@ export default function App() {
   const [isChatCollapsed, setIsChatCollapsed] = useState<boolean>(false);
   const [isNotesMaximized, setIsNotesMaximized] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'notes' | 'materials'>('notes');
+  const [fontFamily, setFontFamily] = useState<string>('plus-jakarta');
+  const [fontSize, setFontSize] = useState<number>(15);
+  const [showWeatherWidget, setShowWeatherWidget] = useState<boolean>(true);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
 
   // Time & Date
   const [currentTime, setCurrentTime] = useState<string>('00:00');
@@ -341,6 +342,11 @@ export default function App() {
     setIsSidebarCollapsed(localPref.isSidebarCollapsed);
     setIsChatCollapsed(localPref.isChatCollapsed);
     setSelectedModel(localPref.selectedModel);
+    if (localPref.fontFamily) setFontFamily(localPref.fontFamily);
+    if (localPref.fontSize) setFontSize(localPref.fontSize);
+    if (typeof localPref.showWeatherWidget === 'boolean') {
+      setShowWeatherWidget(localPref.showWeatherWidget);
+    }
 
     const localSubs = WorkspaceService.getLocalSubjects();
     setSubjects(localSubs);
@@ -452,6 +458,9 @@ export default function App() {
           if (pref.isSidebarCollapsed !== undefined) setIsSidebarCollapsed(pref.isSidebarCollapsed);
           if (pref.isChatCollapsed !== undefined) setIsChatCollapsed(pref.isChatCollapsed);
           if (pref.selectedModel !== undefined) setSelectedModel(pref.selectedModel);
+          if (pref.fontFamily !== undefined) setFontFamily(pref.fontFamily);
+          if (pref.fontSize !== undefined) setFontSize(pref.fontSize);
+          if (pref.showWeatherWidget !== undefined) setShowWeatherWidget(pref.showWeatherWidget);
           if (pref.activeSubject !== undefined) {
             setActiveSubject(prev => pref.activeSubject || prev);
           }
@@ -620,6 +629,83 @@ export default function App() {
       await signOut(auth);
       showToast('Disconnesso con successo.');
     }
+  };
+
+  // Background selection from settings
+  const handleSelectBgIndex = (nextIdx: number) => {
+    setBgIndex(nextIdx);
+    WorkspaceService.saveLocalPreferences({ bgIndex: nextIdx });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { bgIndex: nextIdx });
+    }
+  };
+
+  // Font customization handlers
+  const handleSelectFontFamily = (font: string) => {
+    setFontFamily(font);
+    WorkspaceService.saveLocalPreferences({ fontFamily: font });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { fontFamily: font });
+    }
+  };
+
+  const handleSelectFontSize = (size: number) => {
+    setFontSize(size);
+    WorkspaceService.saveLocalPreferences({ fontSize: size });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { fontSize: size });
+    }
+  };
+
+  // Weather widget visibility toggle
+  const handleToggleWeatherWidget = (show: boolean) => {
+    setShowWeatherWidget(show);
+    WorkspaceService.saveLocalPreferences({ showWeatherWidget: show });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { showWeatherWidget: show });
+    }
+  };
+
+  // Model & API Key handlers for SettingsModal
+  const handleSelectModel = (model: string) => {
+    setSelectedModel(model);
+    WorkspaceService.saveLocalPreferences({ selectedModel: model });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { selectedModel: model });
+    }
+  };
+
+  const handleAddApiKey = async (key: string) => {
+    const updated = [...apiKeys, key];
+    setApiKeys(updated);
+    const newIdx = updated.length - 1;
+    setSelectedKeyIndex(newIdx);
+    WorkspaceService.saveLocalApiKeys(updated, newIdx);
+    if (currentUser) {
+      await WorkspaceService.saveApiKeysToCloud(currentUser.uid, updated, newIdx);
+    }
+    showToast('Chiave API aggiunta con successo!');
+  };
+
+  const handleRemoveApiKey = async (idx: number) => {
+    const updated = apiKeys.filter((_, i) => i !== idx);
+    const newIdx = Math.max(0, Math.min(selectedKeyIndex, updated.length - 1));
+    setApiKeys(updated);
+    setSelectedKeyIndex(newIdx);
+    WorkspaceService.saveLocalApiKeys(updated, newIdx);
+    if (currentUser) {
+      await WorkspaceService.saveApiKeysToCloud(currentUser.uid, updated, newIdx);
+    }
+    showToast('Chiave API rimossa.');
+  };
+
+  const handleSelectApiKeyIndex = async (idx: number) => {
+    setSelectedKeyIndex(idx);
+    WorkspaceService.saveLocalApiKeys(apiKeys, idx);
+    if (currentUser) {
+      await WorkspaceService.saveApiKeysToCloud(currentUser.uid, apiKeys, idx);
+    }
+    showToast(`Chiave #${idx + 1} attiva.`);
   };
 
   // Background toggle
@@ -2508,8 +2594,13 @@ export default function App() {
             <button className="top-btn" id="immersion-btn" onClick={handleToggleImmersion} title="Attiva modalità concentrazione">
               Focus Mode
             </button>
-            <button className="top-btn" onClick={handleChangeBackground} title="Cambia sfondo">
-              Sfondo
+            <button
+              className="top-btn"
+              onClick={() => setIsSettingsModalOpen(true)}
+              title="Personalizza sfondi, font, meteo e chiavi API"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+            >
+              ⚙️ Impostazioni
             </button>
             <button
               className="top-btn"
@@ -2562,30 +2653,32 @@ export default function App() {
           </div>
 
           {/* Interactive Weather Widget in Tools Column */}
-          <div
-            className="weather-card-widget"
-            onClick={() => setIsWeatherModalOpen(true)}
-            title="Clicca per aprire le previsioni meteo dettagliate e orarie"
-          >
-            <div className="weather-widget-top">
-              <div className="weather-widget-city">
-                <span className="weather-icon-big">{weatherData?.current.icon || '🌤️'}</span>
-                <div>
-                  <div className="weather-city-name">{selectedWeatherCity.name}</div>
-                  <div className="weather-city-sub">{selectedWeatherCity.region}</div>
+          {showWeatherWidget && (
+            <div
+              className="weather-card-widget"
+              onClick={() => setIsWeatherModalOpen(true)}
+              title="Clicca per aprire le previsioni meteo dettagliate e orarie"
+            >
+              <div className="weather-widget-top">
+                <div className="weather-widget-city">
+                  <span className="weather-icon-big">{weatherData?.current.icon || '🌤️'}</span>
+                  <div>
+                    <div className="weather-city-name">{selectedWeatherCity.name}</div>
+                    <div className="weather-city-sub">{selectedWeatherCity.region}</div>
+                  </div>
+                </div>
+                <div className="weather-widget-temp">
+                  {weatherData ? `${weatherData.current.temp}°C` : '...'}
                 </div>
               </div>
-              <div className="weather-widget-temp">
-                {weatherData ? `${weatherData.current.temp}°C` : '...'}
+              <div className="weather-widget-bottom">
+                <span className="weather-widget-desc">
+                  {weatherData?.current.conditionText || 'Caricamento meteo...'}
+                </span>
+                <span className="weather-widget-link">Dettagli ↗</span>
               </div>
             </div>
-            <div className="weather-widget-bottom">
-              <span className="weather-widget-desc">
-                {weatherData?.current.conditionText || 'Caricamento meteo...'}
-              </span>
-              <span className="weather-widget-link">Dettagli ↗</span>
-            </div>
-          </div>
+          )}
 
           {/* Search Box */}
           <div className="search-container">
@@ -3080,6 +3173,8 @@ export default function App() {
                 {/* Contenteditable Notes Area */}
                 <div
                   id="notes-area"
+                  className={`font-${fontFamily}`}
+                  style={{ fontSize: `${fontSize}px` }}
                   ref={el => {
                     (notesAreaRef as any).current = el;
                     if (el) {
@@ -4400,6 +4495,47 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* MODALE IMPOSTAZIONI DETTAGLIATE */}
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        bgIndex={bgIndex}
+        onSelectBackground={handleSelectBgIndex}
+        fontFamily={fontFamily}
+        onSelectFontFamily={handleSelectFontFamily}
+        fontSize={fontSize}
+        onSelectFontSize={handleSelectFontSize}
+        showWeatherWidget={showWeatherWidget}
+        onToggleShowWeatherWidget={handleToggleWeatherWidget}
+        isImmersion={isImmersion}
+        onToggleImmersion={handleToggleImmersion}
+        isSidebarCollapsed={isSidebarCollapsed}
+        onToggleSidebarCollapsed={handleToggleSidebar}
+        selectedWeatherCity={selectedWeatherCity}
+        onSelectCity={setSelectedWeatherCity}
+        presetCities={PRESET_CITIES}
+        apiKeys={apiKeys}
+        selectedKeyIndex={selectedKeyIndex}
+        onSaveApiKeys={(keys, idx) => {
+          setApiKeys(keys);
+          setSelectedKeyIndex(idx);
+          WorkspaceService.saveLocalApiKeys(keys, idx);
+          if (currentUser) {
+            WorkspaceService.saveApiKeysToCloud(currentUser.uid, keys, idx);
+          }
+        }}
+        selectedModel={selectedModel}
+        onSelectModel={handleSelectModel}
+        currentUser={currentUser}
+        cloudSyncActive={cloudSyncActive}
+        onExportBackup={handleExportBackup}
+        onOpenRestoreBackup={() => {
+          setIsSettingsModalOpen(false);
+          setIsBackupModalOpen(true);
+        }}
+        showToast={showToast}
+      />
 
       {/* TOAST CONTAINER */}
       <div className="toast-container" id="toast-container">

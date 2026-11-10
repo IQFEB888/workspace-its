@@ -51,6 +51,19 @@
           "description": "Selected Gemini model identifier",
           "maxLength": 64
         },
+        "fontFamily": {
+          "type": "string",
+          "description": "Selected font family for notes editor",
+          "maxLength": 64
+        },
+        "fontSize": {
+          "type": "number",
+          "description": "Selected font size in px"
+        },
+        "showWeatherWidget": {
+          "type": "boolean",
+          "description": "Whether weather widget is visible in sidebar"
+        },
         "updatedAt": {
           "type": "string",
           "description": "ISO timestamp of last update"

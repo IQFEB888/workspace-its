@@ -1,6 +1,6 @@
 {
-  "summary":  "Funzionalità di sincronizzazione automatica Google Drive completata con successo: servizio googleDriveService, modale DriveSyncModal, salvataggio API Key e sincronizzazione sia per lo spazio personale che per le stanze condivise.",
-  "updatedAt":  "2026-11-10T09:40:38.136220Z",
+  "summary":  "Piano di implementazione dettagliato per:\n1. Perfezionamento pulsanti 'Salva su Drive' e 'Scarica' nell'editor appunti.\n2. Riprogettazione delle schede materiali (più ampie, minmax 340px, nomi estesi su 2 righe, pulsanti compatti).\n3. Correzione grafica del widget meteo (scrollbars scure sottili, fix layout collassato della barra laterale).\n4. Nuovo pannello Impostazioni avanzato con gestione sfondi (rimosso dalla topbar), font editor, dimensione testo, visibilità widget e chiavi API.",
+  "updatedAt":  "2026-11-10T11:19:37.912512787Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

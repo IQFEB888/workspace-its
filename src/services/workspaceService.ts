@@ -70,7 +70,10 @@ export class WorkspaceService {
       isChatCollapsed: localStorage.getItem('workspace_chat_collapsed') === 'true',
       activeSubject: localStorage.getItem('workspace_active_subject') || 'Database',
       activePageId: localStorage.getItem('workspace_active_page') || '',
-      selectedModel: localStorage.getItem('workspace_gemini_model') || 'gemini-3.8-flash'
+      selectedModel: localStorage.getItem('workspace_gemini_model') || 'gemini-3.8-flash',
+      fontFamily: localStorage.getItem('workspace_font_family') || 'plus-jakarta',
+      fontSize: parseInt(localStorage.getItem('workspace_font_size') || '15', 10),
+      showWeatherWidget: localStorage.getItem('workspace_show_weather') !== 'false'
     };
   }
 
@@ -139,6 +142,9 @@ export class WorkspaceService {
     if (pref.activeSubject !== undefined) localStorage.setItem('workspace_active_subject', pref.activeSubject);
     if (pref.activePageId !== undefined) localStorage.setItem('workspace_active_page', pref.activePageId);
     if (pref.selectedModel !== undefined) localStorage.setItem('workspace_gemini_model', pref.selectedModel);
+    if (pref.fontFamily !== undefined) localStorage.setItem('workspace_font_family', pref.fontFamily);
+    if (pref.fontSize !== undefined) localStorage.setItem('workspace_font_size', String(pref.fontSize));
+    if (pref.showWeatherWidget !== undefined) localStorage.setItem('workspace_show_weather', String(pref.showWeatherWidget));
   }
 
   static saveLocalPages(pages: Record<string, PageItem[]>): void {
