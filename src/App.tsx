@@ -148,6 +148,7 @@ export default function App() {
   const [googleDriveApiKey, setGoogleDriveApiKey] = useState<string>(() => {
     return localStorage.getItem('workspace_gdrive_api_key') || '';
   });
+  const [googleOAuthAccessToken, setGoogleOAuthAccessToken] = useState<string | null>(null);
   const [isDriveSyncModalOpen, setIsDriveSyncModalOpen] = useState<boolean>(false);
 
   // AI Chat Active Document Source
@@ -1440,6 +1441,30 @@ export default function App() {
         await WorkspaceService.saveMaterialToCloud(currentUser.uid, activeSubject, item);
       }
     }
+  };
+
+  // Request Google Drive OAuth token for protected/institutional folders
+  const handleAuthorizeGoogleDrive = async (): Promise<string | null> => {
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.addScope('https://www.googleapis.com/auth/drive.readonly');
+      provider.setCustomParameters({
+        prompt: 'consent'
+      });
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      const token = credential?.accessToken || null;
+      if (token) {
+        setGoogleOAuthAccessToken(token);
+        return token;
+      }
+    } catch (err: any) {
+      if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+        console.error('Drive OAuth error:', err);
+        showToast(`Errore autorizzazione Google: ${err.message || 'Riprova'}`, 'error');
+      }
+    }
+    return null;
   };
 
   // Helper to determine icon, color, and badge for materials
@@ -4017,6 +4042,8 @@ export default function App() {
         onClose={() => setIsDriveSyncModalOpen(false)}
         apiKey={googleDriveApiKey}
         onSaveApiKey={handleSaveGoogleDriveApiKey}
+        oAuthToken={googleOAuthAccessToken}
+        onAuthorizeGoogleDrive={handleAuthorizeGoogleDrive}
         currentFolderUrl={
           workspaceMode === 'personal'
             ? subjects.find(s => s.id === activeSubject)?.driveLink || ''

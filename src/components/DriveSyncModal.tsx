@@ -13,6 +13,8 @@ interface DriveSyncModalProps {
   onClose: () => void;
   apiKey: string;
   onSaveApiKey: (key: string) => void;
+  oAuthToken: string | null;
+  onAuthorizeGoogleDrive: () => Promise<string | null>;
   currentFolderUrl: string;
   existingMaterials: MaterialItem[];
   workspaceMode: 'personal' | 'shared';
@@ -26,6 +28,8 @@ export const DriveSyncModal: React.FC<DriveSyncModalProps> = ({
   onClose,
   apiKey,
   onSaveApiKey,
+  oAuthToken,
+  onAuthorizeGoogleDrive,
   currentFolderUrl,
   existingMaterials,
   workspaceMode,
@@ -36,6 +40,7 @@ export const DriveSyncModal: React.FC<DriveSyncModalProps> = ({
   const [keyInput, setKeyInput] = useState(apiKey || '');
   const [folderUrl, setFolderUrl] = useState(currentFolderUrl || '');
   const [showKey, setShowKey] = useState(false);
+  const [isAuthorizing, setIsAuthorizing] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
@@ -67,17 +72,33 @@ export const DriveSyncModal: React.FC<DriveSyncModalProps> = ({
     showToast('Google Drive API Key salvata!');
   };
 
-  const handleScanFolder = async () => {
+  const handleConnectGoogle = async () => {
+    setIsAuthorizing(true);
+    setErrorMessage(null);
+    try {
+      const token = await onAuthorizeGoogleDrive();
+      if (token) {
+        showToast('Account Google connesso per le cartelle protette!', 'info');
+        // If folderUrl is already filled, automatically scan!
+        if (folderUrl.trim()) {
+          runScan(token);
+        }
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Errore durante la connessione con Google.');
+    } finally {
+      setIsAuthorizing(false);
+    }
+  };
+
+  const runScan = async (activeToken?: string | null) => {
     setErrorMessage(null);
     setSyncResult(null);
 
+    const tokenToUse = activeToken !== undefined ? activeToken : oAuthToken;
     const trimmedKey = keyInput.trim();
-    if (!trimmedKey) {
-      setErrorMessage('Inserisci prima la tua Google Drive API Key.');
-      return;
-    }
-
     const trimmedFolderUrl = folderUrl.trim();
+
     if (!trimmedFolderUrl) {
       setErrorMessage('Inserisci il link della cartella Google Drive da sincronizzare.');
       return;
@@ -91,19 +112,28 @@ export const DriveSyncModal: React.FC<DriveSyncModalProps> = ({
       return;
     }
 
-    // Auto-save key if changed
-    if (trimmedKey !== apiKey) {
+    if (!tokenToUse && !trimmedKey) {
+      setErrorMessage(
+        'Per cartelle protette dal docente, clicca sul pulsante "Connetti Account Google" qui sotto.'
+      );
+      return;
+    }
+
+    if (trimmedKey && trimmedKey !== apiKey) {
       onSaveApiKey(trimmedKey);
     }
 
     setIsScanning(true);
     try {
-      const files = await fetchDriveFolderFiles(folderId, trimmedKey);
+      const files = await fetchDriveFolderFiles(folderId, {
+        apiKey: trimmedKey || undefined,
+        accessToken: tokenToUse || undefined
+      });
       setScannedFiles(files);
 
       if (files.length === 0) {
         setErrorMessage(
-          'Nessun file trovato in questa cartella. Assicurati che non sia vuota e che la condivisione sia impostata su "Chiunque abbia il link può visualizzare".'
+          'Nessun file trovato in questa cartella. Assicurati che non sia vuota e che il tuo account Google abbia i permessi di visualizzazione.'
         );
       } else {
         const diff = computeDriveMaterialsDiff(
@@ -126,10 +156,9 @@ export const DriveSyncModal: React.FC<DriveSyncModalProps> = ({
 
     setIsImporting(true);
     try {
-      // Re-map with selected category
       const materialsToImport = syncResult.newMaterials.map(m => ({
         ...m,
-        category: selectedCategory.trim() || 'Lezioni'
+        category: selectedCategory.trim() || (workspaceMode === 'shared' ? 'Condivisi' : 'Lezioni')
       }));
 
       await onImportMaterials(materialsToImport);
@@ -150,7 +179,7 @@ export const DriveSyncModal: React.FC<DriveSyncModalProps> = ({
         className="modal-box"
         onClick={e => e.stopPropagation()}
         style={{
-          maxWidth: '620px',
+          maxWidth: '640px',
           width: '95%',
           maxHeight: '90vh',
           overflowY: 'auto',
@@ -191,77 +220,48 @@ export const DriveSyncModal: React.FC<DriveSyncModalProps> = ({
           </button>
         </div>
 
-        {/* Section 1: Google Drive API Key */}
-        <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '12px', padding: '14px', marginBottom: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-            <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#cbd5e1' }}>
-              🔑 Google Drive API Key (Ufficiale)
-            </label>
-            <a
-              href="https://console.cloud.google.com/apis/credentials"
-              target="_blank"
-              rel="noreferrer"
-              style={{ fontSize: '0.72rem', color: '#818cf8', textDecoration: 'none' }}
-            >
-              Crea o visualizza su Google Cloud ↗
-            </a>
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <div style={{ position: 'relative', flex: 1 }}>
-              <input
-                type={showKey ? 'text' : 'password'}
-                placeholder="Incolla la tua chiave AIzaSy..."
-                value={keyInput}
-                onChange={e => setKeyInput(e.target.value)}
-                style={{
-                  width: '100%',
-                  background: 'rgba(0, 0, 0, 0.3)',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                  borderRadius: '8px',
-                  color: '#f8fafc',
-                  padding: '8px 36px 8px 10px',
-                  fontSize: '0.85rem'
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => setShowKey(!showKey)}
-                title={showKey ? 'Nascondi' : 'Mostra'}
-                style={{
-                  position: 'absolute',
-                  right: '8px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#94a3b8',
-                  cursor: 'pointer',
-                  fontSize: '0.9rem'
-                }}
-              >
-                {showKey ? '👁️‍🗨️' : '👁️'}
-              </button>
+        {/* Section: Authentication Mode (OAuth vs API Key) */}
+        <div
+          style={{
+            background: oAuthToken ? 'rgba(16, 185, 129, 0.1)' : 'rgba(56, 189, 248, 0.08)',
+            border: oAuthToken ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(56, 189, 248, 0.25)',
+            borderRadius: '12px',
+            padding: '14px',
+            marginBottom: '16px'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: oAuthToken ? '#34d399' : '#e0f2fe' }}>
+                {oAuthToken ? '✅ Account Google Connesso' : '🔐 Accesso per Cartelle Protette del Docente'}
+              </div>
+              <div style={{ fontSize: '0.74rem', color: '#94a3b8', marginTop: '2px' }}>
+                {oAuthToken
+                  ? 'Il tuo account Google è autorizzato: puoi leggere cartelle protette e istituzionali a cui hai accesso.'
+                  : 'Se la cartella richiede il login (non pubblica), connetti il tuo account Google per leggerla senza errori 403.'}
+              </div>
             </div>
             <button
               type="button"
-              onClick={handleSaveKeyOnly}
+              onClick={handleConnectGoogle}
+              disabled={isAuthorizing}
               style={{
-                background: 'rgba(99, 102, 241, 0.2)',
-                border: '1px solid rgba(99, 102, 241, 0.4)',
-                color: '#a5b4fc',
+                background: oAuthToken ? 'rgba(16, 185, 129, 0.2)' : '#0284c7',
+                border: oAuthToken ? '1px solid rgba(16, 185, 129, 0.4)' : 'none',
+                color: '#ffffff',
                 borderRadius: '8px',
-                padding: '8px 14px',
-                fontSize: '0.8rem',
+                padding: '7px 14px',
+                fontSize: '0.78rem',
                 fontWeight: 600,
-                cursor: 'pointer',
+                cursor: isAuthorizing ? 'not-allowed' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
                 whiteSpace: 'nowrap'
               }}
             >
-              Salva Chiave
+              {isAuthorizing ? '⏳ Connessione...' : oAuthToken ? '🔄 Riconnetti Account' : '🔐 Connetti Account Google'}
             </button>
-          </div>
-          <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '6px' }}>
-            Basta la chiave standard di Google Cloud con <b>Google Drive API</b> abilitata. Viene salvata nel tuo profilo sicuro.
           </div>
         </div>
 
@@ -286,7 +286,7 @@ export const DriveSyncModal: React.FC<DriveSyncModalProps> = ({
               marginBottom: '8px'
             }}
           />
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ fontSize: '0.78rem', color: '#cbd5e1' }}>Categoria da assegnare:</span>
               <input
@@ -307,14 +307,14 @@ export const DriveSyncModal: React.FC<DriveSyncModalProps> = ({
             </div>
             <button
               type="button"
-              onClick={handleScanFolder}
+              onClick={() => runScan()}
               disabled={isScanning || !folderUrl.trim()}
               style={{
                 background: '#6366f1',
                 border: 'none',
                 color: '#fff',
                 borderRadius: '8px',
-                padding: '8px 16px',
+                padding: '8px 18px',
                 fontSize: '0.82rem',
                 fontWeight: 600,
                 cursor: isScanning ? 'not-allowed' : 'pointer',
@@ -328,6 +328,66 @@ export const DriveSyncModal: React.FC<DriveSyncModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Section 3 (Collapsible): Optional Google Drive API Key */}
+        <details style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: '10px', padding: '10px 12px', marginBottom: '16px' }}>
+          <summary style={{ fontSize: '0.76rem', color: '#94a3b8', cursor: 'pointer', fontWeight: 500 }}>
+            Opzioni avanzate: Chiave API Google Cloud (opzionale per cartelle pubbliche)
+          </summary>
+          <div style={{ marginTop: '10px' }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <input
+                  type={showKey ? 'text' : 'password'}
+                  placeholder="Chiave AIzaSy..."
+                  value={keyInput}
+                  onChange={e => setKeyInput(e.target.value)}
+                  style={{
+                    width: '100%',
+                    background: 'rgba(0, 0, 0, 0.3)',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                    borderRadius: '8px',
+                    color: '#f8fafc',
+                    padding: '8px 36px 8px 10px',
+                    fontSize: '0.82rem'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey(!showKey)}
+                  style={{
+                    position: 'absolute',
+                    right: '8px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#94a3b8',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {showKey ? '👁️‍🗨️' : '👁️'}
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveKeyOnly}
+                style={{
+                  background: 'rgba(99, 102, 241, 0.2)',
+                  border: '1px solid rgba(99, 102, 241, 0.4)',
+                  color: '#a5b4fc',
+                  borderRadius: '8px',
+                  padding: '6px 12px',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Salva
+              </button>
+            </div>
+          </div>
+        </details>
 
         {/* Error message */}
         {errorMessage && (
@@ -343,7 +403,27 @@ export const DriveSyncModal: React.FC<DriveSyncModalProps> = ({
               marginBottom: '16px'
             }}
           >
-            ⚠️ {errorMessage}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+              <div>⚠️ {errorMessage}</div>
+              {!oAuthToken && (
+                <button
+                  type="button"
+                  onClick={handleConnectGoogle}
+                  style={{
+                    background: '#e11d48',
+                    border: 'none',
+                    color: '#fff',
+                    borderRadius: '6px',
+                    padding: '6px 12px',
+                    fontSize: '0.74rem',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  🔐 Connetti Google Ora
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -358,15 +438,15 @@ export const DriveSyncModal: React.FC<DriveSyncModalProps> = ({
               marginBottom: '18px'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
               <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#f8fafc' }}>
                 Risultato Scansione Drive
               </div>
               <div style={{ display: 'flex', gap: '8px', fontSize: '0.75rem' }}>
                 <span style={{ color: '#94a3b8' }}>File trovati: <b>{syncResult.totalFound}</b></span>
-                <span style={{ color: '#38bdf8' }}>Già in libreria: <b>{syncResult.alreadyExistingCount}</b></span>
+                <span style={{ color: '#38bdf8' }}>Già presenti: <b>{syncResult.alreadyExistingCount}</b></span>
                 <span style={{ color: '#34d399', fontWeight: 700 }}>
-                  Nuovi da importare: <b>{syncResult.newMaterials.length}</b>
+                  Nuovi: <b>{syncResult.newMaterials.length}</b>
                 </span>
               </div>
             </div>
@@ -385,7 +465,7 @@ export const DriveSyncModal: React.FC<DriveSyncModalProps> = ({
             >
               {syncResult.newMaterials.length === 0 ? (
                 <div style={{ color: '#94a3b8', fontSize: '0.82rem', textAlign: 'center', padding: '16px 0' }}>
-                  🎉 La tua libreria è già aggiornata! Non ci sono nuovi file PDF o documenti da importare da questa cartella.
+                  🎉 La tua libreria è già aggiornata! Non ci sono nuovi file o dispense da importare.
                 </div>
               ) : (
                 syncResult.newMaterials.map(m => (

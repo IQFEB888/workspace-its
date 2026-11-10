@@ -40,35 +40,58 @@ export function extractDriveFolderId(url: string): string | null {
   return null;
 }
 
+export interface DriveAuthOptions {
+  apiKey?: string;
+  accessToken?: string;
+}
+
 /**
  * Fetches files from a Google Drive folder using Google Drive API v3
+ * Supports both OAuth Bearer Access Token (for private/institutional folders) and API Key (for public folders)
  */
 export async function fetchDriveFolderFiles(
   folderId: string,
-  apiKey: string
+  authOptions: DriveAuthOptions | string
 ): Promise<GoogleDriveFile[]> {
-  if (!apiKey || !apiKey.trim()) {
-    throw new Error('Chiave API Google Drive mancante. Inserisci la tua chiave API di Google Cloud.');
+  const options: DriveAuthOptions =
+    typeof authOptions === 'string' ? { apiKey: authOptions } : authOptions;
+
+  const { apiKey, accessToken } = options;
+
+  if (!apiKey && !accessToken) {
+    throw new Error('Autenticazione mancante. Inserisci la tua API Key oppure clicca su "Autorizza con il tuo Account Google".');
   }
 
   const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
   const fields = encodeURIComponent('files(id,name,mimeType,size,createdTime,webViewLink,webContentLink)');
-  const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=${fields}&orderBy=name&pageSize=100&key=${apiKey.trim()}`;
+  
+  let url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=${fields}&orderBy=name&pageSize=100`;
+  const headers: Record<string, string> = {};
 
-  const response = await fetch(url);
+  if (accessToken && accessToken.trim()) {
+    headers['Authorization'] = `Bearer ${accessToken.trim()}`;
+  } else if (apiKey && apiKey.trim()) {
+    url += `&key=${apiKey.trim()}`;
+  }
+
+  const response = await fetch(url, { headers });
   const data = await response.json();
 
   if (!response.ok) {
     if (data.error) {
       const errMessage = data.error.message || 'Errore durante la chiamata a Google Drive API.';
       if (errMessage.toLowerCase().includes('api key not valid') || errMessage.toLowerCase().includes('keyinvalid')) {
-        throw new Error('La chiave Google Drive API inserita non è valida. Verifica di averla copiata correttamente da Google Cloud Console.');
+        throw new Error('La chiave Google Drive API inserita non è valida. Usa l\'accesso con account Google autorizzato.');
       }
       if (errMessage.toLowerCase().includes('not found') || response.status === 404) {
         throw new Error('Cartella Google Drive non trovata. Controlla il link della cartella.');
       }
       if (response.status === 403) {
-        throw new Error('Accesso negato (403): assicurati che la cartella sia condivisa con "Chiunque abbia il link può visualizzare" e che l\'API Google Drive sia abilitata su Google Cloud.');
+        if (!accessToken) {
+          throw new Error('Accesso negato (403): La cartella è protetta dal docente e richiede autenticazione. Clicca su "🔐 Connetti Account Google" per accedere con la tua email autorizzata.');
+        } else {
+          throw new Error('Accesso negato (403): Il tuo account Google non ha accesso a questa cartella. Verifica che il docente l\'abbia condivisa con la tua email.');
+        }
       }
       throw new Error(`Errore Google Drive: ${errMessage}`);
     }
