@@ -61,22 +61,106 @@ body::before {
   pointer-events: none;
 }
 
-/* Top Floating Pill Controls */
-.top-controls {
-  position: fixed;
-  top: 1.1rem;
-  right: 1.5rem;
-  z-index: 100;
+/* Main Viewport & Top Navigation Bar */
+.app-viewport {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.app-topbar {
+  width: 100%;
+  height: 48px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.25rem;
+  background: rgba(12, 13, 18, 0.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--panel-border);
+  z-index: 90;
+  flex-shrink: 0;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  font-size: 0.84rem;
+  letter-spacing: 1.2px;
+  color: #f8fafc;
+}
+
+.brand-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6366f1;
+  box-shadow: 0 0 10px #818cf8;
+}
+
+.topbar-weather-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.76rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.topbar-weather-btn:hover {
+  background: rgba(99, 102, 241, 0.16);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: #c7d2fe;
+  transform: translateY(-1px);
+}
+
+.topbar-weather-btn .weather-temp {
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.topbar-weather-btn .weather-cond {
+  color: #94a3b8;
+  font-size: 0.72rem;
+}
+
+.topbar-weather-btn .weather-arrow {
+  color: #818cf8;
+  font-size: 0.65rem;
+}
+
+.topbar-right {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(14, 14, 18, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  padding: 4px 6px;
-  border-radius: 999px;
-  border: 1px solid var(--panel-border);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* Fallback floating pill if used in auth views */
+.top-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .top-btn {
@@ -259,10 +343,13 @@ body.full-immersion .top-controls {
   grid-template-columns: var(--left-w) 1fr var(--right-w);
   gap: 1.25rem;
   width: 100%;
-  max-width: 1680px;
-  height: calc(100vh - 3rem); 
-  max-height: calc(100vh - 3rem);
+  max-width: 1720px;
+  margin: 0 auto;
+  padding: 0.85rem 1.25rem;
+  height: calc(100vh - 48px); 
+  max-height: calc(100vh - 48px);
   transition: grid-template-columns 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
 }
 
 .dashboard-container.sidebar-collapsed {
@@ -791,18 +878,34 @@ body.full-immersion .top-controls {
   transform: translateY(-2px);
   box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.5);
 }
+.material-card {
+  background: rgba(15, 17, 23, 0.7);
+  border: 1px solid var(--panel-border);
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.material-card:hover {
+  border-color: rgba(99, 102, 241, 0.4);
+  background: rgba(255, 255, 255, 0.04);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px -6px rgba(0, 0, 0, 0.4);
+}
 .material-info {
   display: flex;
   align-items: center;
   gap: 12px;
-  overflow: hidden;
+  min-width: 0;
   flex: 1;
-  margin-right: 10px;
 }
 .material-icon-box {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -810,49 +913,218 @@ body.full-immersion .top-controls {
   flex-shrink: 0;
   background: rgba(255, 255, 255, 0.05);
 }
-.material-text { display: flex; flex-direction: column; overflow: hidden; gap: 2px; }
+.material-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 3px;
+}
 .material-name {
-  font-size: 0.85rem;
-  color: var(--text-primary);
-  white-space: nowrap;
+  font-size: 0.94rem;
+  color: #f8fafc;
+  font-weight: 600;
+  line-height: 1.35;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-weight: 600;
 }
-.material-sub { font-size: 0.72rem; color: var(--text-secondary); }
-.material-actions { display: flex; gap: 6px; }
-.material-dl-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--panel-border);
-  color: var(--text-primary);
-  text-decoration: none;
-  padding: 6px 11px;
-  border-radius: 6px;
-  font-size: 0.74rem;
+.material-sub {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.material-type-pill {
+  background: rgba(255, 255, 255, 0.07);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #cbd5e1;
+}
+.material-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.material-action-btn {
+  font-size: 0.70rem;
   font-weight: 500;
-  transition: all 0.2s;
+  padding: 4px 7px;
+  border-radius: 6px;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
+  gap: 3px;
+  height: 26px;
+  line-height: 1;
+  transition: all 0.18s;
+  text-decoration: none;
+  white-space: nowrap;
 }
-.material-dl-btn:hover {
+.material-preview-btn {
+  background: rgba(99, 102, 241, 0.14);
+  border: 1px solid rgba(99, 102, 241, 0.32);
+  color: #a5b4fc;
+}
+.material-preview-btn:hover {
   background: var(--accent-primary);
   border-color: var(--accent-primary);
   color: #fff;
 }
+.material-ai-btn {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  color: #7dd3fc;
+}
+.material-ai-btn:hover {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #fff;
+}
+.material-dl-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+}
+.material-dl-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
 .material-del-btn {
   background: transparent;
-  color: var(--text-secondary);
+  color: #64748b;
   border: 1px solid transparent;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.75rem;
-  transition: all 0.2s;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
 }
 .material-del-btn:hover {
-  color: var(--danger);
+  color: #f43f5e;
   background: rgba(244, 63, 94, 0.12);
-  border-color: rgba(244, 63, 94, 0.3);
+  border-color: rgba(244, 63, 94, 0.25);
+}
+
+/* Weather Widget in Sidebar Tools */
+.weather-card-widget {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(56, 189, 248, 0.08));
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.weather-card-widget:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(56, 189, 248, 0.14));
+  border-color: rgba(99, 102, 241, 0.45);
+  transform: translateY(-1px);
+}
+.weather-widget-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.weather-widget-city {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.weather-icon-big {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+.weather-city-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+.weather-city-sub {
+  font-size: 0.68rem;
+  color: #818cf8;
+}
+.weather-widget-temp {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+.weather-widget-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 5px;
+}
+.weather-widget-link {
+  color: #818cf8;
+  font-weight: 500;
+}
+
+/* Google Drive Preview Alert */
+.preview-drive-alert {
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.8rem;
+  color: #fef08a;
+}
+.preview-drive-direct-btn {
+  background: #eab308;
+  color: #000;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 8px;
+  text-decoration: none;
+  font-size: 0.76rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+}
+.preview-drive-direct-btn:hover {
+  background: #facc15;
+  transform: translateY(-1px);
+}
+
+.immersion-exit-pill {
+  position: fixed;
+  top: 1rem;
+  right: 1.5rem;
+  z-index: 1000;
+  background: rgba(15, 17, 23, 0.85);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #e2e8f0;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+.immersion-exit-pill:hover {
+  background: rgba(99, 102, 241, 0.4);
+  color: #ffffff;
 }
 
 /* Right Column: AI Copilot Panel */
@@ -990,9 +1262,8 @@ body .dashboard-container.chat-collapsed .chat-controls-hide,
 body .dashboard-container.chat-collapsed .chat-messages,
 body .dashboard-container.chat-collapsed .file-upload-preview-bar,
 body .dashboard-container.chat-collapsed .chat-input-row { display: none !important; }
-body .dashboard-container.chat-collapsed .chat-header-bar { border-bottom: none; justify-content: center; width: 100%; margin-bottom: 0; padding-bottom: 0; margin-top: 3.5rem; }
-
-body .dashboard-container.chat-collapsed #notes-panel .notes-header { padding-right: 220px; }
+body .dashboard-container.chat-collapsed .chat-header-bar { border-bottom: none; justify-content: center; width: 100%; margin: 0; padding: 0; }
+body .dashboard-container.chat-collapsed #notes-panel .notes-header { padding-right: 0; }
 
 .chat-vertical-title {
   display: none;

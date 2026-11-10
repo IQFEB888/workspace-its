@@ -20,6 +20,43 @@ import {
 } from './types';
 import { WorkspaceService, DEFAULT_SUBJECTS, DEFAULT_PAGES } from './services/workspaceService';
 import { saveFileToIndexedDB, getFileFromIndexedDB, deleteFileFromIndexedDB } from './services/fileStorage';
+import { WeatherModal } from './components/WeatherModal';
+import {
+  FullWeatherData,
+  CityLocation,
+  PRESET_CITIES,
+  fetchFullWeather
+} from './services/weatherService';
+
+// Helper to extract Google Drive file ID from various URL formats
+function extractGoogleDriveId(url: string): string | null {
+  if (!url) return null;
+  const fileDMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/);
+  if (fileDMatch && fileDMatch[1]) return fileDMatch[1];
+  const dMatch = url.match(/\/d\/([a-zA-Z0-9_-]{20,})/);
+  if (dMatch && dMatch[1]) return dMatch[1];
+  const idMatch = url.match(/[?&]id=([a-zA-Z0-9_-]{20,})/);
+  if (idMatch && idMatch[1]) return idMatch[1];
+  return null;
+}
+
+// Helper to convert base64 data to blob URL for iframe/object PDF viewing
+function base64ToBlobUrl(base64Data: string, mimeType = 'application/pdf'): string {
+  try {
+    const parts = base64Data.split(';base64,');
+    const contentType = parts.length > 1 ? parts[0].replace('data:', '') : mimeType;
+    const raw = window.atob(parts.length > 1 ? parts[1] : parts[0]);
+    const rawLength = raw.length;
+    const uInt8Array = new Uint8Array(rawLength);
+    for (let i = 0; i < rawLength; ++i) {
+      uInt8Array[i] = raw.charCodeAt(i);
+    }
+    const blob = new Blob([uInt8Array], { type: contentType || 'application/pdf' });
+    return URL.createObjectURL(blob);
+  } catch (e) {
+    return base64Data;
+  }
+}
 
 const BACKGROUNDS = [
   'url("https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=2564")',
@@ -97,7 +134,14 @@ export default function App() {
   // Material Preview & PDF Inspection
   const [previewMaterial, setPreviewMaterial] = useState<MaterialItem | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>('');
+  const [previewDriveId, setPreviewDriveId] = useState<string | null>(null);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState<boolean>(false);
+
+  // Weather State
+  const [selectedWeatherCity, setSelectedWeatherCity] = useState<CityLocation>(PRESET_CITIES[0]);
+  const [weatherData, setWeatherData] = useState<FullWeatherData | null>(null);
+  const [isWeatherModalOpen, setIsWeatherModalOpen] = useState<boolean>(false);
+  const [isWeatherLoading, setIsWeatherLoading] = useState<boolean>(false);
 
   // AI Chat Active Document Source
   const [chatSelectedMaterial, setChatSelectedMaterial] = useState<MaterialItem | null>(null);
@@ -230,6 +274,56 @@ export default function App() {
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Weather Loader Effect
+  useEffect(() => {
+    let isMounted = true;
+    const loadWeather = async () => {
+      setIsWeatherLoading(true);
+      try {
+        const data = await fetchFullWeather(selectedWeatherCity);
+        if (isMounted && data) {
+          setWeatherData(data);
+        }
+      } catch (err) {
+        console.warn('Weather fetch error:', err);
+      } finally {
+        if (isMounted) setIsWeatherLoading(false);
+      }
+    };
+    loadWeather();
+    const interval = setInterval(loadWeather, 15 * 60 * 1000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [selectedWeatherCity]);
+
+  const handleDetectLocation = () => {
+    if (!navigator.geolocation) {
+      showToast('Geolocalizzazione non supportata dal tuo browser.', 'error');
+      return;
+    }
+    setIsWeatherLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const lat = Number(pos.coords.latitude.toFixed(2));
+        const lon = Number(pos.coords.longitude.toFixed(2));
+        const customCity: CityLocation = {
+          name: 'Mia Posizione',
+          lat,
+          lon,
+          region: 'GPS'
+        };
+        setSelectedWeatherCity(customCity);
+        showToast('📍 Posizione GPS rilevata!');
+      },
+      () => {
+        setIsWeatherLoading(false);
+        showToast('Impossibile ottenere la posizione GPS. Verifica i permessi del browser.', 'error');
+      }
+    );
+  };
 
   // Initialize from LocalStorage first (Fast offline-first render)
   useEffect(() => {
@@ -1166,11 +1260,11 @@ export default function App() {
         return;
       }
       let url = customMaterialUrl.trim();
-      const driveMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-      if (driveMatch && driveMatch[1]) {
-        url = `https://drive.google.com/uc?export=download&id=${driveMatch[1]}`;
+      const driveId = extractGoogleDriveId(url);
+      if (driveId) {
+        url = `https://drive.google.com/file/d/${driveId}/view?usp=sharing`;
       }
-      const isDrive = url.includes('drive.google.com');
+      const isDrive = Boolean(driveId) || url.includes('drive.google.com');
       const isPdf = url.toLowerCase().includes('.pdf');
       const matId = 'mat_' + Date.now();
       const newMaterial: MaterialItem = {
@@ -1215,28 +1309,42 @@ export default function App() {
   const handleOpenPreview = async (material: MaterialItem) => {
     setPreviewMaterial(material);
     let resolvedUrl = material.url;
+    const driveId = extractGoogleDriveId(material.url);
 
-    // Check if we have fileData in Firestore
-    if (material.fileData && material.fileData.startsWith('data:')) {
-      resolvedUrl = material.fileData;
+    if (driveId) {
+      setPreviewDriveId(driveId);
+      resolvedUrl = `https://drive.google.com/file/d/${driveId}/preview`;
     } else {
-      // Check IndexedDB
-      const localData = await getFileFromIndexedDB(String(material.id));
-      if (localData) {
-        if (typeof localData === 'string' && localData.startsWith('data:')) {
-          resolvedUrl = localData;
-        } else if (localData instanceof Blob) {
-          resolvedUrl = URL.createObjectURL(localData);
+      setPreviewDriveId(null);
+      // Check if we have fileData in Firestore
+      if (material.fileData && material.fileData.startsWith('data:')) {
+        if (material.fileData.includes('application/pdf') || material.fileType === 'pdf') {
+          resolvedUrl = base64ToBlobUrl(material.fileData, 'application/pdf');
+        } else {
+          resolvedUrl = material.fileData;
+        }
+      } else {
+        // Check IndexedDB
+        const localData = await getFileFromIndexedDB(String(material.id));
+        if (localData) {
+          if (typeof localData === 'string' && localData.startsWith('data:')) {
+            if (localData.includes('application/pdf') || material.fileType === 'pdf') {
+              resolvedUrl = base64ToBlobUrl(localData, 'application/pdf');
+            } else {
+              resolvedUrl = localData;
+            }
+          } else if (localData instanceof Blob) {
+            resolvedUrl = URL.createObjectURL(localData);
+          }
         }
       }
     }
 
     if (!resolvedUrl || resolvedUrl === 'local_storage') {
-      if (material.url.includes('drive.google.com/file/d/')) {
-        const match = material.url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-        if (match && match[1]) {
-          resolvedUrl = `https://drive.google.com/file/d/${match[1]}/preview`;
-        }
+      const fallbackDriveId = extractGoogleDriveId(material.url);
+      if (fallbackDriveId) {
+        resolvedUrl = `https://drive.google.com/file/d/${fallbackDriveId}/preview`;
+        setPreviewDriveId(fallbackDriveId);
       }
     }
 
@@ -2153,78 +2261,113 @@ export default function App() {
 
   // 3. Authenticated Workspace (When currentUser is present)
   return (
-    <div style={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      {/* Top Floating Controls */}
-      <div className="top-controls">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          {isAdmin && (
+    <div className="app-viewport">
+      {/* Unified App Top Header - NEVER overlaps content or chat toggle */}
+      {!isImmersion && (
+        <header className="app-topbar">
+          <div className="topbar-left">
+            <div className="topbar-brand">
+              <span className="brand-dot"></span>
+              <span className="brand-title">WORKSPACE ITS</span>
+            </div>
+
+            {/* Topbar Weather Quick Pill */}
             <button
-              className="top-btn"
-              style={{
-                background: 'rgba(234, 179, 8, 0.15)',
-                border: '1px solid rgba(234, 179, 8, 0.4)',
-                color: '#fde047'
-              }}
-              onClick={() => setIsAdminModalOpen(true)}
-              title="Gestione Accessi e Approvazione Utenti"
+              type="button"
+              className="topbar-weather-btn"
+              onClick={() => setIsWeatherModalOpen(true)}
+              title="Meteo ITS • Clicca per visualizzare previsioni dettagliate, orarie e consigli"
             >
-              👑 Utenti
-              {accessRequests.filter(r => r.status === 'pending').length > 0 && (
-                <span
-                  style={{
-                    background: '#f43f5e',
-                    color: '#fff',
-                    borderRadius: '999px',
-                    padding: '1px 6px',
-                    fontSize: '0.68rem',
-                    fontWeight: 700
-                  }}
-                >
-                  {accessRequests.filter(r => r.status === 'pending').length}
-                </span>
+              <span className="weather-icon">{weatherData?.current.icon || '🌤️'}</span>
+              <span className="weather-city">{selectedWeatherCity.name}</span>
+              <span className="weather-temp">
+                {weatherData ? `${weatherData.current.temp}°C` : '...'}
+              </span>
+              <span className="weather-cond">{weatherData?.current.conditionText || 'Meteo'}</span>
+              <span className="weather-arrow">▾</span>
+            </button>
+          </div>
+
+          <div className="topbar-right">
+            {isAdmin && (
+              <button
+                className="top-btn"
+                style={{
+                  background: 'rgba(234, 179, 8, 0.15)',
+                  border: '1px solid rgba(234, 179, 8, 0.4)',
+                  color: '#fde047'
+                }}
+                onClick={() => setIsAdminModalOpen(true)}
+                title="Gestione Accessi e Approvazione Utenti"
+              >
+                👑 Utenti
+                {accessRequests.filter(r => r.status === 'pending').length > 0 && (
+                  <span
+                    style={{
+                      background: '#f43f5e',
+                      color: '#fff',
+                      borderRadius: '999px',
+                      padding: '1px 6px',
+                      fontSize: '0.68rem',
+                      fontWeight: 700
+                    }}
+                  >
+                    {accessRequests.filter(r => r.status === 'pending').length}
+                  </span>
+                )}
+              </button>
+            )}
+            <button
+              className="top-btn top-btn-auth"
+              onClick={() => setIsSyncModalOpen(true)}
+              title="Gestisci stato di sincronizzazione Cloud e backup"
+            >
+              <div className="sync-dot"></div>
+              <span>Cloud Sync</span>
+              {currentUser.photoURL && (
+                <img
+                  src={currentUser.photoURL}
+                  alt="Avatar"
+                  style={{ width: '16px', height: '16px', borderRadius: '50%' }}
+                />
               )}
             </button>
-          )}
-          <button
-            className="top-btn top-btn-auth"
-            onClick={() => setIsSyncModalOpen(true)}
-            title="Gestisci stato di sincronizzazione Cloud e backup"
-          >
-            <div className="sync-dot"></div>
-            <span>Cloud Sync</span>
-            {currentUser.photoURL && (
-              <img
-                src={currentUser.photoURL}
-                alt="Avatar"
-                style={{ width: '16px', height: '16px', borderRadius: '50%' }}
-              />
-            )}
-          </button>
-          <button
-            className="top-btn"
-            onClick={handleLogout}
-            title="Disconnetti account Google"
-            style={{ padding: '6px 10px' }}
-          >
-            Esci
-          </button>
-        </div>
+            <button
+              className="top-btn"
+              onClick={() => setIsBackupModalOpen(true)}
+              title="Salva o Ripristina il backup dei tuoi appunti e corsi"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+            >
+              💾 Backup
+            </button>
+            <button className="top-btn" id="immersion-btn" onClick={handleToggleImmersion} title="Attiva modalità concentrazione">
+              Focus Mode
+            </button>
+            <button className="top-btn" onClick={handleChangeBackground} title="Cambia sfondo">
+              Sfondo
+            </button>
+            <button
+              className="top-btn"
+              onClick={handleLogout}
+              title="Disconnetti account Google"
+              style={{ padding: '6px 10px' }}
+            >
+              Esci
+            </button>
+          </div>
+        </header>
+      )}
 
+      {/* Floating Exit Button ONLY when in Full Focus/Immersion mode */}
+      {isImmersion && (
         <button
-          className="top-btn"
-          onClick={() => setIsBackupModalOpen(true)}
-          title="Salva o Ripristina il backup dei tuoi appunti e corsi"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+          className="immersion-exit-pill"
+          onClick={handleToggleImmersion}
+          title="Esci dalla modalità Focus"
         >
-          💾 Backup
+          ✕ Esci da Focus
         </button>
-        <button className="top-btn" id="immersion-btn" onClick={handleToggleImmersion}>
-          {isImmersion ? 'Esci da Focus' : 'Focus Mode'}
-        </button>
-        <button className="top-btn" onClick={handleChangeBackground}>
-          Sfondo
-        </button>
-      </div>
+      )}
 
       {/* Main 3-Column Dashboard Container */}
       <div
@@ -2253,11 +2396,29 @@ export default function App() {
             </button>
           </div>
 
-          {/* Weather Widget */}
-          <div className="weather-container">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.82rem' }}>
-              <span style={{ fontWeight: 600, color: '#f4f4f6' }}>🌤️ Seregno</span>
-              <span style={{ color: '#818cf8', fontWeight: 500 }}>ITS Meteo</span>
+          {/* Interactive Weather Widget in Tools Column */}
+          <div
+            className="weather-card-widget"
+            onClick={() => setIsWeatherModalOpen(true)}
+            title="Clicca per aprire le previsioni meteo dettagliate e orarie"
+          >
+            <div className="weather-widget-top">
+              <div className="weather-widget-city">
+                <span className="weather-icon-big">{weatherData?.current.icon || '🌤️'}</span>
+                <div>
+                  <div className="weather-city-name">{selectedWeatherCity.name}</div>
+                  <div className="weather-city-sub">{selectedWeatherCity.region}</div>
+                </div>
+              </div>
+              <div className="weather-widget-temp">
+                {weatherData ? `${weatherData.current.temp}°C` : '...'}
+              </div>
+            </div>
+            <div className="weather-widget-bottom">
+              <span className="weather-widget-desc">
+                {weatherData?.current.conditionText || 'Caricamento meteo...'}
+              </span>
+              <span className="weather-widget-link">Dettagli ↗</span>
             </div>
           </div>
 
@@ -2760,27 +2921,28 @@ export default function App() {
                                     {f.name}
                                   </div>
                                   <div className="material-sub">
-                                    {meta.type} {f.fileSize ? `• ${(f.fileSize / 1024).toFixed(0)} KB` : ''}
+                                    <span className="material-type-pill">{meta.type}</span>
+                                    {f.fileSize ? <span>• {(f.fileSize / 1024).toFixed(0)} KB</span> : null}
                                   </div>
                                 </div>
                               </div>
                               <div className="material-actions">
                                 <button
-                                  className="material-preview-btn"
+                                  className="material-action-btn material-preview-btn"
                                   onClick={() => handleOpenPreview(f)}
                                   title="Visualizza anteprima documento o PDF"
                                 >
                                   👁️ Anteprima
                                 </button>
                                 <button
-                                  className="material-ai-btn"
+                                  className="material-action-btn material-ai-btn"
                                   onClick={() => handleSelectMaterialForChat(f)}
                                   title="Chiedi spiegazioni a Gemini su questo materiale"
                                 >
                                   🧠 AI
                                 </button>
                                 <a
-                                  href={f.url && f.url.startsWith('http') ? f.url : '#'}
+                                  href={f.url && f.url.startsWith('http') ? (extractGoogleDriveId(f.url) ? `https://drive.google.com/file/d/${extractGoogleDriveId(f.url)}/view` : f.url) : '#'}
                                   onClick={e => {
                                     if (!f.url || !f.url.startsWith('http')) {
                                       e.preventDefault();
@@ -2789,15 +2951,15 @@ export default function App() {
                                   }}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="material-dl-btn"
+                                  className="material-action-btn material-dl-btn"
                                   title="Apri o Scarica file"
                                 >
-                                  Apri
+                                  ↗ Apri
                                 </a>
                                 <button
-                                  className="material-del-btn"
+                                  className="material-action-btn material-del-btn"
                                   onClick={() => handleDeleteMaterial(f.id)}
-                                  title="Rimuovi"
+                                  title="Rimuovi risorsa"
                                 >
                                   ✕
                                 </button>
@@ -3689,8 +3851,8 @@ export default function App() {
 
       {/* MODALE ANTEPRIMA FILE & PDF */}
       {isPreviewModalOpen && previewMaterial && (
-        <div className="modal-overlay">
-          <div className="preview-modal-dialog">
+        <div className="modal-overlay" onClick={() => setIsPreviewModalOpen(false)}>
+          <div className="preview-modal-dialog" onClick={e => e.stopPropagation()}>
             <div className="preview-modal-header">
               <div className="preview-modal-title">
                 <span>{previewMaterial.fileType === 'pdf' ? '📄' : '📎'}</span>
@@ -3709,7 +3871,7 @@ export default function App() {
                 </button>
                 {previewUrl && (
                   <a
-                    href={previewUrl}
+                    href={previewDriveId ? `https://drive.google.com/file/d/${previewDriveId}/view` : previewUrl}
                     download={previewMaterial.name}
                     target="_blank"
                     rel="noreferrer"
@@ -3723,6 +3885,27 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            {/* Google Drive 403 / Access helper banner */}
+            {previewDriveId && (
+              <div className="preview-drive-alert">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                  <span>⚠️</span>
+                  <span>
+                    <b>Google Drive:</b> Se appare l'errore <i>"403 Non disponi dell'autorizzazione"</i>, significa che il file è privato o non autorizzato nell'anteprima integrata. Puoi aprirlo direttamente nel tuo Google account:
+                  </span>
+                </div>
+                <a
+                  href={`https://drive.google.com/file/d/${previewDriveId}/view`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="preview-drive-direct-btn"
+                >
+                  Apri su Google Drive ↗
+                </a>
+              </div>
+            )}
+
             <div className="preview-modal-body">
               {previewUrl ? (
                 previewMaterial.fileType === 'image' || previewMaterial.mimeType?.includes('image') ? (
@@ -3732,11 +3915,18 @@ export default function App() {
                     style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }}
                   />
                 ) : (
-                  <iframe
-                    src={previewUrl}
+                  <object
+                    data={previewUrl}
+                    type="application/pdf"
                     className="preview-modal-iframe"
                     title={`Anteprima ${previewMaterial.name}`}
-                  />
+                  >
+                    <iframe
+                      src={previewUrl}
+                      className="preview-modal-iframe"
+                      title={`Anteprima ${previewMaterial.name}`}
+                    />
+                  </object>
                 )
               ) : (
                 <div style={{ color: 'var(--text-secondary)', padding: '30px', textAlign: 'center' }}>
@@ -3747,6 +3937,24 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* MODALE METEO DETTAGLIATO & PREVISIONI ITS */}
+      <WeatherModal
+        isOpen={isWeatherModalOpen}
+        onClose={() => setIsWeatherModalOpen(false)}
+        weatherData={weatherData}
+        selectedCity={selectedWeatherCity}
+        onSelectCity={city => setSelectedWeatherCity(city)}
+        onRefresh={async () => {
+          setIsWeatherLoading(true);
+          const data = await fetchFullWeather(selectedWeatherCity);
+          if (data) setWeatherData(data);
+          setIsWeatherLoading(false);
+          showToast('Meteo aggiornato!');
+        }}
+        onDetectLocation={handleDetectLocation}
+        isLoading={isWeatherLoading}
+      />
 
       {/* MODALE AGGIUNGI MATERIALE (FILE / LINK) */}
       {isAddMaterialModalOpen && (
