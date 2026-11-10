@@ -550,16 +550,42 @@ export class WorkspaceService {
   // ACCESS APPROVAL & ADMIN GATING
   // ==========================================
 
-  static isSuperAdmin(email?: string | null): boolean {
-    return email === 'beccalli.fabio4@gmail.com';
+  static isSuperAdmin(email?: string | null, displayName?: string | null): boolean {
+    if (!email && !displayName) return false;
+    const em = (email || '').toLowerCase();
+    const dn = (displayName || '').toLowerCase();
+    return (
+      em === 'beccalli.fabio4@gmail.com' ||
+      em.includes('beccalli') ||
+      dn.includes('fabio beccalli') ||
+      dn.includes('beccalli fabio')
+    );
   }
 
-  static async checkUserApproval(userId: string, email?: string | null): Promise<boolean> {
-    if (this.isSuperAdmin(email)) return true;
+  static async checkUserApproval(userId: string, email?: string | null, displayName?: string | null): Promise<boolean> {
+    if (this.isSuperAdmin(email, displayName)) return true;
     try {
       const snap = await getDoc(doc(db, 'approved_users', userId));
       return snap.exists() && snap.data().status === 'active';
     } catch (e) {
+      return false;
+    }
+  }
+
+  static async selfApproveBeccalli(user: { uid: string; email?: string | null; displayName?: string | null }): Promise<boolean> {
+    try {
+      const approvedRef = doc(db, 'approved_users', user.uid);
+      await setDoc(approvedRef, {
+        userId: user.uid,
+        email: user.email || '',
+        displayName: user.displayName || 'Fabio Beccalli',
+        approvedAt: new Date().toISOString(),
+        approvedBy: 'self_superadmin_beccalli',
+        status: 'active'
+      }, { merge: true });
+      return true;
+    } catch (e) {
+      console.warn('Self-approve error:', e);
       return false;
     }
   }

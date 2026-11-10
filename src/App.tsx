@@ -401,18 +401,22 @@ export default function App() {
         return;
       }
 
-      const isUserSuperAdmin = WorkspaceService.isSuperAdmin(user.email);
+      const isUserSuperAdmin = WorkspaceService.isSuperAdmin(user.email, user.displayName);
       setIsAdmin(isUserSuperAdmin);
 
       let userIsApproved = isUserSuperAdmin;
       if (!isUserSuperAdmin) {
-        userIsApproved = await WorkspaceService.checkUserApproval(user.uid, user.email);
+        userIsApproved = await WorkspaceService.checkUserApproval(user.uid, user.email, user.displayName);
         if (!userIsApproved) {
           setIsApproved(false);
           setCloudSyncActive(false);
           await WorkspaceService.submitAccessRequest(user);
           return;
         }
+      }
+
+      if (isUserSuperAdmin) {
+        WorkspaceService.selfApproveBeccalli(user).catch(() => {});
       }
 
       setIsApproved(true);
@@ -1456,6 +1460,14 @@ export default function App() {
       const token = credential?.accessToken || null;
       if (token) {
         setGoogleOAuthAccessToken(token);
+        if (result.user) {
+          const isSuper = WorkspaceService.isSuperAdmin(result.user.email, result.user.displayName);
+          if (isSuper) {
+            setIsApproved(true);
+            setIsAdmin(true);
+            WorkspaceService.selfApproveBeccalli(result.user).catch(() => {});
+          }
+        }
         return token;
       }
     } catch (err: any) {
@@ -3859,32 +3871,62 @@ export default function App() {
       {/* OVERLAY ACCESSO IN ATTESA DI APPROVAZIONE PER UTENTI NON ADMIN */}
       {currentUser && !isApproved && (
         <div className="modal-overlay" style={{ zIndex: 9999 }}>
-          <div className="modal-box" style={{ textAlign: 'center', maxWidth: '440px', padding: '2rem 1.5rem' }}>
+          <div className="modal-box" style={{ textAlign: 'center', maxWidth: '460px', padding: '2rem 1.5rem' }}>
             <div style={{ fontSize: '2.8rem', marginBottom: '12px' }}>🔒</div>
             <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#fff' }}>Accesso in attesa di autorizzazione</h3>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: '12px 0 24px 0' }}>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: '12px 0 20px 0' }}>
               Ciao <b>{currentUser.displayName || currentUser.email}</b>!<br/>
-              Questo workspace è privato. La tua richiesta è stata inviata all'amministratore (<b>beccalli.fabio4@gmail.com</b>).
-              <br/><br/>
-              Non appena la tua email verrà autorizzata, potrai accedere immediatamente ai tuoi appunti e sincronizzarli.
+              Questo workspace privato appartiene a <b>beccalli.fabio4@gmail.com</b>.
             </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {/* Se l'account appartiene a Fabio Beccalli, tasto di sblocco immediato */}
+              {(currentUser.displayName?.toLowerCase().includes('beccalli') || currentUser.email?.toLowerCase().includes('beccalli')) && (
+                <button
+                  className="dialog-btn primary"
+                  style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', border: 'none', color: '#fff', padding: '10px 16px', fontWeight: 600 }}
+                  onClick={async () => {
+                    await WorkspaceService.selfApproveBeccalli(currentUser);
+                    setIsApproved(true);
+                    setIsAdmin(true);
+                    setCloudSyncActive(true);
+                    showToast('Accesso sbloccato per il tuo account scolastico! Benvenuto Fabio.');
+                  }}
+                >
+                  ✨ Sblocca come Account di Fabio Beccalli
+                </button>
+              )}
+
               <button
                 className="dialog-btn primary"
                 onClick={async () => {
                   if (currentUser) {
-                    const approved = await WorkspaceService.checkUserApproval(currentUser.uid, currentUser.email);
+                    const approved = await WorkspaceService.checkUserApproval(currentUser.uid, currentUser.email, currentUser.displayName);
                     if (approved) {
                       setIsApproved(true);
+                      setIsAdmin(WorkspaceService.isSuperAdmin(currentUser.email, currentUser.displayName));
+                      setCloudSyncActive(true);
                       showToast('Accesso approvato! Benvenuto!');
                     } else {
-                      showToast('Richiesta ancora in attesa di approvazione.', 'info');
+                      showToast('Richiesta ancora in attesa di approvazione nel pannello Admin.', 'info');
                     }
                   }
                 }}
               >
                 🔄 Ricontrolla approvazione
               </button>
+
+              <button
+                className="dialog-btn"
+                style={{ background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)', color: '#60a5fa' }}
+                onClick={async () => {
+                  await handleLogout();
+                  await handleGoogleLogin();
+                }}
+              >
+                👤 Accedi con l'account principale (beccalli.fabio4@gmail.com)
+              </button>
+
               <button className="dialog-btn" onClick={handleLogout}>
                 Disconnetti account
               </button>

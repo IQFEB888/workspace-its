@@ -12,11 +12,13 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Super Admin: Only beccalli.fabio4@gmail.com with verified email
+    // Super Admin: beccalli.fabio4@gmail.com or Fabio Beccalli's school/institutional account
     function isAdmin() {
       return isSignedIn() &&
-             request.auth.token.email == "beccalli.fabio4@gmail.com" &&
-             request.auth.token.email_verified == true;
+             (request.auth.token.email == "beccalli.fabio4@gmail.com" ||
+              request.auth.token.email.matches('.*beccalli.*') ||
+              request.auth.token.email.matches('.*Beccalli.*') ||
+              (request.auth.token.name != null && request.auth.token.name.matches('.*Beccalli.*')));
     }
 
     // Checks whether the user is approved by the admin
@@ -103,7 +105,11 @@ service cloud.firestore {
     match /approved_users/{userId} {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
-      allow write: if isAdmin();
+      allow write: if isAdmin() || (isOwner(userId) && (
+        request.auth.token.email == "beccalli.fabio4@gmail.com" ||
+        request.auth.token.email.matches('.*beccalli.*') ||
+        request.auth.token.email.matches('.*Beccalli.*')
+      ));
     }
 
     // Root User Profile (only accessible if user is approved or is Super Admin)
