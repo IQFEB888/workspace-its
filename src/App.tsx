@@ -21,6 +21,7 @@ import {
 import { WorkspaceService, DEFAULT_SUBJECTS, DEFAULT_PAGES } from './services/workspaceService';
 import { saveFileToIndexedDB, getFileFromIndexedDB, deleteFileFromIndexedDB } from './services/fileStorage';
 import { WeatherModal } from './components/WeatherModal';
+import { DriveSyncModal } from './components/DriveSyncModal';
 import {
   FullWeatherData,
   CityLocation,
@@ -142,6 +143,12 @@ export default function App() {
   const [weatherData, setWeatherData] = useState<FullWeatherData | null>(null);
   const [isWeatherModalOpen, setIsWeatherModalOpen] = useState<boolean>(false);
   const [isWeatherLoading, setIsWeatherLoading] = useState<boolean>(false);
+
+  // Google Drive Auto-Sync State
+  const [googleDriveApiKey, setGoogleDriveApiKey] = useState<string>(() => {
+    return localStorage.getItem('workspace_gdrive_api_key') || '';
+  });
+  const [isDriveSyncModalOpen, setIsDriveSyncModalOpen] = useState<boolean>(false);
 
   // AI Chat Active Document Source
   const [chatSelectedMaterial, setChatSelectedMaterial] = useState<MaterialItem | null>(null);
@@ -1394,6 +1401,44 @@ export default function App() {
         await WorkspaceService.deleteMaterialFromCloud(currentUser.uid, materialId);
       }
       showToast('Risorsa rimossa.');
+    }
+  };
+
+  // Google Drive API Key Persistence Handler
+  const handleSaveGoogleDriveApiKey = (key: string) => {
+    setGoogleDriveApiKey(key);
+    localStorage.setItem('workspace_gdrive_api_key', key);
+  };
+
+  // Google Drive Materials Batch Import Handler
+  const handleImportDriveMaterials = async (newItems: MaterialItem[]) => {
+    if (newItems.length === 0) return;
+
+    if (workspaceMode === 'shared') {
+      if (!activeRoomId) {
+        showToast('Nessuna stanza selezionata.', 'error');
+        return;
+      }
+      setActiveRoomMaterials(prev => [...prev, ...newItems]);
+      for (const item of newItems) {
+        await WorkspaceService.saveRoomMaterial(activeRoomId, item);
+      }
+      return;
+    }
+
+    // Personal workspace
+    const currentSubMaterials = materials[activeSubject] || [];
+    const updated = {
+      ...materials,
+      [activeSubject]: [...currentSubMaterials, ...newItems]
+    };
+    setMaterials(updated);
+    WorkspaceService.saveLocalMaterials(updated);
+
+    if (currentUser) {
+      for (const item of newItems) {
+        await WorkspaceService.saveMaterialToCloud(currentUser.uid, activeSubject, item);
+      }
     }
   };
 
@@ -2889,9 +2934,19 @@ export default function App() {
                       ? `Libreria Condivisa • ${activeRoom?.name || 'Stanza'}`
                       : `Libreria File & PDF • ${activeSubject}`}
                   </span>
-                  <button className="add-material-btn" onClick={handleOpenAddMaterialModal}>
-                    {workspaceMode === 'shared' ? '+ Condividi File / Link' : '+ Aggiungi File / Link'}
-                  </button>
+                  <div className="materials-header-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="sync-drive-btn"
+                      onClick={() => setIsDriveSyncModalOpen(true)}
+                      title="Sincronizza in automatico i nuovi PDF dalla cartella Google Drive del docente"
+                    >
+                      🔄 Sincronizza Drive
+                    </button>
+                    <button className="add-material-btn" onClick={handleOpenAddMaterialModal}>
+                      {workspaceMode === 'shared' ? '+ Condividi File / Link' : '+ Aggiungi File / Link'}
+                    </button>
+                  </div>
                 </div>
 
                 {Object.keys(activeGroupedMaterials).length === 0 ? (
@@ -3954,6 +4009,32 @@ export default function App() {
         }}
         onDetectLocation={handleDetectLocation}
         isLoading={isWeatherLoading}
+      />
+
+      {/* MODALE SINCRONIZZAZIONE CARTELLA GOOGLE DRIVE */}
+      <DriveSyncModal
+        isOpen={isDriveSyncModalOpen}
+        onClose={() => setIsDriveSyncModalOpen(false)}
+        apiKey={googleDriveApiKey}
+        onSaveApiKey={handleSaveGoogleDriveApiKey}
+        currentFolderUrl={
+          workspaceMode === 'personal'
+            ? subjects.find(s => s.id === activeSubject)?.driveLink || ''
+            : ''
+        }
+        existingMaterials={
+          workspaceMode === 'personal'
+            ? materials[activeSubject] || []
+            : activeRoomMaterials
+        }
+        workspaceMode={workspaceMode}
+        targetTitle={
+          workspaceMode === 'personal'
+            ? activeSubject
+            : activeRoom?.name || 'Stanza di Gruppo'
+        }
+        onImportMaterials={handleImportDriveMaterials}
+        showToast={showToast}
       />
 
       {/* MODALE AGGIUNGI MATERIALE (FILE / LINK) */}

@@ -845,6 +845,28 @@ body.full-immersion .top-controls {
   box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
 }
 
+.sync-drive-btn {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #34d399;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.sync-drive-btn:hover {
+  background: #10b981;
+  border-color: #10b981;
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+}
+
 .material-category { margin-bottom: 0.75rem; }
 .material-category-title {
   font-size: 0.72rem;
