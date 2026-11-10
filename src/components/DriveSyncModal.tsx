@@ -263,6 +263,32 @@ export const DriveSyncModal: React.FC<DriveSyncModalProps> = ({
               {isAuthorizing ? '⏳ Connessione...' : oAuthToken ? '🔄 Riconnetti Account' : '🔐 Connetti Account Google'}
             </button>
           </div>
+
+          {!oAuthToken && (
+            <div
+              style={{
+                marginTop: '10px',
+                paddingTop: '8px',
+                borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                fontSize: '0.73rem',
+                color: '#94a3b8',
+                lineHeight: 1.5
+              }}
+            >
+              💡 <b>Se Google mostra &ldquo;Accesso bloccato (Errore 403 / App in fase di test)&rdquo;</b> con l&apos;account scolastico:
+              <br />
+              Aggiungi <code>fabio.beccalli@itsrizzoli.it</code> come <b>Utente di test</b> nella{' '}
+              <a
+                href="https://console.cloud.google.com/apis/credentials/consent?project=workspace-its-10786"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: '#38bdf8', textDecoration: 'underline' }}
+              >
+                Schermata di consenso OAuth di Google Cloud
+              </a>{' '}
+              (sezione &ldquo;Utenti di test&rdquo;) con il tuo account principale.
+            </div>
+          )}
         </div>
 
         {/* Section 2: Folder Link */}
