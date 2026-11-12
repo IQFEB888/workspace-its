@@ -2,7 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
     function isSignedIn() {
       return request.auth != null;
     }
@@ -11,98 +10,55 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Super Admin check: safely inspect email claims
+    // Super Admin: ONLY beccalli.fabio4@gmail.com
     function isAdmin() {
       return isSignedIn() &&
              'email' in request.auth.token &&
-             (request.auth.token.email == "beccalli.fabio4@gmail.com" ||
-              request.auth.token.email == "fabio.beccalli@itsrizzoli.it" ||
-              request.auth.token.email.matches('.*beccalli.*') ||
-              request.auth.token.email.matches('.*Beccalli.*'));
+             request.auth.token.email == "beccalli.fabio4@gmail.com";
     }
 
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128;
+    // Approved User check: Admin or active status in approved_users collection
+    function isApprovedUser(userId) {
+      return isAdmin() ||
+             (exists(/databases/$(database)/documents/approved_users/$(userId)) &&
+              get(/databases/$(database)/documents/approved_users/$(userId)).data.status == 'active');
     }
 
-    // Connection health check test collection
-    match /test/{docId} {
+    // Health check endpoint
+    match /test/{document=**} {
       allow read, write: if true;
     }
 
-    // Access Requests: any signed in user can create and view
+    // Access Requests:
+    // Any signed-in user can submit, check, and update their OWN request
+    // Admin can list and manage all requests
     match /access_requests/{userId} {
-      allow read, write: if isSignedIn();
-      allow delete: if isAdmin();
+      allow get, create, update: if isOwner(userId) || isAdmin();
+      allow list, delete: if isAdmin();
     }
 
-    // Approved Users: managed by admin, readable by all authenticated users
+    // Approved Users directory:
+    // Any signed-in user can check their OWN approval status
+    // Admin can list, create, update, and delete all records
     match /approved_users/{userId} {
-      allow read, write: if isSignedIn();
-      allow delete: if isAdmin();
+      allow get: if isOwner(userId) || isAdmin();
+      allow list, create, update, delete: if isAdmin();
     }
 
-    // Root User Profile & Personal Workspace
-    // Every user has exclusive full access to their own data tree (isOwner)
+    // Personal Workspace & Subcollections:
+    // Accessible only when approved by the admin (or if admin)
     match /users/{userId} {
-      allow read, write, delete: if isOwner(userId) || isAdmin();
+      allow read, write: if (isOwner(userId) && isApprovedUser(userId)) || isAdmin();
 
-      // Subjects Subcollection
-      match /subjects/{subjectId} {
-        allow read, write, delete: if isOwner(userId) || isAdmin();
-      }
-
-      // Pages Subcollection
-      match /pages/{pageId} {
-        allow read, write, delete: if isOwner(userId) || isAdmin();
-      }
-
-      // Materials Subcollection
-      match /materials/{materialId} {
-        allow read, write, delete: if isOwner(userId) || isAdmin();
-      }
-
-      // Chat Sessions Subcollection
-      match /chats/{subjectId} {
-        allow read, write, delete: if isOwner(userId) || isAdmin();
-      }
-
-      // Settings Subcollection (e.g. Gemini Keys)
-      match /settings/{settingId} {
-        allow read, write, delete: if isOwner(userId) || isAdmin();
+      match /{allChildren=**} {
+        allow read, write: if (isOwner(userId) && isApprovedUser(userId)) || isAdmin();
       }
     }
 
-    // Shared Collaboration Rooms & Group Study
-    match /shared_rooms/{roomId} {
-      allow read, write: if isSignedIn();
-      allow delete: if isSignedIn() && (resource.data.createdBy == request.auth.uid || isAdmin());
-
-      // Shared Room Pages
-      match /pages/{pageId} {
-        allow read, write, delete: if isSignedIn();
-      }
-
-      // Shared Room Messages (Real-time Gemini & Student Chat)
-      match /messages/{messageId} {
-        allow read, write, delete: if isSignedIn();
-      }
-
-      // Shared Room Materials
-      match /materials/{materialId} {
-        allow read, write, delete: if isSignedIn();
-      }
-
-      // Presence / Active typing
-      match /presence/{userId} {
-        allow read: if isSignedIn();
-        allow write, delete: if isSignedIn() && request.auth.uid == userId;
-      }
-    }
-
-    // Fallback: deny all other paths
-    match /{document=**} {
-      allow read, write: if false;
+    // Shared Collaboration Rooms:
+    // Only approved users or admin can access
+    match /shared_rooms/{document=**} {
+      allow read, write: if isSignedIn() && (isAdmin() || isApprovedUser(request.auth.uid));
     }
   }
 }

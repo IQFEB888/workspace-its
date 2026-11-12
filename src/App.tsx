@@ -409,79 +409,107 @@ export default function App() {
 
       const isUserSuperAdmin = WorkspaceService.isSuperAdmin(user.email, user.displayName);
       setIsAdmin(isUserSuperAdmin);
+
+      let userIsApproved = isUserSuperAdmin;
+      if (!isUserSuperAdmin) {
+        userIsApproved = await WorkspaceService.checkUserApproval(user.uid, user.email, user.displayName);
+      }
+
+      const startCloudSyncForUser = async (targetUser: User, isAdminUser: boolean) => {
+        let unsubAdminReq: (() => void) | null = null;
+        let unsubAdminAppr: (() => void) | null = null;
+
+        if (isAdminUser) {
+          unsubAdminReq = WorkspaceService.subscribeToAccessRequests(setAccessRequests);
+          unsubAdminAppr = WorkspaceService.subscribeToApprovedUsers(setApprovedUsers);
+        }
+
+        // Auto-sync local notes to Cloud Firestore in background without annoying popups
+        const hasCloudData = await WorkspaceService.checkHasCloudData(targetUser.uid);
+        const localPages = WorkspaceService.getLocalPages();
+        const hasLocalData = Object.keys(localPages).some(sub => (localPages[sub] || []).length > 0);
+
+        if (!hasCloudData && hasLocalData) {
+          WorkspaceService.migrateLocalDataToCloud(targetUser.uid).then(result => {
+            if (result.pagesCount > 0) {
+              console.log(`Appunti auto-sincronizzati su Cloud Firestore (${result.pagesCount} pagine).`);
+            }
+          }).catch(err => console.warn('Auto cloud sync error:', err));
+        }
+
+        // Subscribe to Realtime Firestore updates
+        const unsubFirestore = WorkspaceService.subscribeToUserData(targetUser.uid, {
+          onPreferences: pref => {
+            if (pref.bgIndex !== undefined) setBgIndex(pref.bgIndex);
+            if (pref.isImmersion !== undefined) setIsImmersion(pref.isImmersion);
+            if (pref.isSidebarCollapsed !== undefined) setIsSidebarCollapsed(pref.isSidebarCollapsed);
+            if (pref.isChatCollapsed !== undefined) setIsChatCollapsed(pref.isChatCollapsed);
+            if (pref.selectedModel !== undefined) setSelectedModel(pref.selectedModel);
+            if (pref.fontFamily !== undefined) setFontFamily(pref.fontFamily);
+            if (pref.fontSize !== undefined) setFontSize(pref.fontSize);
+            if (pref.showWeatherWidget !== undefined) setShowWeatherWidget(pref.showWeatherWidget);
+            if (pref.activeSubject !== undefined) {
+              setActiveSubject(prev => pref.activeSubject || prev);
+            }
+          },
+          onSubjects: subs => {
+            if (subs.length > 0) {
+              setSubjects(subs);
+              setActiveSubject(prev => (subs.some(s => s.id === prev) ? prev : subs[0].id));
+            }
+          },
+          onPages: pagesBySub => {
+            if (Object.keys(pagesBySub).length > 0) {
+              setPages(prev => ({ ...prev, ...pagesBySub }));
+            }
+          },
+          onMaterials: matBySub => {
+            setMaterials(matBySub);
+          },
+          onChats: chatsBySub => {
+            setChats(chatsBySub);
+          },
+          onKeys: (keys, idx) => {
+            setApiKeys(keys);
+            setSelectedKeyIndex(idx);
+          }
+        });
+
+        activeListenersCleanupRef.current = () => {
+          unsubFirestore();
+          if (unsubAdminReq) unsubAdminReq();
+          if (unsubAdminAppr) unsubAdminAppr();
+        };
+      };
+
+      if (!userIsApproved) {
+        setIsApproved(false);
+        setCloudSyncActive(false);
+        await WorkspaceService.submitAccessRequest(user);
+
+        // Real-time listener: auto-unlocks as soon as admin approves
+        const unsubApproval = WorkspaceService.subscribeToUserApprovalStatus(user.uid, approved => {
+          if (approved) {
+            setIsApproved(true);
+            setCloudSyncActive(true);
+            showToast('Accesso autorizzato dall\'amministratore! Benvenuto.');
+            startCloudSyncForUser(user, false);
+          }
+        });
+
+        activeListenersCleanupRef.current = () => {
+          unsubApproval();
+        };
+        return;
+      }
+
       setIsApproved(true);
       setCloudSyncActive(true);
-
       if (isUserSuperAdmin) {
         WorkspaceService.selfApproveBeccalli(user).catch(() => {});
       }
-
       showToast(`Benvenuto, ${user.displayName || user.email}! Sincronizzazione cloud attiva.`, 'info');
-
-      let unsubAdminReq: (() => void) | null = null;
-      let unsubAdminAppr: (() => void) | null = null;
-
-      if (isUserSuperAdmin) {
-        unsubAdminReq = WorkspaceService.subscribeToAccessRequests(setAccessRequests);
-        unsubAdminAppr = WorkspaceService.subscribeToApprovedUsers(setApprovedUsers);
-      }
-
-      // Auto-sync local notes to Cloud Firestore in background without annoying popups
-      const hasCloudData = await WorkspaceService.checkHasCloudData(user.uid);
-      const localPages = WorkspaceService.getLocalPages();
-      const hasLocalData = Object.keys(localPages).some(sub => (localPages[sub] || []).length > 0);
-
-      if (!hasCloudData && hasLocalData) {
-        WorkspaceService.migrateLocalDataToCloud(user.uid).then(result => {
-          if (result.pagesCount > 0) {
-            console.log(`Appunti auto-sincronizzati su Cloud Firestore (${result.pagesCount} pagine).`);
-          }
-        }).catch(err => console.warn('Auto cloud sync error:', err));
-      }
-
-      // Subscribe to Realtime Firestore updates
-      const unsubFirestore = WorkspaceService.subscribeToUserData(user.uid, {
-        onPreferences: pref => {
-          if (pref.bgIndex !== undefined) setBgIndex(pref.bgIndex);
-          if (pref.isImmersion !== undefined) setIsImmersion(pref.isImmersion);
-          if (pref.isSidebarCollapsed !== undefined) setIsSidebarCollapsed(pref.isSidebarCollapsed);
-          if (pref.isChatCollapsed !== undefined) setIsChatCollapsed(pref.isChatCollapsed);
-          if (pref.selectedModel !== undefined) setSelectedModel(pref.selectedModel);
-          if (pref.fontFamily !== undefined) setFontFamily(pref.fontFamily);
-          if (pref.fontSize !== undefined) setFontSize(pref.fontSize);
-          if (pref.showWeatherWidget !== undefined) setShowWeatherWidget(pref.showWeatherWidget);
-          if (pref.activeSubject !== undefined) {
-            setActiveSubject(prev => pref.activeSubject || prev);
-          }
-        },
-        onSubjects: subs => {
-          if (subs.length > 0) {
-            setSubjects(subs);
-            setActiveSubject(prev => (subs.some(s => s.id === prev) ? prev : subs[0].id));
-          }
-        },
-        onPages: pagesBySub => {
-          if (Object.keys(pagesBySub).length > 0) {
-            setPages(prev => ({ ...prev, ...pagesBySub }));
-          }
-        },
-        onMaterials: matBySub => {
-          setMaterials(matBySub);
-        },
-        onChats: chatsBySub => {
-          setChats(chatsBySub);
-        },
-        onKeys: (keys, idx) => {
-          setApiKeys(keys);
-          setSelectedKeyIndex(idx);
-        }
-      });
-
-      activeListenersCleanupRef.current = () => {
-        unsubFirestore();
-        if (unsubAdminReq) unsubAdminReq();
-        if (unsubAdminAppr) unsubAdminAppr();
-      };
+      startCloudSyncForUser(user, isUserSuperAdmin);
     });
 
     return () => {
@@ -495,7 +523,7 @@ export default function App() {
 
   // Subscribe to user's joined rooms
   useEffect(() => {
-    if (!currentUser) {
+    if (!currentUser || !isApproved) {
       setUserRooms([]);
       return;
     }
@@ -506,11 +534,11 @@ export default function App() {
       }
     });
     return () => unsub();
-  }, [currentUser, activeRoomId]);
+  }, [currentUser, activeRoomId, isApproved]);
 
   // Subscribe to active room data (pages, messages, materials)
   useEffect(() => {
-    if (workspaceMode !== 'shared' || !activeRoomId || !currentUser) {
+    if (workspaceMode !== 'shared' || !activeRoomId || !currentUser || !isApproved) {
       return;
     }
     const unsubPages = WorkspaceService.subscribeToRoomPages(activeRoomId, (rPages) => {
@@ -4095,23 +4123,6 @@ export default function App() {
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {/* Se l'account appartiene a Fabio Beccalli, tasto di sblocco immediato */}
-              {(currentUser.displayName?.toLowerCase().includes('beccalli') || currentUser.email?.toLowerCase().includes('beccalli')) && (
-                <button
-                  className="dialog-btn primary"
-                  style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', border: 'none', color: '#fff', padding: '10px 16px', fontWeight: 600 }}
-                  onClick={async () => {
-                    await WorkspaceService.selfApproveBeccalli(currentUser);
-                    setIsApproved(true);
-                    setIsAdmin(true);
-                    setCloudSyncActive(true);
-                    showToast('Accesso sbloccato per il tuo account scolastico! Benvenuto Fabio.');
-                  }}
-                >
-                  ✨ Sblocca come Account di Fabio Beccalli
-                </button>
-              )}
-
               <button
                 className="dialog-btn primary"
                 onClick={async () => {

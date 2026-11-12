@@ -206,7 +206,7 @@ export class WorkspaceService {
           }
         },
         error => {
-          if (!auth.currentUser) return;
+          if (!auth.currentUser || auth.currentUser.uid !== userId) return;
           handleFirestoreError(error, OperationType.GET, `users/${userId}`);
         }
       )
@@ -230,7 +230,7 @@ export class WorkspaceService {
           if (callbacks.onSubjects) callbacks.onSubjects(subs);
         },
         error => {
-          if (!auth.currentUser) return;
+          if (!auth.currentUser || auth.currentUser.uid !== userId) return;
           handleFirestoreError(error, OperationType.LIST, `users/${userId}/subjects`);
         }
       )
@@ -261,7 +261,7 @@ export class WorkspaceService {
           if (callbacks.onPages) callbacks.onPages(pagesBySubject);
         },
         error => {
-          if (!auth.currentUser) return;
+          if (!auth.currentUser || auth.currentUser.uid !== userId) return;
           handleFirestoreError(error, OperationType.LIST, `users/${userId}/pages`);
         }
       )
@@ -294,7 +294,7 @@ export class WorkspaceService {
           if (callbacks.onMaterials) callbacks.onMaterials(matBySubject);
         },
         error => {
-          if (!auth.currentUser) return;
+          if (!auth.currentUser || auth.currentUser.uid !== userId) return;
           handleFirestoreError(error, OperationType.LIST, `users/${userId}/materials`);
         }
       )
@@ -315,7 +315,7 @@ export class WorkspaceService {
           if (callbacks.onChats) callbacks.onChats(chatsBySubject);
         },
         error => {
-          if (!auth.currentUser) return;
+          if (!auth.currentUser || auth.currentUser.uid !== userId) return;
           handleFirestoreError(error, OperationType.LIST, `users/${userId}/chats`);
         }
       )
@@ -335,7 +335,7 @@ export class WorkspaceService {
           }
         },
         error => {
-          if (!auth.currentUser) return;
+          if (!auth.currentUser || auth.currentUser.uid !== userId) return;
           handleFirestoreError(error, OperationType.GET, `users/${userId}/settings/keys`);
         }
       )
@@ -557,16 +557,9 @@ export class WorkspaceService {
   // ==========================================
 
   static isSuperAdmin(email?: string | null, displayName?: string | null): boolean {
-    if (!email && !displayName) return false;
-    const em = (email || '').toLowerCase();
-    const dn = (displayName || '').toLowerCase();
-    return (
-      em === 'beccalli.fabio4@gmail.com' ||
-      em === 'fabio.beccalli@itsrizzoli.it' ||
-      em.includes('beccalli') ||
-      dn.includes('fabio beccalli') ||
-      dn.includes('beccalli fabio')
-    );
+    if (!email) return false;
+    const em = (email || '').toLowerCase().trim();
+    return em === 'beccalli.fabio4@gmail.com';
   }
 
   static async checkUserApproval(userId: string, email?: string | null, displayName?: string | null): Promise<boolean> {
@@ -577,6 +570,16 @@ export class WorkspaceService {
     } catch (e) {
       return false;
     }
+  }
+
+  static subscribeToUserApprovalStatus(userId: string, callback: (isApproved: boolean) => void): Unsubscribe {
+    const docRef = doc(db, 'approved_users', userId);
+    return onSnapshot(docRef, snap => {
+      const active = snap.exists() && snap.data().status === 'active';
+      callback(active);
+    }, err => {
+      console.warn('Approval status listener:', err);
+    });
   }
 
   static async selfApproveBeccalli(user: { uid: string; email?: string | null; displayName?: string | null }): Promise<boolean> {
