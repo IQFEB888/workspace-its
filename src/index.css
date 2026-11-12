@@ -1543,7 +1543,7 @@ body .dashboard-container.chat-collapsed .chat-vertical-title { display: block; 
   background: rgba(5, 5, 8, 0.72);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  z-index: 2000;
+  z-index: 10000;
   align-items: center;
   justify-content: center;
   opacity: 1;

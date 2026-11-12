@@ -565,21 +565,55 @@ export class WorkspaceService {
   static async checkUserApproval(userId: string, email?: string | null, displayName?: string | null): Promise<boolean> {
     if (this.isSuperAdmin(email, displayName)) return true;
     try {
+      // 1. Direct check by userId
       const snap = await getDoc(doc(db, 'approved_users', userId));
-      return snap.exists() && snap.data().status === 'active';
+      if (snap.exists() && snap.data().status === 'active') return true;
+
+      // 2. Also check if approved by email directly
+      if (email) {
+        const emailClean = email.toLowerCase().trim();
+        const emailUid = 'user_' + emailClean.replace(/[^a-zA-Z0-9]/g, '_');
+        const snapEmail = await getDoc(doc(db, 'approved_users', emailUid));
+        if (snapEmail.exists() && snapEmail.data().status === 'active') return true;
+      }
+      return false;
     } catch (e) {
       return false;
     }
   }
 
-  static subscribeToUserApprovalStatus(userId: string, callback: (isApproved: boolean) => void): Unsubscribe {
+  static subscribeToUserApprovalStatus(userId: string, email: string | null | undefined, callback: (isApproved: boolean) => void): Unsubscribe {
+    const unsubs: Unsubscribe[] = [];
     const docRef = doc(db, 'approved_users', userId);
-    return onSnapshot(docRef, snap => {
-      const active = snap.exists() && snap.data().status === 'active';
-      callback(active);
-    }, err => {
-      console.warn('Approval status listener:', err);
-    });
+
+    unsubs.push(
+      onSnapshot(docRef, snap => {
+        if (snap.exists() && snap.data().status === 'active') {
+          callback(true);
+        }
+      }, err => {
+        console.warn('Approval status listener:', err);
+      })
+    );
+
+    if (email) {
+      const emailClean = email.toLowerCase().trim();
+      const emailUid = 'user_' + emailClean.replace(/[^a-zA-Z0-9]/g, '_');
+      if (emailUid !== userId) {
+        const emailDocRef = doc(db, 'approved_users', emailUid);
+        unsubs.push(
+          onSnapshot(emailDocRef, snap => {
+            if (snap.exists() && snap.data().status === 'active') {
+              callback(true);
+            }
+          }, () => {})
+        );
+      }
+    }
+
+    return () => {
+      unsubs.forEach(u => u());
+    };
   }
 
   static async selfApproveBeccalli(user: { uid: string; email?: string | null; displayName?: string | null }): Promise<boolean> {
@@ -603,14 +637,15 @@ export class WorkspaceService {
   static async submitAccessRequest(user: { uid: string; email?: string | null; displayName?: string | null; photoURL?: string | null }): Promise<void> {
     try {
       const reqRef = doc(db, 'access_requests', user.uid);
+      // Overwrite request to force status to 'pending'
       await setDoc(reqRef, {
         userId: user.uid,
-        email: user.email || '',
-        displayName: user.displayName || 'Utente',
+        email: (user.email || '').toLowerCase().trim(),
+        displayName: user.displayName || user.email || 'Utente',
         photoURL: user.photoURL || '',
         requestedAt: new Date().toISOString(),
         status: 'pending'
-      }, { merge: true });
+      });
     } catch (e) {
       console.warn('Access request submission:', e);
     }
@@ -620,7 +655,10 @@ export class WorkspaceService {
     const colRef = collection(db, 'access_requests');
     return onSnapshot(colRef, (snap) => {
       const items: any[] = [];
-      snap.forEach(d => items.push(d.data()));
+      snap.forEach(d => {
+        const data = d.data();
+        items.push({ id: d.id, userId: d.id, ...data });
+      });
       callback(items);
     }, (err) => console.warn('Access requests listener:', err));
   }
@@ -629,23 +667,74 @@ export class WorkspaceService {
     const colRef = collection(db, 'approved_users');
     return onSnapshot(colRef, (snap) => {
       const items: any[] = [];
-      snap.forEach(d => items.push(d.data()));
+      snap.forEach(d => {
+        const data = d.data();
+        items.push({ id: d.id, userId: d.id, ...data });
+      });
       callback(items);
     }, (err) => console.warn('Approved users listener:', err));
   }
 
   static async approveUserRequest(request: any, adminEmail: string): Promise<void> {
-    const approvedRef = doc(db, 'approved_users', request.userId);
+    const targetUid = request.userId || request.id;
+    const cleanEmail = (request.email || '').toLowerCase().trim();
+    const approvedRef = doc(db, 'approved_users', targetUid);
     await setDoc(approvedRef, {
-      userId: request.userId,
-      email: request.email,
-      displayName: request.displayName,
+      userId: targetUid,
+      email: cleanEmail,
+      displayName: request.displayName || request.email,
       approvedAt: new Date().toISOString(),
       approvedBy: adminEmail,
       status: 'active'
     });
-    const reqRef = doc(db, 'access_requests', request.userId);
+    // Also store normalized email doc if email exists
+    if (cleanEmail) {
+      const emailDocId = 'user_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
+      if (emailDocId !== targetUid) {
+        await setDoc(doc(db, 'approved_users', emailDocId), {
+          userId: targetUid,
+          email: cleanEmail,
+          displayName: request.displayName || request.email,
+          approvedAt: new Date().toISOString(),
+          approvedBy: adminEmail,
+          status: 'active'
+        }, { merge: true });
+      }
+    }
+    const reqRef = doc(db, 'access_requests', targetUid);
     await setDoc(reqRef, { status: 'approved' }, { merge: true });
+  }
+
+  static async manualApproveEmail(targetEmail: string, adminEmail: string): Promise<void> {
+    const cleanEmail = targetEmail.toLowerCase().trim();
+    const reqsCol = collection(db, 'access_requests');
+    const snap = await getDocs(reqsCol);
+    let matchedUserId = '';
+    let matchedDisplayName = '';
+
+    snap.forEach(d => {
+      const data = d.data();
+      if ((data.email || '').toLowerCase().trim() === cleanEmail) {
+        matchedUserId = data.userId || d.id;
+        matchedDisplayName = data.displayName || '';
+      }
+    });
+
+    const targetUid = matchedUserId || 'user_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
+    const approvedRef = doc(db, 'approved_users', targetUid);
+    await setDoc(approvedRef, {
+      userId: targetUid,
+      email: cleanEmail,
+      displayName: matchedDisplayName || cleanEmail.split('@')[0],
+      approvedAt: new Date().toISOString(),
+      approvedBy: adminEmail,
+      status: 'active'
+    });
+
+    if (matchedUserId) {
+      const reqRef = doc(db, 'access_requests', matchedUserId);
+      await setDoc(reqRef, { status: 'approved' }, { merge: true });
+    }
   }
 
   static async revokeApprovedUser(userId: string): Promise<void> {

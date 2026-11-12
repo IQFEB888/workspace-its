@@ -177,6 +177,7 @@ export default function App() {
   const [approvedUsers, setApprovedUsers] = useState<any[]>([]);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState<boolean>(false);
   const [adminTab, setAdminTab] = useState<'requests' | 'approved'>('requests');
+  const [manualApprovalEmail, setManualApprovalEmail] = useState<string>('');
 
   // Universal Dialog State
   const [dialogState, setDialogState] = useState<{
@@ -488,7 +489,7 @@ export default function App() {
         await WorkspaceService.submitAccessRequest(user);
 
         // Real-time listener: auto-unlocks as soon as admin approves
-        const unsubApproval = WorkspaceService.subscribeToUserApprovalStatus(user.uid, approved => {
+        const unsubApproval = WorkspaceService.subscribeToUserApprovalStatus(user.uid, user.email, approved => {
           if (approved) {
             setIsApproved(true);
             setCloudSyncActive(true);
@@ -497,8 +498,21 @@ export default function App() {
           }
         });
 
+        // Continuous auto-check every 2.5 seconds (eliminates manual rechecking)
+        const autoCheckInterval = setInterval(async () => {
+          const approved = await WorkspaceService.checkUserApproval(user.uid, user.email, user.displayName);
+          if (approved) {
+            clearInterval(autoCheckInterval);
+            setIsApproved(true);
+            setCloudSyncActive(true);
+            showToast('Accesso autorizzato dall\'amministratore! Benvenuto.');
+            startCloudSyncForUser(user, false);
+          }
+        }, 2500);
+
         activeListenersCleanupRef.current = () => {
           unsubApproval();
+          clearInterval(autoCheckInterval);
         };
         return;
       }
@@ -645,6 +659,44 @@ export default function App() {
       }
       await signOut(auth);
       showToast('Disconnesso con successo.');
+    }
+  };
+
+  // Immediate logout from waiting modal without confirmation dialog
+  const handleImmediateLogoutFromWaitScreen = async () => {
+    try {
+      if (activeListenersCleanupRef.current) {
+        activeListenersCleanupRef.current();
+        activeListenersCleanupRef.current = null;
+      }
+      await signOut(auth);
+    } catch (e) {
+      console.warn('Logout error:', e);
+    } finally {
+      setCurrentUser(null);
+      setIsApproved(true);
+      setIsAdmin(false);
+      setCloudSyncActive(false);
+      showToast('Disconnesso con successo.');
+    }
+  };
+
+  // Immediate switch account from waiting modal
+  const handleImmediateSwitchAccount = async () => {
+    try {
+      if (activeListenersCleanupRef.current) {
+        activeListenersCleanupRef.current();
+        activeListenersCleanupRef.current = null;
+      }
+      await signOut(auth);
+      setCurrentUser(null);
+      setIsApproved(true);
+      setIsAdmin(false);
+      setCloudSyncActive(false);
+      // Immediately open Google Login popup
+      await handleGoogleLogin();
+    } catch (e) {
+      console.warn('Switch account error:', e);
     }
   };
 
@@ -3975,78 +4027,131 @@ export default function App() {
       />
 
       {/* MODALE AMMINISTRATORE GESTIONE ACCESSI */}
-      {isAdminModalOpen && (
-        <div className="modal-overlay">
-          <div className="modal-box" style={{ maxWidth: '580px' }}>
-            <div className="modal-header">
-              <span className="modal-title">👑 Gestione Accessi & Approvazioni</span>
-              <button className="modal-close" onClick={() => setIsAdminModalOpen(false)}>
-                ✕
-              </button>
-            </div>
-            
-            <div style={{ display: 'flex', gap: '6px', borderBottom: '1px solid var(--panel-border)', paddingBottom: '8px' }}>
-              <button
-                className={`tab-btn ${adminTab === 'requests' ? 'active' : ''}`}
-                onClick={() => setAdminTab('requests')}
-              >
-                Richieste in attesa ({accessRequests.filter(r => r.status === 'pending').length})
-              </button>
-              <button
-                className={`tab-btn ${adminTab === 'approved' ? 'active' : ''}`}
-                onClick={() => setAdminTab('approved')}
-              >
-                Utenti autorizzati ({approvedUsers.filter(u => u.status === 'active').length})
-              </button>
-            </div>
+      {isAdminModalOpen && (() => {
+        const pendingRequests = accessRequests.filter(r => {
+          const reqEmail = (r.email || '').toLowerCase().trim();
+          const reqUid = r.userId || r.id;
+          const isCurrentlyActive = approvedUsers.some(u => {
+            const uEmail = (u.email || '').toLowerCase().trim();
+            const uUid = u.userId || u.id;
+            return (uUid === reqUid || (Boolean(reqEmail) && Boolean(uEmail) && reqEmail === uEmail)) && u.status === 'active';
+          });
+          return !isCurrentlyActive;
+        });
 
-            <div style={{ maxHeight: '320px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
-              {adminTab === 'requests' ? (
-                accessRequests.filter(r => r.status === 'pending').length === 0 ? (
-                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', padding: '16px 0', textAlign: 'center' }}>
-                    Nessuna richiesta di accesso in sospeso.
-                  </div>
-                ) : (
-                  accessRequests.filter(r => r.status === 'pending').map((req) => (
-                    <div key={req.userId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.03)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--panel-border)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        {req.photoURL ? (
-                          <img src={req.photoURL} alt="Avatar" style={{ width: '32px', height: '32px', borderRadius: '50%' }} />
-                        ) : (
-                          <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>👤</div>
-                        )}
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#fff' }}>{req.displayName || req.email}</div>
-                          <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>{req.email}</div>
+        return (
+          <div className="modal-overlay">
+            <div className="modal-box" style={{ maxWidth: '580px' }}>
+              <div className="modal-header">
+                <span className="modal-title">👑 Gestione Accessi & Approvazioni</span>
+                <button className="modal-close" onClick={() => setIsAdminModalOpen(false)}>
+                  ✕
+                </button>
+              </div>
+              
+              {/* Direct Email Fast Authorization */}
+              <div style={{ display: 'flex', gap: '8px', padding: '6px 0 12px 0', borderBottom: '1px solid var(--panel-border)' }}>
+                <input
+                  type="email"
+                  placeholder="Autorizza direttamente (es. fabio.beccalli@itsrizzoli.it)..."
+                  value={manualApprovalEmail}
+                  onChange={e => setManualApprovalEmail(e.target.value)}
+                  style={{
+                    flex: 1,
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid var(--panel-border)',
+                    borderRadius: '8px',
+                    padding: '8px 12px',
+                    color: '#fff',
+                    fontSize: '0.8rem',
+                    outline: 'none'
+                  }}
+                  onKeyDown={async (e) => {
+                    if (e.key === 'Enter' && manualApprovalEmail.trim() && currentUser?.email) {
+                      await WorkspaceService.manualApproveEmail(manualApprovalEmail.trim(), currentUser.email);
+                      showToast(`Utente ${manualApprovalEmail.trim()} autorizzato con successo!`);
+                      setManualApprovalEmail('');
+                    }
+                  }}
+                />
+                <button
+                  className="dialog-btn primary"
+                  style={{ whiteSpace: 'nowrap', fontSize: '0.78rem', padding: '8px 14px' }}
+                  disabled={!manualApprovalEmail.trim()}
+                  onClick={async () => {
+                    if (currentUser?.email && manualApprovalEmail.trim()) {
+                      await WorkspaceService.manualApproveEmail(manualApprovalEmail.trim(), currentUser.email);
+                      showToast(`Utente ${manualApprovalEmail.trim()} autorizzato con successo!`);
+                      setManualApprovalEmail('');
+                    }
+                  }}
+                >
+                  ➕ Autorizza Email
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', gap: '6px', borderBottom: '1px solid var(--panel-border)', paddingBottom: '8px', marginTop: '10px' }}>
+                <button
+                  className={`tab-btn ${adminTab === 'requests' ? 'active' : ''}`}
+                  onClick={() => setAdminTab('requests')}
+                >
+                  Richieste in attesa ({pendingRequests.length})
+                </button>
+                <button
+                  className={`tab-btn ${adminTab === 'approved' ? 'active' : ''}`}
+                  onClick={() => setAdminTab('approved')}
+                >
+                  Utenti autorizzati ({approvedUsers.filter(u => u.status === 'active').length})
+                </button>
+              </div>
+
+              <div style={{ maxHeight: '320px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px', marginTop: '8px' }}>
+                {adminTab === 'requests' ? (
+                  pendingRequests.length === 0 ? (
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', padding: '16px 0', textAlign: 'center' }}>
+                      Nessuna richiesta di accesso in sospeso.
+                    </div>
+                  ) : (
+                    pendingRequests.map((req) => (
+                      <div key={req.userId || req.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.03)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--panel-border)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          {req.photoURL ? (
+                            <img src={req.photoURL} alt="Avatar" style={{ width: '32px', height: '32px', borderRadius: '50%' }} />
+                          ) : (
+                            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>👤</div>
+                          )}
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#fff' }}>{req.displayName || req.email}</div>
+                            <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>{req.email}</div>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button
+                            className="dialog-btn primary"
+                            style={{ padding: '6px 12px', fontSize: '0.75rem' }}
+                            onClick={async () => {
+                              if (currentUser?.email) {
+                                await WorkspaceService.approveUserRequest(req, currentUser.email);
+                                showToast(`Utente ${req.email} approvato!`);
+                              }
+                            }}
+                          >
+                            Approva
+                          </button>
+                          <button
+                            className="dialog-btn danger"
+                            style={{ padding: '6px 10px', fontSize: '0.75rem' }}
+                            onClick={async () => {
+                              await WorkspaceService.removeApprovedUser(req.userId || req.id);
+                              showToast(`Richiesta di ${req.email} rimossa.`);
+                            }}
+                          >
+                            Rifiuta
+                          </button>
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <button
-                          className="dialog-btn primary"
-                          style={{ padding: '6px 12px', fontSize: '0.75rem' }}
-                          onClick={async () => {
-                            if (currentUser?.email) {
-                              await WorkspaceService.approveUserRequest(req, currentUser.email);
-                              showToast(`Utente ${req.email} approvato!`);
-                            }
-                          }}
-                        >
-                          Approva
-                        </button>
-                        <button
-                          className="dialog-btn danger"
-                          style={{ padding: '6px 10px', fontSize: '0.75rem' }}
-                          onClick={async () => {
-                            await WorkspaceService.removeApprovedUser(req.userId);
-                            showToast(`Richiesta di ${req.email} rimossa.`);
-                          }}
-                        >
-                          Rifiuta
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )
+                    ))
+                  )
               ) : (
                 approvedUsers.length === 0 ? (
                   <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', padding: '16px 0', textAlign: 'center' }}>
@@ -4109,7 +4214,8 @@ export default function App() {
             </button>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* OVERLAY ACCESSO IN ATTESA DI APPROVAZIONE PER UTENTI NON ADMIN */}
       {currentUser && !isApproved && (
@@ -4122,39 +4228,41 @@ export default function App() {
               Questo workspace privato appartiene a <b>beccalli.fabio4@gmail.com</b>.
             </p>
 
+            <div style={{ margin: '8px 0 14px 0', padding: '10px 12px', background: 'rgba(56, 189, 248, 0.08)', borderRadius: '10px', border: '1px solid rgba(56, 189, 248, 0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              <div className="sync-dot" style={{ background: '#38bdf8' }}></div>
+              <span style={{ fontSize: '0.78rem', color: '#7dd3fc', fontWeight: 500 }}>
+                Controllo autorizzazione attivo in tempo reale • Sblocco automatico
+              </span>
+            </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <button
-                className="dialog-btn primary"
-                onClick={async () => {
-                  if (currentUser) {
-                    const approved = await WorkspaceService.checkUserApproval(currentUser.uid, currentUser.email, currentUser.displayName);
-                    if (approved) {
-                      setIsApproved(true);
-                      setIsAdmin(WorkspaceService.isSuperAdmin(currentUser.email, currentUser.displayName));
-                      setCloudSyncActive(true);
-                      showToast('Accesso approvato! Benvenuto!');
-                    } else {
-                      showToast('Richiesta ancora in attesa di approvazione nel pannello Admin.', 'info');
-                    }
-                  }
-                }}
-              >
-                🔄 Ricontrolla approvazione
-              </button>
-
-              <button
                 className="dialog-btn"
-                style={{ background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)', color: '#60a5fa' }}
-                onClick={async () => {
-                  await handleLogout();
-                  await handleGoogleLogin();
-                }}
+                style={{ background: 'rgba(59, 130, 246, 0.18)', border: '1px solid rgba(59, 130, 246, 0.4)', color: '#93c5fd', padding: '10px 14px', fontWeight: 600 }}
+                onClick={handleImmediateSwitchAccount}
               >
                 👤 Accedi con l'account principale (beccalli.fabio4@gmail.com)
               </button>
 
-              <button className="dialog-btn" onClick={handleLogout}>
-                Disconnetti account
+              <button
+                className="dialog-btn"
+                style={{ fontSize: '0.8rem', padding: '8px 12px' }}
+                onClick={async () => {
+                  if (currentUser) {
+                    await WorkspaceService.submitAccessRequest(currentUser);
+                    showToast('Richiesta di accesso inviata al pannello Admin!');
+                  }
+                }}
+              >
+                📩 Reinvia notifica di richiesta ad admin
+              </button>
+
+              <button
+                className="dialog-btn danger"
+                style={{ padding: '8px 12px' }}
+                onClick={handleImmediateLogoutFromWaitScreen}
+              >
+                🚪 Disconnetti account
               </button>
             </div>
           </div>
