@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CustomWidget, MaterialItem, WidgetSlot } from '../types';
-import { getFileFromIndexedDB } from '../services/fileStorage';
+import { getFileFromIndexedDB, saveFileToIndexedDB } from '../services/fileStorage';
 import { evaluateMathExpression, compressImageFromBlob } from '../utils/editorTools';
 
 interface WorkspaceWidgetsDockProps {
@@ -12,6 +12,8 @@ interface WorkspaceWidgetsDockProps {
   onOpenWidgetSettings: () => void;
   onOpenFullPreview: (material: MaterialItem) => void;
   onInsertTextIntoNotes: (text: string) => void;
+  columnWidth?: number;
+  onChangeColumnWidth?: (w: number) => void;
   showToast: (msg: string, type?: 'info' | 'error') => void;
 }
 
@@ -58,6 +60,8 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
   onOpenWidgetSettings,
   onOpenFullPreview,
   onInsertTextIntoNotes,
+  columnWidth = 420,
+  onChangeColumnWidth,
   showToast
 }) => {
   const slotWidgets = widgets.filter(w => w.enabled && w.slot === slot);
@@ -104,11 +108,23 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
       if (!activeWidget || activeWidget.type !== 'pdf_viewer') return;
       setLoadingPdf(true);
       try {
-        // 1. Check if linked to a course material
-        const targetMat =
-          materials.find(m => String(m.id) === String(activeWidget.materialId)) ||
-          materials.find(m => m.fileType === 'pdf' || m.url.includes('drive.google.com')) ||
-          materials[0];
+        // Check if customUrl points to a direct local PDF uploaded inside the widget
+        if (activeWidget.customUrl && activeWidget.customUrl.startsWith('local_widget_pdf:')) {
+          const idbKey = activeWidget.customUrl.replace('local_widget_pdf:', '');
+          const localData = await getFileFromIndexedDB(idbKey);
+          if (localData && typeof localData === 'string' && localData.startsWith('data:')) {
+            const url = base64ToBlobUrl(localData, 'application/pdf');
+            if (isMounted) setResolvedPdfUrl(url);
+            return;
+          }
+        }
+
+        // Check if linked to a course material (or default to first PDF material if none chosen yet)
+        const targetMat = activeWidget.materialId
+          ? materials.find(m => String(m.id) === String(activeWidget.materialId))
+          : !activeWidget.customUrl
+          ? materials.find(m => m.fileType === 'pdf' || m.url.includes('drive.google.com')) || materials[0]
+          : undefined;
 
         if (targetMat && (!activeWidget.customUrl || activeWidget.materialId)) {
           const dId = extractDriveId(targetMat.url);
@@ -166,18 +182,35 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
 
   if (slotWidgets.length === 0 || !activeWidget) return null;
 
-  const widgetHeight = activeWidget.height || (slot === 'right_bottom' ? 300 : 250);
+  const isFullHeightSlot = slot === 'right_bottom' || slot === 'full_column';
+  const widgetHeight = activeWidget.height || (slot === 'right_bottom' ? 300 : 260);
 
-  const handleCycleSlot = (w: CustomWidget) => {
-    const order: WidgetSlot[] = ['right_bottom', 'center_bottom', 'left_bottom'];
-    const nextSlot = order[(order.indexOf(w.slot) + 1) % order.length];
+  const handleSelectSlot = (w: CustomWidget, nextSlot: WidgetSlot) => {
     const slotNames: Record<WidgetSlot, string> = {
+      full_column: 'Nuova Colonna Grande Dedicata',
       right_bottom: 'Sotto la Chat AI',
       center_bottom: 'Sotto gli Appunti',
       left_bottom: 'Sotto la Barra Laterale'
     };
     onUpdateWidget({ ...w, slot: nextSlot });
     showToast(`Widget spostato in: ${slotNames[nextSlot]}`);
+  };
+
+  const handleDirectPdfUpload = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result as string;
+      const key = `widget_pdf_${activeWidget.id}`;
+      await saveFileToIndexedDB(key, base64);
+      onUpdateWidget({
+        ...activeWidget,
+        title: file.name.replace(/\.pdf$/i, '').slice(0, 26) || 'PDF',
+        materialId: '',
+        customUrl: `local_widget_pdf:${key}`
+      });
+      showToast(`📄 PDF "${file.name}" caricato nel widget!`);
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleImagePasteOrUpload = async (file: Blob) => {
@@ -206,15 +239,22 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
+  // Determine current selected material ID for the PDF dropdown
+  const effectivePdfMaterialId =
+    activeWidget.materialId ||
+    (!activeWidget.customUrl && materials.length > 0
+      ? String((materials.find(m => m.fileType === 'pdf' || m.url.includes('drive.google.com')) || materials[0]).id)
+      : '');
+
   return (
     <div
-      className="workspace-widget-dock"
+      className={`workspace-widget-dock ${slot === 'full_column' ? 'is-full-column-dock' : ''}`}
       style={{
-        height: slot === 'right_bottom' ? '100%' : `${widgetHeight}px`,
-        minHeight: slot === 'right_bottom' ? '180px' : `${widgetHeight}px`
+        height: isFullHeightSlot ? '100%' : `${widgetHeight}px`,
+        minHeight: isFullHeightSlot ? '180px' : `${widgetHeight}px`
       }}
     >
-      {/* Top Bar: Widget Tabs + Quick Actions */}
+      {/* Compact Header Bar: Tabs + Inline PDF File Dropdown (if pdf_viewer) + Slot/Size Controls */}
       <div className="widget-dock-header">
         <div className="widget-dock-tabs">
           {slotWidgets.map(w => {
@@ -236,16 +276,99 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
                 type="button"
                 className={`widget-dock-tab ${w.id === activeWidget.id ? 'active' : ''}`}
                 onClick={() => setActiveWidgetId(w.id)}
+                title={w.title}
               >
                 <span>{icon}</span>
-                <span>{w.title}</span>
+                <span className="widget-tab-label">{w.title}</span>
               </button>
             );
           })}
+
+          {/* INLINE COMPACT PDF DROPDOWN SELECTOR IN HEADER (Maximizes vertical space for PDF!) */}
+          {activeWidget.type === 'pdf_viewer' && (
+            <div className="widget-header-pdf-bar">
+              <select
+                value={effectivePdfMaterialId}
+                onChange={e => {
+                  const val = e.target.value;
+                  onUpdateWidget({
+                    ...activeWidget,
+                    materialId: val,
+                    customUrl: ''
+                  });
+                }}
+                className="widget-header-pdf-select"
+                aria-label="Seleziona file PDF dal menu a tendina"
+                title="Scegli il PDF o documento da visualizzare"
+              >
+                <option value="">📂 Scegli file ({materials.length})...</option>
+                {materials.map(m => (
+                  <option key={String(m.id)} value={String(m.id)}>
+                    📄 {m.name}
+                  </option>
+                ))}
+              </select>
+
+              <label
+                className="widget-ctrl-btn"
+                style={{ cursor: 'pointer', width: 'auto', padding: '0 6px' }}
+                title="Carica un PDF dal PC direttamente nel widget"
+              >
+                📤
+                <input
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  style={{ display: 'none' }}
+                  onChange={e => {
+                    const f = e.target.files?.[0];
+                    if (f) handleDirectPdfUpload(f);
+                  }}
+                />
+              </label>
+
+              {materials.length > 0 && (
+                <button
+                  type="button"
+                  className="widget-ctrl-btn"
+                  onClick={() => {
+                    const target =
+                      materials.find(m => String(m.id) === String(effectivePdfMaterialId)) || materials[0];
+                    if (target) onOpenFullPreview(target);
+                  }}
+                  title="Apri PDF a schermo intero"
+                >
+                  ⛶
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="widget-dock-controls">
-          {slot !== 'right_bottom' && (
+          {/* Width controls when in Full Column mode */}
+          {slot === 'full_column' && onChangeColumnWidth && (
+            <>
+              <button
+                type="button"
+                className="widget-ctrl-btn"
+                onClick={() => onChangeColumnWidth(Math.max(280, columnWidth - 40))}
+                title="Stringi colonna widget"
+              >
+                ◀−
+              </button>
+              <button
+                type="button"
+                className="widget-ctrl-btn"
+                onClick={() => onChangeColumnWidth(Math.min(720, columnWidth + 40))}
+                title="Allarga colonna widget"
+              >
+                +▶
+              </button>
+            </>
+          )}
+
+          {/* Height controls when in bottom docks (left_bottom / center_bottom) */}
+          {!isFullHeightSlot && (
             <>
               <button
                 type="button"
@@ -258,26 +381,33 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
               <button
                 type="button"
                 className="widget-ctrl-btn"
-                onClick={() => onUpdateWidget({ ...activeWidget, height: Math.min(540, widgetHeight + 40) })}
+                onClick={() => onUpdateWidget({ ...activeWidget, height: Math.min(580, widgetHeight + 40) })}
                 title="Aumenta altezza widget"
               >
                 +
               </button>
             </>
           )}
-          <button
-            type="button"
-            className="widget-ctrl-btn"
-            onClick={() => handleCycleSlot(activeWidget)}
-            title="Sposta widget in un'altra posizione (Sotto Chat / Sotto Appunti / Sotto Strumenti)"
+
+          {/* Direct Slot / Full Column Selector */}
+          <select
+            value={activeWidget.slot}
+            onChange={e => handleSelectSlot(activeWidget, e.target.value as WidgetSlot)}
+            className="widget-slot-mini-select"
+            aria-label="Posizione del widget"
+            title="Sposta il widget (es. in una Nuova Colonna Grande dedicata o sotto la Chat)"
           >
-            ⇄
-          </button>
+            <option value="full_column">📐 Colonna Grande</option>
+            <option value="right_bottom">📍 Sotto Chat</option>
+            <option value="center_bottom">📍 Sotto Appunti</option>
+            <option value="left_bottom">📍 Sotto Strumenti</option>
+          </select>
+
           <button
             type="button"
             className="widget-ctrl-btn"
             onClick={onOpenWidgetSettings}
-            title="Personalizza o aggiungi altri widget"
+            title="Apri impostazioni Layout & Widget"
           >
             ⚙️
           </button>
@@ -285,7 +415,7 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
             type="button"
             className="widget-ctrl-btn danger"
             onClick={() => onRemoveWidget(activeWidget.id)}
-            title="Rimuovi questo widget"
+            title="Chiudi e rimuovi questo widget"
           >
             ✕
           </button>
@@ -294,47 +424,11 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
 
       {/* Widget Body */}
       <div className="widget-dock-body">
-        {/* 1. PDF VIEWER WIDGET */}
+        {/* 1. PDF VIEWER WIDGET (Zero extra subtoolbar when viewing PDF -> Maximum space!) */}
         {activeWidget.type === 'pdf_viewer' && (
           <div className="widget-pdf-container">
-            <div className="widget-subtoolbar">
-              <select
-                value={activeWidget.materialId || ''}
-                onChange={e =>
-                  onUpdateWidget({
-                    ...activeWidget,
-                    materialId: e.target.value,
-                    customUrl: ''
-                  })
-                }
-                className="widget-select"
-                title="Scegli un PDF o documento dai materiali della materia corrente"
-              >
-                <option value="">📚 Scegli dai Materiali ({materials.length})...</option>
-                {materials.map(m => (
-                  <option key={String(m.id)} value={String(m.id)}>
-                    {m.name} ({m.category})
-                  </option>
-                ))}
-              </select>
-              {materials.length > 0 && (
-                <button
-                  type="button"
-                  className="widget-mini-btn"
-                  onClick={() => {
-                    const target =
-                      materials.find(m => String(m.id) === String(activeWidget.materialId)) || materials[0];
-                    if (target) onOpenFullPreview(target);
-                  }}
-                  title="Apri anteprima a tutto schermo"
-                >
-                  ⛶ Espandi
-                </button>
-              )}
-            </div>
-
             {loadingPdf ? (
-              <div className="widget-empty-state">Caricamento documento...</div>
+              <div className="widget-empty-state">Caricamento documento PDF...</div>
             ) : resolvedPdfUrl ? (
               <iframe
                 src={resolvedPdfUrl}
@@ -343,15 +437,33 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
               />
             ) : (
               <div className="widget-empty-state">
-                <div style={{ fontSize: '1.4rem', marginBottom: '4px' }}>📄</div>
-                <div>Nessun PDF selezionato o presente in questa materia.</div>
-                <div style={{ display: 'flex', gap: '6px', marginTop: '8px', width: '100%', maxWidth: '280px' }}>
+                <div style={{ fontSize: '1.5rem', marginBottom: '4px' }}>📄</div>
+                <div style={{ fontWeight: 600, color: '#e2e8f0' }}>
+                  Scegli un file dal menu a tendina in alto
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '2px' }}>
+                  oppure carica un PDF dal PC o incolla un link Google Drive qui sotto:
+                </div>
+                <div style={{ display: 'flex', gap: '6px', marginTop: '10px', width: '100%', maxWidth: '310px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <label className="widget-mini-btn accent" style={{ cursor: 'pointer', padding: '6px 12px' }}>
+                    📤 Sfoglia PDF dal PC
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      style={{ display: 'none' }}
+                      onChange={e => {
+                        const f = e.target.files?.[0];
+                        if (f) handleDirectPdfUpload(f);
+                      }}
+                    />
+                  </label>
                   <input
                     type="text"
-                    placeholder="Oppure incolla link PDF / Google Drive..."
-                    value={activeWidget.customUrl || ''}
+                    placeholder="O incolla link PDF / Google Drive..."
+                    value={activeWidget.customUrl?.startsWith('local_widget_pdf:') ? '' : activeWidget.customUrl || ''}
                     onChange={e => onUpdateWidget({ ...activeWidget, customUrl: e.target.value, materialId: '' })}
                     className="widget-input"
+                    style={{ width: '100%', marginTop: '4px' }}
                   />
                 </div>
               </div>
@@ -418,7 +530,7 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
               )}
             </div>
 
-            <div className="widget-image- stage" style={{ flex: 1, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px' }}>
+            <div className="widget-image-stage" style={{ flex: 1, overflow: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px' }}>
               {activeWidget.imageData || activeWidget.customUrl ? (
                 <img
                   src={activeWidget.imageData || activeWidget.customUrl}
@@ -466,17 +578,6 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
                   Vai
                 </button>
               </form>
-              <a
-                href={activeWidget.customUrl || 'https://it.wikipedia.org'}
-                target="_blank"
-                rel="noreferrer"
-                className="widget-mini-btn"
-                title="Apri il sito in una nuova scheda se blocca la visualizzazione interna"
-              >
-                ↗
-              </a>
-            </div>
-            <div className="widget-subtoolbar" style={{ paddingTop: 0, gap: '4px', overflowX: 'auto' }}>
               {WEB_WIDGET_PRESETS.map(p => (
                 <button
                   key={p.label}
@@ -490,6 +591,15 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
                   {p.label}
                 </button>
               ))}
+              <a
+                href={activeWidget.customUrl || 'https://it.wikipedia.org'}
+                target="_blank"
+                rel="noreferrer"
+                className="widget-mini-btn"
+                title="Apri il sito in una nuova scheda"
+              >
+                ↗
+              </a>
             </div>
             <iframe
               src={activeWidget.customUrl || 'https://it.m.wikipedia.org/wiki/Informatica'}

@@ -1,7 +1,10 @@
 /**
  * Editor Utilities:
- * - Safe Math & Formula Evaluator (inline calculations & formula toolbox)
- * - Multi-language Syntax Highlighter for Note Code Blocks
+ * - Safe Math & Formula Evaluator (inline live formula boxes & calculations)
+ * - Multi-language Syntax Highlighter & Interactive Inline Code Block Builder
+ * - Smart Tab & Loop/Block Auto-Indentation Engine
+ * - Caret Offset Preservation for ContentEditable Code Blocks
+ * - Viewport-Aware Context Menu Positioning (Flip Up / Left)
  * - Clipboard Image Compression for Note & Chat Screenshot Pasting
  */
 
@@ -15,57 +18,57 @@ export interface CodeLanguageOption {
 export const CODE_LANGUAGES: CodeLanguageOption[] = [
   {
     id: 'javascript',
-    label: 'JavaScript / TypeScript',
+    label: 'JavaScript / TS',
     badge: 'JS / TS',
-    sample: 'function calcolaMedia(voti) {\n  const somma = voti.reduce((a, b) => a + b, 0);\n  return somma / voti.length;\n}'
+    sample: 'for (let i = 0; i < 10; i++) {\n    console.log(i);\n}'
   },
   {
     id: 'python',
     label: 'Python',
     badge: 'PYTHON',
-    sample: 'def filtra_studenti(lista, voto_min=18):\n    # Restituisce gli studenti promossi\n    return [s for s in lista if s["voto"] >= voto_min]'
+    sample: 'for studente in lista:\n    print(studente)'
   },
   {
     id: 'sql',
     label: 'SQL / Database',
     badge: 'SQL',
-    sample: 'SELECT s.nome, s.cognome, AVG(e.voto) AS media\nFROM studenti s\nJOIN esami e ON s.id = e.studente_id\nWHERE e.voto >= 18\nGROUP BY s.id\nORDER BY media DESC;'
-  },
-  {
-    id: 'html',
-    label: 'HTML / CSS',
-    badge: 'HTML / CSS',
-    sample: '<div class="card-container">\n  <h2>Titolo Sezione</h2>\n  <p>Contenuto dell\'elemento</p>\n</div>'
+    sample: 'SELECT nome, voto\nFROM esami\nWHERE voto >= 18;'
   },
   {
     id: 'java',
     label: 'Java / C#',
     badge: 'JAVA / C#',
-    sample: 'public class Studente {\n    private String nome;\n    public Studente(String nome) {\n        this.nome = nome;\n    }\n}'
+    sample: 'for (int i = 0; i < n; i++) {\n    System.out.println(i);\n}'
   },
   {
     id: 'cpp',
     label: 'C / C++',
     badge: 'C / C++',
-    sample: '#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << "Workspace ITS" << endl;\n    return 0;\n}'
+    sample: 'for (int i = 0; i < n; i++) {\n    cout << i << endl;\n}'
+  },
+  {
+    id: 'html',
+    label: 'HTML / CSS',
+    badge: 'HTML / CSS',
+    sample: '<div class="card">\n    <h2>Titolo</h2>\n</div>'
   },
   {
     id: 'php',
     label: 'PHP',
     badge: 'PHP',
-    sample: '<?php\n$utente = ["nome" => "Mario", "ruolo" => "Studente"];\necho "Benvenuto " . $utente["nome"];\n?>'
+    sample: 'foreach ($utenti as $u) {\n    echo $u;\n}'
   },
   {
     id: 'bash',
-    label: 'Bash / Terminale / Linux',
+    label: 'Bash / Linux',
     badge: 'BASH',
-    sample: '#!/bin/bash\ndocker compose up -d --build\ngit status && git log -n 5 --oneline'
+    sample: 'for f in *.txt; do\n    echo "$f"\ndone'
   },
   {
     id: 'json',
-    label: 'JSON / Configurazione',
+    label: 'JSON',
     badge: 'JSON',
-    sample: '{\n  "corso": "Sviluppo Cloud & Database",\n  "anno": 2026,\n  "attivo": true\n}'
+    sample: '{\n    "corso": "ITS",\n    "attivo": true\n}'
   }
 ];
 
@@ -105,17 +108,29 @@ export const FORMULA_PRESETS = [
 
 /**
  * Safely evaluates a mathematical expression string.
+ * Supports direct expressions ("(125 * 4) + sqrt(16)") as well as
+ * named formulas ("area = 12 * 5" -> evaluates right-hand side "12 * 5" -> "60").
  * Returns formatted number string or null if invalid.
  */
 export function evaluateMathExpression(raw: string): string | null {
   if (!raw || typeof raw !== 'string') return null;
 
-  let expr = raw
-    .trim()
-    .replace(/=$/, '')
-    .trim()
-    // Normalize symbols
+  let expr = raw.trim().replace(/=\s*$/, '').trim();
+  if (!expr) return null;
+
+  // If the user wrote a named formula like "risultato = 25 * 4" or "y = sqrt(144) + 8",
+  // evaluate the right-hand side after the first '=' if the left side is a variable name
+  if (expr.includes('=') && !/[<>!]=/.test(expr)) {
+    const parts = expr.split('=');
+    if (parts.length === 2 && /^[a-zA-Z_α-ωΑ-Ω0-9\s]+$/.test(parts[0].trim())) {
+      expr = parts[1].trim();
+    }
+  }
+
+  expr = expr
+    // Normalize math symbols
     .replace(/×/g, '*')
+    .replace(/·/g, '*')
     .replace(/÷/g, '/')
     .replace(/:/g, '/')
     .replace(/−/g, '-')
@@ -127,7 +142,7 @@ export function evaluateMathExpression(raw: string): string | null {
     .replace(/\bpi\b/gi, 'PI');
 
   // Support comma decimals if not inside multi-arg function like pow(2,3)
-  if (!/pow\s*\(/i.test(expr)) {
+  if (!/\b(pow|min|max)\s*\(/i.test(expr)) {
     expr = expr.replace(/(\d),(\d)/g, '$1.$2');
   }
 
@@ -160,12 +175,16 @@ export function evaluateMathExpression(raw: string): string | null {
     E: 'Math.E'
   };
 
-  const tokenized = expr.replace(/\b(sqrt|sin|cos|tan|asin|acos|atan|abs|round|floor|ceil|log|ln|exp|pow|min|max|PI|E)\b/g, match => {
-    return mathMap[match] || match;
-  });
+  const tokenized = expr.replace(
+    /\b(sqrt|sin|cos|tan|asin|acos|atan|abs|round|floor|ceil|log|ln|exp|pow|min|max|PI|E)\b/g,
+    match => mathMap[match] || match
+  );
 
   // Security validation: after replacing Math.* tokens, only digits, operators, parens, dots, commas, and spaces may remain
-  const stripped = tokenized.replace(/Math\.(sqrt|sin|cos|tan|asin|acos|atan|abs|round|floor|ceil|log10|log|exp|pow|min|max|PI|E)/g, '');
+  const stripped = tokenized.replace(
+    /Math\.(sqrt|sin|cos|tan|asin|acos|atan|abs|round|floor|ceil|log10|log|exp|pow|min|max|PI|E)/g,
+    ''
+  );
   if (!/^[0-9+\-*/().\s,%]+$/.test(stripped)) {
     return null;
   }
@@ -189,7 +208,7 @@ export function evaluateMathExpression(raw: string): string | null {
   }
 }
 
-function escapeHtml(str: string): string {
+export function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -204,11 +223,6 @@ export function highlightCodeSyntax(rawCode: string, language: string): string {
   const escaped = escapeHtml(rawCode);
   const lang = (language || 'javascript').toLowerCase();
 
-  // Combined single-pass regex to avoid nested span corruption:
-  // Group 1: Comments (//..., /*...*/, #..., --...)
-  // Group 2: Strings ("...", '...', `...`)
-  // Group 3: Numbers (\b\d+(?:\.\d+)?\b)
-  // Group 4: Words / Identifiers (\b[A-Za-z_][A-Za-z0-9_]*\b)
   const tokenRegex =
     /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|#[^\n]*|--[^\n]*)|(&quot;(?:\\.|[^&])*?&quot;|'(?:\\.|[^'])*?'|`(?:\\.|[^`])*?`)|\b(\d+(?:\.\d+)?)\b|\b([A-Za-z_][A-Za-z0-9_]*)\b/g;
 
@@ -216,12 +230,14 @@ export function highlightCodeSyntax(rawCode: string, language: string): string {
     'function', 'const', 'let', 'var', 'return', 'if', 'else', 'for', 'while', 'do',
     'switch', 'case', 'break', 'continue', 'class', 'extends', 'new', 'import', 'from',
     'export', 'default', 'async', 'await', 'try', 'catch', 'finally', 'throw', 'typeof',
-    'interface', 'type', 'implements', 'public', 'private', 'protected', 'static', 'readonly'
+    'interface', 'type', 'implements', 'public', 'private', 'protected', 'static', 'readonly',
+    'console', 'log'
   ]);
   const pyKeywords = new Set([
     'def', 'class', 'return', 'if', 'elif', 'else', 'for', 'while', 'in', 'not', 'and',
     'or', 'import', 'from', 'as', 'try', 'except', 'finally', 'raise', 'with', 'lambda',
-    'yield', 'pass', 'break', 'continue', 'global', 'nonlocal', 'assert', 'async', 'await'
+    'yield', 'pass', 'break', 'continue', 'global', 'nonlocal', 'assert', 'async', 'await',
+    'print', 'range', 'len'
   ]);
   const sqlKeywords = new Set([
     'SELECT', 'FROM', 'WHERE', 'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE',
@@ -235,7 +251,7 @@ export function highlightCodeSyntax(rawCode: string, language: string): string {
     'int', 'double', 'float', 'char', 'boolean', 'bool', 'long', 'short', 'String',
     'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue',
     'new', 'this', 'super', 'static', 'final', 'const', 'using', 'namespace', 'include',
-    'std', 'cout', 'cin', 'endl', 'try', 'catch', 'throw', 'override', 'virtual'
+    'std', 'cout', 'cin', 'endl', 'try', 'catch', 'throw', 'override', 'virtual', 'System', 'out', 'println'
   ]);
   const literals = new Set(['true', 'false', 'null', 'undefined', 'None', 'True', 'False', 'NULL']);
 
@@ -274,23 +290,255 @@ export function highlightCodeSyntax(rawCode: string, language: string): string {
 }
 
 /**
- * Generates the HTML snippet for a syntax-highlighted code block inside #notes-area
+ * Generates an inline interactive code block HTML with an embedded language <select> dropdown,
+ * Tab / Auto-indent support, and live syntax highlighting directly inside #notes-area.
  */
-export function buildHighlightedCodeBlockHtml(code: string, languageId: string): string {
+export function buildHighlightedCodeBlockHtml(
+  code: string,
+  languageId = 'javascript',
+  blockId?: string
+): string {
   const langObj = CODE_LANGUAGES.find(l => l.id === languageId) || CODE_LANGUAGES[0];
-  const highlighted = highlightCodeSyntax(code, langObj.id);
-  const encodedRaw = encodeURIComponent(code);
+  const initialCode = typeof code === 'string' && code.length > 0 ? code : '';
+  const highlighted = highlightCodeSyntax(initialCode, langObj.id);
+  const encodedRaw = encodeURIComponent(initialCode);
+  const uniqueId = blockId || `code_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
-  return `
-<div class="note-code-block" data-lang="${langObj.id}" data-raw="${encodedRaw}" contenteditable="false">
-  <div class="note-code-header">
-    <span class="note-code-lang-badge">${langObj.badge}</span>
-    <div class="note-code-actions">
-      <button type="button" class="note-code-copy-btn" data-copy-code="true">📋 Copia Codice</button>
-    </div>
-  </div>
-  <pre class="note-code-pre" contenteditable="true" spellcheck="false"><code>${highlighted}</code></pre>
-</div><p><br></p>`;
+  const optionsHtml = CODE_LANGUAGES.map(
+    l =>
+      `<option value="${l.id}"${l.id === langObj.id ? ' selected="selected"' : ''}>${l.label}</option>`
+  ).join('');
+
+  return `<div class="note-code-block" id="${uniqueId}" data-lang="${langObj.id}" data-raw="${encodedRaw}" contenteditable="false"><div class="note-code-header"><div class="note-code-lang-wrap"><span class="note-code-dot">●</span><select class="note-code-lang-select" aria-label="Linguaggio blocco codice" title="Cambia linguaggio di programmazione">${optionsHtml}</select><span class="note-code-hint">Tab = Indenta • Auto-indent attivo</span></div><div class="note-code-actions"><button type="button" class="note-code-copy-btn" data-copy-code="true">📋 Copia</button><button type="button" class="note-code-del-btn" data-delete-code="true" title="Elimina blocco codice">✕</button></div></div><pre class="note-code-pre" contenteditable="true" spellcheck="false" data-placeholder="Scrivi o incolla il codice qui... (Premi Tab per indentare)"><code class="note-code-content">${highlighted || ''}</code></pre></div><p><br></p>`;
+}
+
+/**
+ * Generates an interactive live-evaluating Formula Box directly inside #notes-area.
+ * Typing any mathematical expression inside `.note-formula-input` immediately computes and updates `.note-formula-output`.
+ */
+export function buildInteractiveFormulaBoxHtml(initialExpr = '', boxId?: string): string {
+  const cleanInitial = initialExpr.trim();
+  const evaluated = cleanInitial ? evaluateMathExpression(cleanInitial) : null;
+  const uniqueId = boxId || `formula_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const escapedInitial = escapeHtml(cleanInitial);
+  const outputText = evaluated !== null ? `= ${evaluated}` : '= ?';
+  const hasValidResult = evaluated !== null;
+
+  return `<span class="note-formula-box" id="${uniqueId}" contenteditable="false" data-formula="${escapedInitial}"><span class="note-formula-sigma" title="Formula / Calcolo Live">∑</span><span class="note-formula-input" contenteditable="true" spellcheck="false" role="textbox" aria-label="Formula o espressione matematica" data-placeholder="Scrivi calcolo o formula (es. 25 * 4)...">${escapedInitial}</span><span class="note-formula-output ${hasValidResult ? 'has-result' : 'is-symbolic'}" title="Risultato calcolato in automatico (clicca per copiare)">${outputText}</span><button type="button" class="note-formula-del-btn" data-delete-formula="true" title="Rimuovi box formula">✕</button></span>&nbsp;`;
+}
+
+/**
+ * Pure, deterministic indentation and auto-indentation logic for code blocks.
+ * Handles:
+ * - Tab (inserts 4 spaces or indents multi-line selection)
+ * - Shift+Tab (unindents up to 4 spaces)
+ * - Enter (preserves current line's indentation AND automatically adds +1 indent level
+ *   when inside a loop/block/function header like `for (...) {`, `if (...) {`, `while (...) {`,
+ *   Python `for ...:`, `def ...:`, `if ...:`, or Bash `do` / `then`).
+ * - Auto-splits `{|}` into three lines with cursor indented in the middle.
+ */
+export function computeCodeKeyDownEdit(
+  code: string,
+  selStart: number,
+  selEnd: number,
+  key: string,
+  shiftKey = false
+): { newCode: string; newCaret: number } | null {
+  const INDENT = '    '; // 4 spaces
+
+  if (key === 'Tab') {
+    const before = code.slice(0, selStart);
+    const selected = code.slice(selStart, selEnd);
+    const after = code.slice(selEnd);
+
+    if (!shiftKey) {
+      if (selStart === selEnd || !selected.includes('\n')) {
+        const newCode = before + INDENT + after;
+        return { newCode, newCaret: selStart + INDENT.length };
+      } else {
+        // Multi-line indent
+        const lineStartIdx = before.lastIndexOf('\n') + 1;
+        const prefix = code.slice(0, lineStartIdx);
+        const targetBlock = code.slice(lineStartIdx, selEnd);
+        const indentedBlock = targetBlock
+          .split('\n')
+          .map(line => INDENT + line)
+          .join('\n');
+        const newCode = prefix + indentedBlock + after;
+        return { newCode, newCaret: lineStartIdx + indentedBlock.length };
+      }
+    } else {
+      // Shift+Tab: unindent current line by up to 4 spaces
+      const lineStartIdx = before.lastIndexOf('\n') + 1;
+      const currentLine = code.slice(lineStartIdx);
+      const matchSpaces = currentLine.match(/^( {1,4}|\t)/);
+      if (!matchSpaces) {
+        return { newCode: code, newCaret: selStart };
+      }
+      const removeLen = matchSpaces[0].length;
+      const newCode = code.slice(0, lineStartIdx) + code.slice(lineStartIdx + removeLen);
+      const newCaret = Math.max(lineStartIdx, selStart - removeLen);
+      return { newCode, newCaret };
+    }
+  }
+
+  if (key === 'Enter') {
+    const before = code.slice(0, selStart);
+    const after = code.slice(selEnd);
+    const lineStartIdx = before.lastIndexOf('\n') + 1;
+    const currentLineBeforeCursor = before.slice(lineStartIdx);
+    const leadingWhitespace = currentLineBeforeCursor.match(/^[ \t]*/)?.[0] || '';
+    const trimmedBefore = currentLineBeforeCursor.trim();
+    const trimmedAfter = after.replace(/^[ \t]*/, '');
+
+    // Check if current line opens a loop, conditional, function, or block:
+    // 1. Ends with '{', ':', '(', '['
+    const endsWithBlockOpener = /[{:(\[]\s*$/.test(trimmedBefore);
+    // 2. Or is a C/JS/Java loop/conditional header without brace yet (e.g. `for (...)`, `while (...)`, `if (...)`, `else`)
+    const isLoopOrBranchHeader =
+      /^(for|while|if|else\s+if|foreach|switch)\s*\(.*\)\s*$/.test(trimmedBefore) ||
+      /^(else|do|try|finally)\s*$/.test(trimmedBefore) ||
+      /\b(do|then)\s*$/.test(trimmedBefore);
+
+    const shouldIncreaseIndent = endsWithBlockOpener || isLoopOrBranchHeader;
+    const nextLineIndent = shouldIncreaseIndent ? leadingWhitespace + INDENT : leadingWhitespace;
+
+    // Special case: cursor is right between `{` and `}` (or `(` and `)`, `[` and `]`)
+    const lastCharBefore = trimmedBefore.slice(-1);
+    const firstCharAfter = trimmedAfter.charAt(0);
+    const isBetweenMatchingBrackets =
+      (lastCharBefore === '{' && firstCharAfter === '}') ||
+      (lastCharBefore === '(' && firstCharAfter === ')') ||
+      (lastCharBefore === '[' && firstCharAfter === ']');
+
+    if (isBetweenMatchingBrackets) {
+      const insertion = '\n' + nextLineIndent + '\n' + leadingWhitespace;
+      const newCode = before + insertion + after;
+      const newCaret = before.length + 1 + nextLineIndent.length;
+      return { newCode, newCaret };
+    }
+
+    const insertion = '\n' + nextLineIndent;
+    const newCode = before + insertion + after;
+    const newCaret = before.length + insertion.length;
+    return { newCode, newCaret };
+  }
+
+  // Optional auto-closing curly brace `{` -> `{}` when followed by whitespace or end of line
+  if (key === '{') {
+    const before = code.slice(0, selStart);
+    const after = code.slice(selEnd);
+    if (selStart === selEnd && (/^\s*(\n|$)/.test(after))) {
+      const newCode = before + '{}' + after;
+      return { newCode, newCaret: selStart + 1 };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Gets the exact character offset (and selection end) of the current selection inside a root HTMLElement.
+ */
+export function getSelectionCharOffsetsWithin(root: HTMLElement): { start: number; end: number } {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return { start: 0, end: 0 };
+  const range = sel.getRangeAt(0);
+  if (!root.contains(range.commonAncestorContainer)) {
+    const len = (root.textContent || '').length;
+    return { start: len, end: len };
+  }
+
+  const preStartRange = range.cloneRange();
+  preStartRange.selectNodeContents(root);
+  preStartRange.setEnd(range.startContainer, range.startOffset);
+  const start = preStartRange.toString().length;
+
+  const preEndRange = range.cloneRange();
+  preEndRange.selectNodeContents(root);
+  preEndRange.setEnd(range.endContainer, range.endOffset);
+  const end = preEndRange.toString().length;
+
+  return { start, end };
+}
+
+/**
+ * Restores the caret inside `root` at the specified character offset.
+ */
+export function setCaretCharOffsetWithin(root: HTMLElement, targetOffset: number): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  let currentNode = walker.nextNode() as Text | null;
+  let charCount = 0;
+
+  while (currentNode) {
+    const nodeLen = currentNode.length;
+    if (charCount + nodeLen >= targetOffset) {
+      const range = document.createRange();
+      const offsetInNode = Math.max(0, Math.min(nodeLen, targetOffset - charCount));
+      range.setStart(currentNode, offsetInNode);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return;
+    }
+    charCount += nodeLen;
+    currentNode = walker.nextNode() as Text | null;
+  }
+
+  // Fallback: place caret at the end of root
+  const fallbackRange = document.createRange();
+  fallbackRange.selectNodeContents(root);
+  fallbackRange.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(fallbackRange);
+}
+
+/**
+ * Computes viewport-safe coordinates for the custom right-click context menu.
+ * If the menu would overflow the bottom edge, it flips UPWARDS above the cursor.
+ * If the menu would overflow the right edge, it flips LEFTWARDS to the left of the cursor.
+ * Also clamps to top/left margins so it never leaves the screen on any direction.
+ */
+export function computeContextMenuPosition(
+  clickX: number,
+  clickY: number,
+  menuWidth: number,
+  menuHeight: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  margin = 12
+): { x: number; y: number } {
+  let x = clickX;
+  let y = clickY;
+
+  // Flip horizontally (to the left of the cursor) if overflowing right edge
+  if (x + menuWidth > viewportWidth - margin) {
+    x = clickX - menuWidth;
+  }
+  // Clamp horizontally within [margin, viewportWidth - menuWidth - margin]
+  if (x + menuWidth > viewportWidth - margin) {
+    x = viewportWidth - menuWidth - margin;
+  }
+  if (x < margin) {
+    x = margin;
+  }
+
+  // Flip vertically (above the cursor) if overflowing bottom edge
+  if (y + menuHeight > viewportHeight - margin) {
+    y = clickY - menuHeight;
+  }
+  // Clamp vertically within [margin, viewportHeight - menuHeight - margin]
+  if (y + menuHeight > viewportHeight - margin) {
+    y = viewportHeight - menuHeight - margin;
+  }
+  if (y < margin) {
+    y = margin;
+  }
+
+  return { x: Math.round(x), y: Math.round(y) };
 }
 
 /**

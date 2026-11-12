@@ -309,6 +309,8 @@ interface SettingsModalProps {
   onChangeLeftColumnWidth: (w: number) => void;
   rightColumnWidth: number;
   onChangeRightColumnWidth: (w: number) => void;
+  widgetColumnWidth: number;
+  onChangeWidgetColumnWidth: (w: number) => void;
   chatSplitRatio: number;
   onChangeChatSplitRatio: (ratio: number) => void;
   customWidgets: CustomWidget[];
@@ -361,6 +363,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onChangeLeftColumnWidth,
   rightColumnWidth,
   onChangeRightColumnWidth,
+  widgetColumnWidth,
+  onChangeWidgetColumnWidth,
   chatSplitRatio,
   onChangeChatSplitRatio,
   customWidgets,
@@ -645,6 +649,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '4px' }}>
+                    <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Larghezza Colonna Widget Grande</span>
+                    <b style={{ color: '#38bdf8' }}>{widgetColumnWidth}px</b>
+                  </div>
+                  <input
+                    type="range"
+                    min={280}
+                    max={720}
+                    step={20}
+                    value={widgetColumnWidth}
+                    onChange={e => onChangeWidgetColumnWidth(parseInt(e.target.value, 10))}
+                    style={{ width: '100%', accentColor: 'var(--accent-primary, #6366f1)', cursor: 'pointer' }}
+                  />
+                </div>
+
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '4px' }}>
                     <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Altezza Chat vs Widget Sotto</span>
                     <b style={{ color: '#38bdf8' }}>Chat {chatSplitRatio}% / Widget {100 - chatSplitRatio}%</b>
                   </div>
@@ -700,58 +720,82 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         {cat.desc}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: '5px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                       <button
                         type="button"
-                        onClick={() => handleAddWidget(cat.type, cat.name, 'right_bottom')}
+                        onClick={() => handleAddWidget(cat.type, cat.name, 'full_column')}
                         style={{
-                          flex: 1,
-                          padding: '5px 8px',
-                          borderRadius: '6px',
-                          background: 'var(--accent-primary, #6366f1)',
-                          border: 'none',
+                          width: '100%',
+                          padding: '6px 10px',
+                          borderRadius: '7px',
+                          background: 'linear-gradient(135deg, var(--accent-primary, #6366f1), #0284c7)',
+                          border: '1px solid rgba(56, 189, 248, 0.45)',
                           color: '#fff',
-                          fontSize: '0.71rem',
-                          fontWeight: 600,
-                          cursor: 'pointer'
+                          fontSize: '0.73rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '5px'
                         }}
+                        title="Aggiungi questo widget come una nuova colonna grande a tutta altezza affiancata agli appunti!"
                       >
-                        + Sotto la Chat
+                        📐 + Nuova Colonna Grande (Dedicata)
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAddWidget(cat.type, cat.name, 'center_bottom')}
-                        style={{
-                          padding: '5px 8px',
-                          borderRadius: '6px',
-                          background: 'rgba(255,255,255,0.08)',
-                          border: '1px solid rgba(255,255,255,0.14)',
-                          color: '#e2e8f0',
-                          fontSize: '0.71rem',
-                          fontWeight: 600,
-                          cursor: 'pointer'
-                        }}
-                        title="Aggiungi sotto l'area degli Appunti"
-                      >
-                        + Sotto Appunti
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAddWidget(cat.type, cat.name, 'left_bottom')}
-                        style={{
-                          padding: '5px 8px',
-                          borderRadius: '6px',
-                          background: 'rgba(255,255,255,0.08)',
-                          border: '1px solid rgba(255,255,255,0.14)',
-                          color: '#e2e8f0',
-                          fontSize: '0.71rem',
-                          fontWeight: 600,
-                          cursor: 'pointer'
-                        }}
-                        title="Aggiungi nella colonna Strumenti"
-                      >
-                        + Sx
-                      </button>
+                      <div style={{ display: 'flex', gap: '5px' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleAddWidget(cat.type, cat.name, 'right_bottom')}
+                          style={{
+                            flex: 1,
+                            padding: '5px 8px',
+                            borderRadius: '6px',
+                            background: 'rgba(99, 102, 241, 0.2)',
+                            border: '1px solid rgba(99, 102, 241, 0.45)',
+                            color: '#e0e7ff',
+                            fontSize: '0.7rem',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          + Sotto Chat
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAddWidget(cat.type, cat.name, 'center_bottom')}
+                          style={{
+                            padding: '5px 8px',
+                            borderRadius: '6px',
+                            background: 'rgba(255,255,255,0.08)',
+                            border: '1px solid rgba(255,255,255,0.14)',
+                            color: '#e2e8f0',
+                            fontSize: '0.7rem',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                          title="Aggiungi sotto l'area degli Appunti"
+                        >
+                          + Sotto Appunti
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAddWidget(cat.type, cat.name, 'left_bottom')}
+                          style={{
+                            padding: '5px 8px',
+                            borderRadius: '6px',
+                            background: 'rgba(255,255,255,0.08)',
+                            border: '1px solid rgba(255,255,255,0.14)',
+                            color: '#e2e8f0',
+                            fontSize: '0.7rem',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                          title="Aggiungi nella colonna Strumenti"
+                        >
+                          + Sx
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -828,6 +872,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           padding: '4px 8px'
                         }}
                       >
+                        <option value="full_column">📐 Nuova Colonna Grande (Dedicata)</option>
                         <option value="right_bottom">📍 Sotto la Chat AI</option>
                         <option value="center_bottom">📍 Sotto gli Appunti</option>
                         <option value="left_bottom">📍 Sotto Barra Strumenti</option>

@@ -39,7 +39,7 @@ export interface SubjectItem {
   driveLink?: string;
 }
 
-export type WidgetSlot = 'right_bottom' | 'left_bottom' | 'center_bottom';
+export type WidgetSlot = 'full_column' | 'right_bottom' | 'left_bottom' | 'center_bottom';
 
 export type WidgetType =
   | 'pdf_viewer'
@@ -56,6 +56,7 @@ export interface CustomWidget {
   slot: WidgetSlot;
   enabled: boolean;
   height?: number;
+  width?: number;
   materialId?: string;
   customUrl?: string;
   imageData?: string;
@@ -87,6 +88,7 @@ export interface UserPreferences {
   columnLayout?: ColumnLayoutPreset;
   leftColumnWidth?: number;
   rightColumnWidth?: number;
+  widgetColumnWidth?: number;
   chatSplitRatio?: number;
   customWidgets?: CustomWidget[];
 }

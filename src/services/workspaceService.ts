@@ -82,6 +82,7 @@ export class WorkspaceService {
       columnLayout: (localStorage.getItem('workspace_column_layout') as any) || 'tools-notes-chat',
       leftColumnWidth: parseInt(localStorage.getItem('workspace_left_col_w') || '250', 10),
       rightColumnWidth: parseInt(localStorage.getItem('workspace_right_col_w') || '340', 10),
+      widgetColumnWidth: parseInt(localStorage.getItem('workspace_widget_col_w') || '420', 10),
       chatSplitRatio: parseInt(localStorage.getItem('workspace_chat_split_ratio') || '52', 10),
       customWidgets: this.localGet('workspace_custom_widgets', [])
     };
@@ -163,6 +164,7 @@ export class WorkspaceService {
     if (pref.columnLayout !== undefined) localStorage.setItem('workspace_column_layout', pref.columnLayout);
     if (pref.leftColumnWidth !== undefined) localStorage.setItem('workspace_left_col_w', String(pref.leftColumnWidth));
     if (pref.rightColumnWidth !== undefined) localStorage.setItem('workspace_right_col_w', String(pref.rightColumnWidth));
+    if (pref.widgetColumnWidth !== undefined) localStorage.setItem('workspace_widget_col_w', String(pref.widgetColumnWidth));
     if (pref.chatSplitRatio !== undefined) localStorage.setItem('workspace_chat_split_ratio', String(pref.chatSplitRatio));
     if (pref.customWidgets !== undefined) this.localSet('workspace_custom_widgets', pref.customWidgets);
   }
@@ -232,6 +234,7 @@ export class WorkspaceService {
                 columnLayout: data.columnLayout,
                 leftColumnWidth: data.leftColumnWidth,
                 rightColumnWidth: data.rightColumnWidth,
+                widgetColumnWidth: data.widgetColumnWidth,
                 chatSplitRatio: data.chatSplitRatio,
                 customWidgets: data.customWidgets
               });
@@ -381,6 +384,7 @@ export class WorkspaceService {
 
   // Cloud Write Methods
   static async saveUserPreferencesToCloud(userId: string, pref: Partial<UserPreferences>): Promise<void> {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const userDocRef = doc(db, 'users', userId);
       const payload: Record<string, any> = {
@@ -404,6 +408,7 @@ export class WorkspaceService {
       if (pref.columnLayout !== undefined) payload.columnLayout = pref.columnLayout;
       if (pref.leftColumnWidth !== undefined) payload.leftColumnWidth = pref.leftColumnWidth;
       if (pref.rightColumnWidth !== undefined) payload.rightColumnWidth = pref.rightColumnWidth;
+      if (pref.widgetColumnWidth !== undefined) payload.widgetColumnWidth = pref.widgetColumnWidth;
       if (pref.chatSplitRatio !== undefined) payload.chatSplitRatio = pref.chatSplitRatio;
       if (pref.customWidgets !== undefined) {
         // Strip large base64 imageData if > 150KB before cloud sync to keep user doc lightweight
@@ -420,6 +425,7 @@ export class WorkspaceService {
   }
 
   static async saveSubjectToCloud(userId: string, subject: SubjectItem): Promise<void> {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const subjectDocRef = doc(db, 'users', userId, 'subjects', subject.id);
       await setDoc(subjectDocRef, {
@@ -435,6 +441,7 @@ export class WorkspaceService {
   }
 
   static async deleteSubjectFromCloud(userId: string, subjectId: string): Promise<void> {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const subjectDocRef = doc(db, 'users', userId, 'subjects', subjectId);
       await deleteDoc(subjectDocRef);
@@ -444,6 +451,7 @@ export class WorkspaceService {
   }
 
   static async savePageToCloud(userId: string, subjectId: string, page: PageItem): Promise<void> {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const pageDocRef = doc(db, 'users', userId, 'pages', page.id);
       await setDoc(pageDocRef, {
@@ -461,6 +469,7 @@ export class WorkspaceService {
   }
 
   static async deletePageFromCloud(userId: string, pageId: string): Promise<void> {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const pageDocRef = doc(db, 'users', userId, 'pages', pageId);
       await deleteDoc(pageDocRef);
@@ -470,6 +479,7 @@ export class WorkspaceService {
   }
 
   static async saveMaterialToCloud(userId: string, subjectId: string, material: MaterialItem): Promise<void> {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const matIdStr = String(material.id);
       const matDocRef = doc(db, 'users', userId, 'materials', matIdStr);
@@ -495,6 +505,7 @@ export class WorkspaceService {
   }
 
   static async deleteMaterialFromCloud(userId: string, materialId: string | number): Promise<void> {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const matIdStr = String(materialId);
       const matDocRef = doc(db, 'users', userId, 'materials', matIdStr);
@@ -505,6 +516,7 @@ export class WorkspaceService {
   }
 
   static async saveChatToCloud(userId: string, subjectId: string, messages: ChatMessage[]): Promise<void> {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const chatDocRef = doc(db, 'users', userId, 'chats', subjectId);
       // Clean up messages to ensure serializable data and bounds
@@ -528,6 +540,7 @@ export class WorkspaceService {
   }
 
   static async saveApiKeysToCloud(userId: string, keys: string[], selectedIndex: number): Promise<void> {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const keysDocRef = doc(db, 'users', userId, 'settings', 'keys');
       await setDoc(keysDocRef, {
@@ -1016,6 +1029,7 @@ export class WorkspaceService {
     uid: string,
     callback: (rooms: SharedRoom[]) => void
   ): Unsubscribe {
+    if (!auth.currentUser) return () => {};
     const roomsCol = collection(db, 'shared_rooms');
     return onSnapshot(roomsCol, (snap) => {
       if (!auth.currentUser) return;
