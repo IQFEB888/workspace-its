@@ -39,6 +39,35 @@ export interface SubjectItem {
   driveLink?: string;
 }
 
+export type WidgetSlot = 'right_bottom' | 'left_bottom' | 'center_bottom';
+
+export type WidgetType =
+  | 'pdf_viewer'
+  | 'image_viewer'
+  | 'web_embed'
+  | 'calculator'
+  | 'pomodoro'
+  | 'quick_scratch';
+
+export interface CustomWidget {
+  id: string;
+  type: WidgetType;
+  title: string;
+  slot: WidgetSlot;
+  enabled: boolean;
+  height?: number;
+  materialId?: string;
+  customUrl?: string;
+  imageData?: string;
+  scratchText?: string;
+}
+
+export type ColumnLayoutPreset =
+  | 'tools-notes-chat'
+  | 'chat-notes-tools'
+  | 'notes-chat-tools'
+  | 'tools-chat-notes';
+
 export interface UserPreferences {
   bgIndex: number;
   isImmersion: boolean;
@@ -55,6 +84,11 @@ export interface UserPreferences {
   panelTheme?: string;
   panelOpacity?: number;
   showDriveBar?: boolean;
+  columnLayout?: ColumnLayoutPreset;
+  leftColumnWidth?: number;
+  rightColumnWidth?: number;
+  chatSplitRatio?: number;
+  customWidgets?: CustomWidget[];
 }
 
 export interface AttachedFile {

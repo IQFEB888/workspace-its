@@ -78,7 +78,12 @@ export class WorkspaceService {
       accentColor: localStorage.getItem('workspace_accent_color') || 'indigo',
       panelTheme: localStorage.getItem('workspace_panel_theme') || 'default',
       panelOpacity: parseInt(localStorage.getItem('workspace_panel_opacity') || '82', 10),
-      showDriveBar: localStorage.getItem('workspace_show_drive_bar') !== 'false'
+      showDriveBar: localStorage.getItem('workspace_show_drive_bar') !== 'false',
+      columnLayout: (localStorage.getItem('workspace_column_layout') as any) || 'tools-notes-chat',
+      leftColumnWidth: parseInt(localStorage.getItem('workspace_left_col_w') || '250', 10),
+      rightColumnWidth: parseInt(localStorage.getItem('workspace_right_col_w') || '340', 10),
+      chatSplitRatio: parseInt(localStorage.getItem('workspace_chat_split_ratio') || '52', 10),
+      customWidgets: this.localGet('workspace_custom_widgets', [])
     };
   }
 
@@ -155,6 +160,11 @@ export class WorkspaceService {
     if (pref.panelTheme !== undefined) localStorage.setItem('workspace_panel_theme', pref.panelTheme);
     if (pref.panelOpacity !== undefined) localStorage.setItem('workspace_panel_opacity', String(pref.panelOpacity));
     if (pref.showDriveBar !== undefined) localStorage.setItem('workspace_show_drive_bar', String(pref.showDriveBar));
+    if (pref.columnLayout !== undefined) localStorage.setItem('workspace_column_layout', pref.columnLayout);
+    if (pref.leftColumnWidth !== undefined) localStorage.setItem('workspace_left_col_w', String(pref.leftColumnWidth));
+    if (pref.rightColumnWidth !== undefined) localStorage.setItem('workspace_right_col_w', String(pref.rightColumnWidth));
+    if (pref.chatSplitRatio !== undefined) localStorage.setItem('workspace_chat_split_ratio', String(pref.chatSplitRatio));
+    if (pref.customWidgets !== undefined) this.localSet('workspace_custom_widgets', pref.customWidgets);
   }
 
   static saveLocalPages(pages: Record<string, PageItem[]>): void {
@@ -218,7 +228,12 @@ export class WorkspaceService {
                 accentColor: data.accentColor,
                 panelTheme: data.panelTheme,
                 panelOpacity: data.panelOpacity,
-                showDriveBar: data.showDriveBar
+                showDriveBar: data.showDriveBar,
+                columnLayout: data.columnLayout,
+                leftColumnWidth: data.leftColumnWidth,
+                rightColumnWidth: data.rightColumnWidth,
+                chatSplitRatio: data.chatSplitRatio,
+                customWidgets: data.customWidgets
               });
             }
           }
@@ -386,6 +401,17 @@ export class WorkspaceService {
       if (pref.panelTheme !== undefined) payload.panelTheme = pref.panelTheme;
       if (pref.panelOpacity !== undefined) payload.panelOpacity = pref.panelOpacity;
       if (pref.showDriveBar !== undefined) payload.showDriveBar = pref.showDriveBar;
+      if (pref.columnLayout !== undefined) payload.columnLayout = pref.columnLayout;
+      if (pref.leftColumnWidth !== undefined) payload.leftColumnWidth = pref.leftColumnWidth;
+      if (pref.rightColumnWidth !== undefined) payload.rightColumnWidth = pref.rightColumnWidth;
+      if (pref.chatSplitRatio !== undefined) payload.chatSplitRatio = pref.chatSplitRatio;
+      if (pref.customWidgets !== undefined) {
+        // Strip large base64 imageData if > 150KB before cloud sync to keep user doc lightweight
+        payload.customWidgets = pref.customWidgets.map(w => ({
+          ...w,
+          imageData: w.imageData && w.imageData.length < 150000 ? w.imageData : ''
+        }));
+      }
 
       await setDoc(userDocRef, payload, { merge: true });
     } catch (e) {

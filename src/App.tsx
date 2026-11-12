@@ -16,12 +16,24 @@ import {
   DialogOptions,
   SharedRoom,
   SharedRoomMember,
-  SharedChatMessage
+  SharedChatMessage,
+  CustomWidget,
+  ColumnLayoutPreset
 } from './types';
 import { WorkspaceService, DEFAULT_SUBJECTS, DEFAULT_PAGES } from './services/workspaceService';
 import { saveFileToIndexedDB, getFileFromIndexedDB, deleteFileFromIndexedDB } from './services/fileStorage';
 import { WeatherModal } from './components/WeatherModal';
 import { SettingsModal, BACKGROUND_THEMES, ACCENT_THEMES, PANEL_THEMES } from './components/SettingsModal';
+import { WorkspaceWidgetsDock } from './components/WorkspaceWidgetsDock';
+import {
+  CODE_LANGUAGES,
+  FORMULA_SYMBOLS,
+  FORMULA_PRESETS,
+  evaluateMathExpression,
+  highlightCodeSyntax,
+  buildHighlightedCodeBlockHtml,
+  compressImageFromBlob
+} from './utils/editorTools';
 import { uploadNoteToDrive } from './services/googleDriveService';
 import { usePWAInstall } from './hooks/usePWAInstall';
 import {
@@ -96,8 +108,28 @@ export default function App() {
   const [panelTheme, setPanelTheme] = useState<string>('default');
   const [panelOpacity, setPanelOpacity] = useState<number>(82);
   const [showDriveBar, setShowDriveBar] = useState<boolean>(true);
+  const [columnLayout, setColumnLayout] = useState<ColumnLayoutPreset>('tools-notes-chat');
+  const [leftColumnWidth, setLeftColumnWidth] = useState<number>(256);
+  const [rightColumnWidth, setRightColumnWidth] = useState<number>(336);
+  const [chatSplitRatio, setChatSplitRatio] = useState<number>(52);
+  const [customWidgets, setCustomWidgets] = useState<CustomWidget[]>([]);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'appearance' | 'theme_bars' | 'widgets' | 'keys' | 'account' | undefined>(undefined);
   const lastEditorRangeRef = useRef<Range | null>(null);
+
+  // Notes Find & Replace (Ctrl+F), Code Block Modal & Formula Modal State
+  const [isFindBarOpen, setIsFindBarOpen] = useState<boolean>(false);
+  const [findQuery, setFindQuery] = useState<string>('');
+  const [replaceQuery, setReplaceQuery] = useState<string>('');
+  const [findMatchCount, setFindMatchCount] = useState<number>(0);
+  const findInputRef = useRef<HTMLInputElement>(null);
+
+  const [isCodeModalOpen, setIsCodeModalOpen] = useState<boolean>(false);
+  const [codeModalLang, setCodeModalLang] = useState<string>('javascript');
+  const [codeModalText, setCodeModalText] = useState<string>('');
+
+  const [isFormulaModalOpen, setIsFormulaModalOpen] = useState<boolean>(false);
+  const [formulaInput, setFormulaInput] = useState<string>('');
 
   // Time & Date
   const [currentTime, setCurrentTime] = useState<string>('00:00');
@@ -377,6 +409,21 @@ export default function App() {
     if (typeof localPref.showDriveBar === 'boolean') {
       setShowDriveBar(localPref.showDriveBar);
     }
+    if (localPref.columnLayout) {
+      setColumnLayout(localPref.columnLayout);
+    }
+    if (typeof localPref.leftColumnWidth === 'number') {
+      setLeftColumnWidth(localPref.leftColumnWidth);
+    }
+    if (typeof localPref.rightColumnWidth === 'number') {
+      setRightColumnWidth(localPref.rightColumnWidth);
+    }
+    if (typeof localPref.chatSplitRatio === 'number') {
+      setChatSplitRatio(localPref.chatSplitRatio);
+    }
+    if (Array.isArray(localPref.customWidgets)) {
+      setCustomWidgets(localPref.customWidgets);
+    }
 
     const localSubs = WorkspaceService.getLocalSubjects();
     setSubjects(localSubs);
@@ -424,7 +471,7 @@ export default function App() {
     }
   }, [bgIndex, compactMode]);
 
-  // Apply Accent Color & Panel/Sidebar/Topbar Theme CSS Variables
+  // Apply Accent Color, Panel/Sidebar/Topbar Theme & Column Dimension CSS Variables
   useEffect(() => {
     const root = document.documentElement;
     const accentObj = ACCENT_THEMES.find(a => a.id === accentColor) || ACCENT_THEMES[0];
@@ -439,7 +486,11 @@ export default function App() {
     const topbarAlpha = Math.max(0.75, Math.min(1, (panelOpacity + 8) / 100));
     root.style.setProperty('--panel-bg', `rgba(${panelObj.rgb}, ${alpha})`);
     root.style.setProperty('--topbar-bg', `rgba(${panelObj.topbarRgb}, ${topbarAlpha})`);
-  }, [accentColor, panelTheme, panelOpacity]);
+
+    root.style.setProperty('--user-left-w', `${leftColumnWidth}px`);
+    root.style.setProperty('--user-right-w', `${rightColumnWidth}px`);
+    root.style.setProperty('--chat-split-pct', `${chatSplitRatio}%`);
+  }, [accentColor, panelTheme, panelOpacity, leftColumnWidth, rightColumnWidth, chatSplitRatio]);
 
   // Firebase Auth State Listener & Cloud Sync Setup
   useEffect(() => {
@@ -559,6 +610,11 @@ export default function App() {
             if (pref.panelTheme !== undefined) setPanelTheme(pref.panelTheme);
             if (pref.panelOpacity !== undefined) setPanelOpacity(pref.panelOpacity);
             if (pref.showDriveBar !== undefined) setShowDriveBar(pref.showDriveBar);
+            if (pref.columnLayout !== undefined) setColumnLayout(pref.columnLayout);
+            if (pref.leftColumnWidth !== undefined) setLeftColumnWidth(pref.leftColumnWidth);
+            if (pref.rightColumnWidth !== undefined) setRightColumnWidth(pref.rightColumnWidth);
+            if (pref.chatSplitRatio !== undefined) setChatSplitRatio(pref.chatSplitRatio);
+            if (pref.customWidgets !== undefined) setCustomWidgets(pref.customWidgets);
             if (pref.activeSubject !== undefined) {
               setActiveSubject(prev => pref.activeSubject || prev);
             }
@@ -858,6 +914,61 @@ export default function App() {
     if (currentUser) {
       WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { showDriveBar: show });
     }
+  };
+
+  // Column layout order & width handlers
+  const handleChangeColumnLayout = (layout: ColumnLayoutPreset) => {
+    setColumnLayout(layout);
+    WorkspaceService.saveLocalPreferences({ columnLayout: layout });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { columnLayout: layout });
+    }
+  };
+
+  const handleChangeLeftColumnWidth = (width: number) => {
+    const clamped = Math.max(180, Math.min(380, width));
+    setLeftColumnWidth(clamped);
+    WorkspaceService.saveLocalPreferences({ leftColumnWidth: clamped });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { leftColumnWidth: clamped });
+    }
+  };
+
+  const handleChangeRightColumnWidth = (width: number) => {
+    const clamped = Math.max(260, Math.min(560, width));
+    setRightColumnWidth(clamped);
+    WorkspaceService.saveLocalPreferences({ rightColumnWidth: clamped });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { rightColumnWidth: clamped });
+    }
+  };
+
+  const handleChangeChatSplitRatio = (ratio: number) => {
+    const clamped = Math.max(30, Math.min(75, ratio));
+    setChatSplitRatio(clamped);
+    WorkspaceService.saveLocalPreferences({ chatSplitRatio: clamped });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { chatSplitRatio: clamped });
+    }
+  };
+
+  const handleUpdateCustomWidgets = (widgets: CustomWidget[]) => {
+    setCustomWidgets(widgets);
+    WorkspaceService.saveLocalPreferences({ customWidgets: widgets });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { customWidgets: widgets });
+    }
+  };
+
+  const handleUpdateSingleWidget = (updated: CustomWidget) => {
+    const nextList = customWidgets.map(w => (w.id === updated.id ? updated : w));
+    handleUpdateCustomWidgets(nextList);
+  };
+
+  const handleRemoveSingleWidget = (widgetId: string) => {
+    const nextList = customWidgets.filter(w => w.id !== widgetId);
+    handleUpdateCustomWidgets(nextList);
+    showToast('Widget rimosso.');
   };
 
   // Model & API Key handlers for SettingsModal
@@ -1554,6 +1665,13 @@ export default function App() {
   const handleFormatText = (command: string, value: string | undefined = undefined) => {
     if (notesAreaRef.current) {
       notesAreaRef.current.focus();
+      if (lastEditorRangeRef.current && notesAreaRef.current.contains(lastEditorRangeRef.current.commonAncestorContainer)) {
+        const sel = window.getSelection();
+        if (sel && sel.isCollapsed && !lastEditorRangeRef.current.collapsed) {
+          sel.removeAllRanges();
+          sel.addRange(lastEditorRangeRef.current);
+        }
+      }
     }
     if (command === 'hiliteColor' || command === 'foreColor') {
       try {
@@ -1569,6 +1687,325 @@ export default function App() {
       document.execCommand(command, false, value);
     }
     handleEditorInput();
+  };
+
+  // Helper to insert HTML snippet at the current/saved cursor position in #notes-area
+  const insertHtmlAtEditorCursor = useCallback((html: string) => {
+    if (!notesAreaRef.current) return;
+    notesAreaRef.current.focus();
+    const sel = window.getSelection();
+    if (sel) {
+      if (
+        (sel.rangeCount === 0 || !notesAreaRef.current.contains(sel.getRangeAt(0).commonAncestorContainer)) &&
+        lastEditorRangeRef.current &&
+        notesAreaRef.current.contains(lastEditorRangeRef.current.commonAncestorContainer)
+      ) {
+        sel.removeAllRanges();
+        sel.addRange(lastEditorRangeRef.current);
+      }
+    }
+    const inserted = document.execCommand('insertHTML', false, html);
+    if (!inserted && notesAreaRef.current) {
+      notesAreaRef.current.innerHTML += html;
+    }
+    handleEditorInput();
+  }, [activeSubject, activePageId, workspaceMode, activeRoomId, activeRoomPageId]);
+
+  // Restore Blockquote (💬 Citazione)
+  const handleInsertBlockquote = () => {
+    if (!notesAreaRef.current) return;
+    notesAreaRef.current.focus();
+    const sel = window.getSelection();
+    const selectedText = sel && !sel.isCollapsed ? sel.toString().trim() : '';
+    const quoteHtml = `<blockquote class="note-blockquote">${
+      selectedText || 'Scrivi qui la tua citazione o definizione importante...'
+    }</blockquote><p><br></p>`;
+    insertHtmlAtEditorCursor(quoteHtml);
+    showToast('💬 Citazione inserita negli appunti!');
+  };
+
+  // Open Code Block Modal (pre-filling any selected text)
+  const handleOpenCodeModal = (prefillText?: string) => {
+    const sel = window.getSelection();
+    const currentSel =
+      typeof prefillText === 'string'
+        ? prefillText
+        : sel && !sel.isCollapsed && notesAreaRef.current?.contains(sel.getRangeAt(0).commonAncestorContainer)
+        ? sel.toString()
+        : '';
+    if (sel && sel.rangeCount > 0 && notesAreaRef.current?.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      lastEditorRangeRef.current = sel.getRangeAt(0).cloneRange();
+    }
+    setCodeModalText(currentSel);
+    setIsCodeModalOpen(true);
+  };
+
+  // Insert Syntax-Highlighted Code Block into Notes
+  const handleInsertSyntaxCodeBlock = () => {
+    if (!codeModalText.trim()) {
+      showToast('Inserisci o incolla il codice prima di confermare.', 'error');
+      return;
+    }
+    const blockHtml = buildHighlightedCodeBlockHtml(codeModalText, codeModalLang);
+    insertHtmlAtEditorCursor(blockHtml);
+    setIsCodeModalOpen(false);
+    setCodeModalText('');
+    const langObj = CODE_LANGUAGES.find(l => l.id === codeModalLang);
+    showToast(`💻 Blocco codice ${langObj?.label || codeModalLang} inserito!`);
+  };
+
+  // Delegate click inside #notes-area (e.g., clicking "📋 Copia Codice" on a syntax-highlighted code block)
+  const handleNotesAreaClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    const copyBtn = target.closest('.note-code-copy-btn') as HTMLElement | null;
+    if (copyBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const codeBlock = copyBtn.closest('.note-code-block');
+      const codeEl = codeBlock?.querySelector('code');
+      const rawCode = codeEl?.textContent || '';
+      if (rawCode) {
+        navigator.clipboard.writeText(rawCode);
+        const prevText = copyBtn.innerText;
+        copyBtn.innerText = '✓ Copiato!';
+        setTimeout(() => {
+          copyBtn.innerText = prevText || '📋 Copia Codice';
+        }, 1600);
+        showToast('📋 Codice copiato negli appunti!');
+      }
+    }
+  };
+
+  // Inline Math Calculation in Notes (or open Formula Studio if no expression is selected)
+  const handleInlineCalculateInNotes = (overrideExpr?: string) => {
+    const sel = window.getSelection();
+    let candidate = typeof overrideExpr === 'string' ? overrideExpr.trim() : '';
+
+    if (!candidate && sel && !sel.isCollapsed && notesAreaRef.current?.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      candidate = sel.toString().trim();
+      lastEditorRangeRef.current = sel.getRangeAt(0).cloneRange();
+    }
+
+    if (candidate) {
+      const result = evaluateMathExpression(candidate);
+      if (result !== null) {
+        const cleanExpr = candidate.replace(/=\s*$/, '').trim();
+        const chipHtml = `<span class="note-formula-chip" contenteditable="false">${cleanExpr} = <b>${result}</b></span>&nbsp;`;
+        insertHtmlAtEditorCursor(chipHtml);
+        showToast(`🧮 Calcolato: ${cleanExpr} = ${result}`);
+        return;
+      }
+    }
+
+    // If no valid math expression is currently selected, open the Formula & Calculator Modal
+    if (candidate) {
+      setFormulaInput(candidate);
+    }
+    setIsFormulaModalOpen(true);
+  };
+
+  // Insert Formula / Calculation from Modal into Notes
+  const handleInsertFormulaFromModal = (includeResult: boolean) => {
+    const raw = formulaInput.trim();
+    if (!raw) {
+      showToast('Scrivi una formula o espressione matematica.', 'error');
+      return;
+    }
+    const evaluated = evaluateMathExpression(raw);
+    const cleanExpr = raw.replace(/=\s*$/, '').trim();
+    const displayHtml =
+      includeResult && evaluated !== null
+        ? `<span class="note-formula-chip" contenteditable="false">${cleanExpr} = <b>${evaluated}</b></span>&nbsp;`
+        : `<span class="note-formula-chip" contenteditable="false">${raw}</span>&nbsp;`;
+    insertHtmlAtEditorCursor(displayHtml);
+    setIsFormulaModalOpen(false);
+    setFormulaInput('');
+    showToast('∑ Formula inserita negli appunti!');
+  };
+
+  // Paste Screenshot / Image directly into Notes (#notes-area)
+  const handleNotesPaste = async (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (!blob) return;
+        try {
+          showToast('📸 Elaborazione screenshot in corso...');
+          const compressed = await compressImageFromBlob(blob, 1150, 0.84);
+          const imgHtml = `<img src="${compressed.dataUrl}" alt="Screenshot Appunti" class="note-pasted-screenshot" /><p><br></p>`;
+          insertHtmlAtEditorCursor(imgHtml);
+          showToast('📸 Screenshot incollato negli appunti!');
+        } catch (err) {
+          console.error('Screenshot paste error:', err);
+          showToast('Errore durante l\'incollaggio dello screenshot.', 'error');
+        }
+        return;
+      }
+    }
+  };
+
+  // Paste Screenshot / Image directly into AI Chat (#user-chat-input / .ai-chat-panel)
+  const handleChatPaste = async (e: React.ClipboardEvent<HTMLElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (!blob) return;
+        try {
+          const compressed = await compressImageFromBlob(blob, 1280, 0.86);
+          const timeStamp = new Date().toLocaleTimeString('it-IT', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+          }).replace(/:/g, '-');
+          setAttachedFile({
+            name: `Screenshot_${timeStamp}.jpg`,
+            mimeType: compressed.mimeType,
+            data: compressed.base64
+          });
+          if (isChatCollapsed) {
+            setIsChatCollapsed(false);
+          }
+          showToast('📸 Screenshot allegato alla Chat AI! Premi Invia per analizzarlo.');
+        } catch (err) {
+          console.error('Chat screenshot paste error:', err);
+          showToast('Errore nell\'allegare lo screenshot alla chat.', 'error');
+        }
+        return;
+      }
+    }
+  };
+
+  // Ctrl+F Keyboard Shortcut for Searching Inside Notes
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        if (activeTab === 'notes' && currentUser && isApproved) {
+          e.preventDefault();
+          setIsFindBarOpen(true);
+          const sel = window.getSelection();
+          const selText = sel && !sel.isCollapsed ? sel.toString().trim() : '';
+          if (selText) {
+            setFindQuery(selText);
+          }
+          setTimeout(() => {
+            findInputRef.current?.focus();
+            findInputRef.current?.select();
+          }, 40);
+        }
+      } else if (e.key === 'Escape' && isFindBarOpen) {
+        setIsFindBarOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTab, currentUser, isApproved, isFindBarOpen]);
+
+  // Count matches whenever findQuery or note content changes
+  useEffect(() => {
+    if (!isFindBarOpen || !findQuery.trim() || !notesAreaRef.current) {
+      setFindMatchCount(0);
+      return;
+    }
+    const plain = notesAreaRef.current.innerText || '';
+    const escaped = findQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const matches = plain.match(new RegExp(escaped, 'gi'));
+    setFindMatchCount(matches ? matches.length : 0);
+  }, [isFindBarOpen, findQuery, pages, activeSubject, activePageId, activeRoomPages, activeRoomPageId]);
+
+  // Navigate to next/previous occurrence in #notes-area
+  const handleFindStep = (backwards: boolean = false) => {
+    if (!findQuery.trim() || !notesAreaRef.current) return;
+    const query = findQuery.trim();
+    // Walk text nodes inside #notes-area to select matching text cleanly without leaving #notes-area
+    const walker = document.createTreeWalker(notesAreaRef.current, NodeFilter.SHOW_TEXT, null);
+    const matches: { node: Text; start: number; end: number }[] = [];
+    const lowerQ = query.toLowerCase();
+    let currentNode = walker.nextNode() as Text | null;
+    while (currentNode) {
+      const text = currentNode.nodeValue || '';
+      const lowerText = text.toLowerCase();
+      let idx = lowerText.indexOf(lowerQ);
+      while (idx !== -1) {
+        matches.push({ node: currentNode, start: idx, end: idx + query.length });
+        idx = lowerText.indexOf(lowerQ, idx + query.length);
+      }
+      currentNode = walker.nextNode() as Text | null;
+    }
+
+    if (matches.length === 0) {
+      showToast(`Nessuna corrispondenza per "${query}"`, 'error');
+      return;
+    }
+
+    // Determine next index based on current selection
+    const sel = window.getSelection();
+    let currentMatchIdx = -1;
+    if (sel && sel.rangeCount > 0) {
+      const r = sel.getRangeAt(0);
+      currentMatchIdx = matches.findIndex(
+        m => m.node === r.startContainer && m.start === r.startOffset
+      );
+    }
+
+    const nextIdx = backwards
+      ? (currentMatchIdx - 1 + matches.length) % matches.length
+      : (currentMatchIdx + 1) % matches.length;
+
+    const target = matches[nextIdx];
+    const range = document.createRange();
+    range.setStart(target.node, target.start);
+    range.setEnd(target.node, target.end);
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    lastEditorRangeRef.current = range.cloneRange();
+    const parentEl = target.node.parentElement;
+    parentEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  // Replace current or all matches inside #notes-area
+  const handleReplaceInNotes = (replaceAll: boolean = false) => {
+    if (!findQuery.trim() || !notesAreaRef.current) return;
+    const walker = document.createTreeWalker(notesAreaRef.current, NodeFilter.SHOW_TEXT, null);
+    const textNodes: Text[] = [];
+    let n = walker.nextNode() as Text | null;
+    while (n) {
+      textNodes.push(n);
+      n = walker.nextNode() as Text | null;
+    }
+
+    const escaped = findQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escaped, replaceAll ? 'gi' : 'i');
+    let replacedCount = 0;
+
+    for (const tNode of textNodes) {
+      const val = tNode.nodeValue || '';
+      if (regex.test(val)) {
+        tNode.nodeValue = val.replace(regex, () => {
+          replacedCount++;
+          return replaceQuery;
+        });
+        if (!replaceAll && replacedCount > 0) break;
+      }
+    }
+
+    if (replacedCount > 0) {
+      handleEditorInput();
+      showToast(`✓ Sostituit${replacedCount === 1 ? 'a 1 occorrenza' : `e ${replacedCount} occorrenze`}!`);
+    } else {
+      showToast('Nessuna corrispondenza da sostituire.', 'error');
+    }
   };
 
   // Helper to format material file names cleanly
@@ -2441,14 +2878,17 @@ export default function App() {
     let range: Range | null = null;
     if (selection && selection.rangeCount > 0) {
       range = selection.getRangeAt(0).cloneRange();
+      if (notesAreaRef.current?.contains(range.commonAncestorContainer)) {
+        lastEditorRangeRef.current = range.cloneRange();
+      }
     }
 
-    let x = e.pageX;
-    let y = e.pageY;
-    const menuWidth = 240;
-    const menuHeight = 220;
-    if (x + menuWidth > window.innerWidth) x = window.innerWidth - menuWidth - 10;
-    if (y + menuHeight > window.innerHeight) y = window.innerHeight - menuHeight - 10;
+    let x = e.clientX;
+    let y = e.clientY;
+    const menuWidth = 305;
+    const menuHeight = text ? 390 : 270;
+    if (x + menuWidth > window.innerWidth) x = Math.max(10, window.innerWidth - menuWidth - 12);
+    if (y + menuHeight > window.innerHeight) y = Math.max(10, window.innerHeight - menuHeight - 12);
 
     setContextMenu({
       visible: true,
@@ -2464,20 +2904,59 @@ export default function App() {
     setContextMenu(prev => ({ ...prev, visible: false }));
     const { selectedText, savedRange } = contextMenu;
 
+    const restoreSavedRange = () => {
+      if (notesAreaRef.current) {
+        notesAreaRef.current.focus();
+      }
+      if (savedRange) {
+        const sel = window.getSelection();
+        if (sel) {
+          sel.removeAllRanges();
+          sel.addRange(savedRange);
+        }
+        lastEditorRangeRef.current = savedRange.cloneRange();
+      }
+    };
+
     if (action === 'incolla_ai') {
       if (lastAIResponse && notesAreaRef.current) {
-        notesAreaRef.current.focus();
-        if (savedRange) {
-          const sel = window.getSelection();
-          if (sel) {
-            sel.removeAllRanges();
-            sel.addRange(savedRange);
-          }
-        }
+        restoreSavedRange();
         document.execCommand('insertHTML', false, marked.parse(lastAIResponse) as string);
         handleEditorInput();
         showToast('Risposta AI incollata!');
       }
+      return;
+    }
+
+    if (action === 'calcola_selezione') {
+      restoreSavedRange();
+      handleInlineCalculateInNotes(selectedText);
+      return;
+    }
+
+    if (action === 'citazione') {
+      restoreSavedRange();
+      handleInsertBlockquote();
+      return;
+    }
+
+    if (action === 'blocco_codice') {
+      restoreSavedRange();
+      handleOpenCodeModal(selectedText);
+      return;
+    }
+
+    if (action === 'formula') {
+      restoreSavedRange();
+      if (selectedText) setFormulaInput(selectedText);
+      setIsFormulaModalOpen(true);
+      return;
+    }
+
+    if (action === 'cerca') {
+      setIsFindBarOpen(true);
+      if (selectedText) setFindQuery(selectedText);
+      setTimeout(() => findInputRef.current?.focus(), 40);
       return;
     }
 
@@ -3005,6 +3484,24 @@ export default function App() {
             </button>
             <button
               className="top-btn"
+              onClick={() => {
+                setSettingsInitialTab('widgets');
+                setIsSettingsModalOpen(true);
+              }}
+              title="Apri Studio Layout & Widget: aggiungi visualizzatore PDF sotto la Chat, Sito Web, Calcolatrice o inverti le colonne"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                background: customWidgets.some(w => w.enabled) ? 'var(--accent-surface)' : 'transparent',
+                borderColor: customWidgets.some(w => w.enabled) ? 'var(--accent-border)' : 'transparent',
+                color: customWidgets.some(w => w.enabled) ? '#c7d2fe' : undefined
+              }}
+            >
+              🧩 Widget {customWidgets.filter(w => w.enabled).length > 0 ? `(${customWidgets.filter(w => w.enabled).length})` : ''}
+            </button>
+            <button
+              className="top-btn"
               onClick={() => setIsBackupModalOpen(true)}
               title="Salva o Ripristina il backup dei tuoi appunti e corsi"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
@@ -3013,8 +3510,11 @@ export default function App() {
             </button>
             <button
               className="top-btn"
-              onClick={() => setIsSettingsModalOpen(true)}
-              title="Personalizza sfondi monocolore, colore barre, font in pixel, meteo e chiavi API"
+              onClick={() => {
+                setSettingsInitialTab('appearance');
+                setIsSettingsModalOpen(true);
+              }}
+              title="Personalizza sfondi monocolore, colore barre, widget, font in pixel, meteo e chiavi API"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
             >
               ⚙️ Impostazioni
@@ -3033,7 +3533,7 @@ export default function App() {
 
       {/* Main 3-Column Dashboard Container */}
       <div
-        className={`dashboard-container ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${
+        className={`dashboard-container layout-${columnLayout} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${
           isChatCollapsed ? 'chat-collapsed' : ''
         }`}
         id="main-container"
@@ -3146,6 +3646,24 @@ export default function App() {
               <span className="app-name">Gmail</span>
             </a>
           </div>
+
+          {/* Left Bottom Modular Widgets Dock */}
+          <WorkspaceWidgetsDock
+            slot="left_bottom"
+            widgets={customWidgets}
+            materials={activeDisplayMaterials}
+            onUpdateWidget={handleUpdateSingleWidget}
+            onRemoveWidget={handleRemoveSingleWidget}
+            onOpenWidgetSettings={() => {
+              setSettingsInitialTab('widgets');
+              setIsSettingsModalOpen(true);
+            }}
+            onOpenFullPreview={handleOpenPreview}
+            onInsertTextIntoNotes={(text: string) => {
+              insertHtmlAtEditorCursor(`<span class="note-formula-chip" contenteditable="false">${text}</span>&nbsp;`);
+            }}
+            showToast={showToast}
+          />
         </div>
 
         {/* Center Column: Workspace Notes & Materials */}
@@ -3486,7 +4004,7 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Minimal & Intuitive Rich Text Toolbar with Exact Pixel (px) Font Size */}
+                {/* Minimal & Intuitive Rich Text Toolbar with Exact Pixel (px) Font Size, Code, Quote, Formula & Search */}
                 <div className="editor-toolbar">
                   <button
                     type="button"
@@ -3689,6 +4207,53 @@ export default function App() {
                   >
                     1. Num
                   </button>
+
+                  {/* Restored Citazione & Syntax-Highlighted Code Block */}
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={handleInsertBlockquote}
+                    title="Inserisci Citazione / Definizione (Blockquote)"
+                  >
+                    💬 Citazione
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleOpenCodeModal()}
+                    title="Inserisci Blocco di Codice con selezione linguaggio e colorazione sintassi"
+                  >
+                    💻 Codice
+                  </button>
+
+                  {/* Formula & Inline Math Calculation */}
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleInlineCalculateInNotes()}
+                    title="Calcola espressione selezionata negli appunti (es. 125 * 4) oppure apri l'inserimento Formula Matematica"
+                    style={{
+                      color: '#6ee7b7',
+                      borderColor: 'rgba(16, 185, 129, 0.35)',
+                      background: 'rgba(16, 185, 129, 0.1)'
+                    }}
+                  >
+                    ∑ Formula / =
+                  </button>
+
+                  {/* Ctrl+F Search inside Notes */}
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => {
+                      setIsFindBarOpen(prev => !prev);
+                      setTimeout(() => findInputRef.current?.focus(), 40);
+                    }}
+                    title="Cerca e Sostituisci negli appunti (Ctrl+F)"
+                  >
+                    🔍 Cerca
+                  </button>
+
                   <button
                     type="button"
                     onMouseDown={e => e.preventDefault()}
@@ -3730,7 +4295,81 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Contenteditable Notes Area */}
+                {/* Floating Ctrl+F Search & Replace Bar */}
+                {isFindBarOpen && (
+                  <div className="notes-find-bar">
+                    <span style={{ fontSize: '0.82rem' }}>🔍</span>
+                    <input
+                      ref={findInputRef}
+                      type="text"
+                      className="notes-find-input"
+                      placeholder="Cerca negli appunti (Invio = successivo)..."
+                      value={findQuery}
+                      onChange={e => setFindQuery(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleFindStep(e.shiftKey);
+                        } else if (e.key === 'Escape') {
+                          setIsFindBarOpen(false);
+                        }
+                      }}
+                    />
+                    <span className="notes-find-count">
+                      {findQuery.trim() ? `${findMatchCount} trovati` : '0'}
+                    </span>
+                    <button
+                      type="button"
+                      className="widget-mini-btn"
+                      onClick={() => handleFindStep(true)}
+                      title="Occorrenza precedente (Shift+Invio)"
+                    >
+                      ▲ Prec
+                    </button>
+                    <button
+                      type="button"
+                      className="widget-mini-btn accent"
+                      onClick={() => handleFindStep(false)}
+                      title="Occorrenza successiva (Invio)"
+                    >
+                      ▼ Succ
+                    </button>
+                    <input
+                      type="text"
+                      className="notes-find-input"
+                      placeholder="Sostituisci con..."
+                      value={replaceQuery}
+                      onChange={e => setReplaceQuery(e.target.value)}
+                      style={{ maxWidth: '160px' }}
+                    />
+                    <button
+                      type="button"
+                      className="widget-mini-btn"
+                      onClick={() => handleReplaceInNotes(false)}
+                      title="Sostituisci prima occorrenza"
+                    >
+                      Sostituisci
+                    </button>
+                    <button
+                      type="button"
+                      className="widget-mini-btn"
+                      onClick={() => handleReplaceInNotes(true)}
+                      title="Sostituisci tutte le occorrenze"
+                    >
+                      Tutti
+                    </button>
+                    <button
+                      type="button"
+                      className="widget-ctrl-btn danger"
+                      onClick={() => setIsFindBarOpen(false)}
+                      title="Chiudi barra di ricerca (Esc)"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+
+                {/* Contenteditable Notes Area (Supports Ctrl+V Screenshot Paste & Code Copy) */}
                 <div
                   id="notes-area"
                   className={`font-${fontFamily}`}
@@ -3750,8 +4389,10 @@ export default function App() {
                   }}
                   contentEditable
                   suppressContentEditableWarning
-                  data-placeholder="Inizia a scrivere i tuoi appunti... Seleziona il testo per cambiarne la grandezza in px, evidenziarlo o usare il menu rapido AI (clic destro)."
+                  data-placeholder="Inizia a scrivere i tuoi appunti... Incolla screenshot (Ctrl+V), cerca (Ctrl+F), inserisci blocchi di codice colorati, formule o usa il tasto destro migliorato."
                   onInput={handleEditorInput}
+                  onPaste={handleNotesPaste}
+                  onClick={handleNotesAreaClick}
                   onMouseUp={handleRecordEditorSelection}
                   onKeyUp={handleRecordEditorSelection}
                   onContextMenu={handleNotesContextMenu}
@@ -3878,10 +4519,34 @@ export default function App() {
               </div>
             )}
           </div>
+
+          {/* Center Bottom Modular Widgets Dock (Under Notes) */}
+          <WorkspaceWidgetsDock
+            slot="center_bottom"
+            widgets={customWidgets}
+            materials={activeDisplayMaterials}
+            onUpdateWidget={handleUpdateSingleWidget}
+            onRemoveWidget={handleRemoveSingleWidget}
+            onOpenWidgetSettings={() => {
+              setSettingsInitialTab('widgets');
+              setIsSettingsModalOpen(true);
+            }}
+            onOpenFullPreview={handleOpenPreview}
+            onInsertTextIntoNotes={(text: string) => {
+              insertHtmlAtEditorCursor(`<span class="note-formula-chip" contenteditable="false">${text}</span>&nbsp;`);
+            }}
+            showToast={showToast}
+          />
         </div>
 
-        {/* Right Column: AI Copilot Panel */}
-        <div className={`panel chat-column ${mobileTab === 'chat' ? 'mobile-active' : ''}`} id="chat-column">
+        {/* Right Column: AI Copilot Panel + Bottom Modular Widgets (PDF / Web / Image / Calculator) */}
+        <div
+          className={`panel chat-column ${
+            customWidgets.some(w => w.enabled && w.slot === 'right_bottom') ? 'has-bottom-widgets' : ''
+          } ${mobileTab === 'chat' ? 'mobile-active' : ''}`}
+          id="chat-column"
+          onPaste={handleChatPaste}
+        >
           <div className="ai-chat-panel">
             <div className="chat-header-bar">
               <button
@@ -3902,10 +4567,20 @@ export default function App() {
                   </span>
                 )}
               </div>
-              <div className="chat-controls-hide">
+              <div className="chat-controls-hide" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  className="expand-btn"
+                  onClick={() => {
+                    setSettingsInitialTab('widgets');
+                    setIsSettingsModalOpen(true);
+                  }}
+                  title="Aggiungi un PDF, una Foto, un Sito Web o una Calcolatrice sotto la Chat"
+                >
+                  🧩 +Widget
+                </button>
                 {workspaceMode === 'personal' && (
                   <button className="expand-btn" onClick={handleClearChatHistory} title="Pulisci cronologia chat">
-                    🧹 Pulisci
+                    🧹
                   </button>
                 )}
               </div>
@@ -3981,7 +4656,7 @@ export default function App() {
                 )
               ) : currentSubChats.length === 0 ? (
                 <div className="chat-msg ai">
-                  Chiedi qualcosa, dai istruzioni o premi <b>🔍 Analizza Note</b> per lavorare sugli appunti di{' '}
+                  Chiedi qualcosa, incolla uno screenshot (<b>Ctrl+V</b>) o premi <b>🔍 Analizza Note</b> per lavorare sugli appunti di{' '}
                   <b>{activeSubject}</b>!
                 </div>
               ) : (
@@ -4010,7 +4685,7 @@ export default function App() {
                     return (
                       <div key={index} className="chat-msg user">
                         <div>{text || 'Analizza allegato.'}</div>
-                        {hasFile && <small style={{ opacity: 0.8 }}>📎 File Allegato</small>}
+                        {hasFile && <small style={{ opacity: 0.8 }}>📎 Screenshot / File Allegato</small>}
                         <button
                           className="msg-action-btn"
                           title="Reinvia messaggio"
@@ -4033,8 +4708,8 @@ export default function App() {
               )}
             </div>
 
-            {/* File Upload Preview Bar */}
-            <div className="file-upload-preview-bar">
+            {/* File Upload & Pasted Screenshot Preview Bar */}
+            <div className="file-upload-preview-bar" style={{ flexWrap: 'wrap' }}>
               <input
                 type="file"
                 ref={fileInputRef}
@@ -4042,12 +4717,21 @@ export default function App() {
                 style={{ display: 'none' }}
                 onChange={handleFileUpload}
               />
-              <button className="chat-btn" onClick={() => fileInputRef.current?.click()}>
-                📎 Allega File
+              <button className="chat-btn" onClick={() => fileInputRef.current?.click()} title="Allega un file o incolla direttamente uno screenshot con Ctrl+V">
+                📎 Allega / Ctrl+V
               </button>
               {attachedFile && (
-                <div id="attached-file-badge">
-                  <span>{attachedFile.name}</span>
+                <div id="attached-file-badge" style={{ maxWidth: '100%' }}>
+                  {attachedFile.mimeType.startsWith('image/') && (
+                    <img
+                      src={`data:${attachedFile.mimeType};base64,${attachedFile.data}`}
+                      alt="Preview"
+                      style={{ width: '22px', height: '22px', objectFit: 'cover', borderRadius: '4px' }}
+                    />
+                  )}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '130px' }}>
+                    {attachedFile.name}
+                  </span>
                   <button
                     onClick={() => {
                       setAttachedFile(null);
@@ -4162,14 +4846,15 @@ export default function App() {
               </select>
             </div>
 
-            {/* Input Row */}
+            {/* Input Row (Supports Ctrl+V Screenshot Paste) */}
             <div className="chat-input-row" style={{ marginTop: '8px' }}>
               <input
                 type="text"
                 id="user-chat-input"
-                placeholder="Chiedi a Gemini..."
+                placeholder="Chiedi a Gemini o incolla screenshot (Ctrl+V)..."
                 value={chatInput}
                 onChange={e => setChatInput(e.target.value)}
+                onPaste={handleChatPaste}
                 onKeyDown={e => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
@@ -4192,6 +4877,24 @@ export default function App() {
               </button>
             </div>
           </div>
+
+          {/* Right Bottom Modular Widgets Dock (Under Chat AI - e.g. PDF Viewer, Website, Image, Calculator) */}
+          <WorkspaceWidgetsDock
+            slot="right_bottom"
+            widgets={customWidgets}
+            materials={activeDisplayMaterials}
+            onUpdateWidget={handleUpdateSingleWidget}
+            onRemoveWidget={handleRemoveSingleWidget}
+            onOpenWidgetSettings={() => {
+              setSettingsInitialTab('widgets');
+              setIsSettingsModalOpen(true);
+            }}
+            onOpenFullPreview={handleOpenPreview}
+            onInsertTextIntoNotes={(text: string) => {
+              insertHtmlAtEditorCursor(`<span class="note-formula-chip" contenteditable="false">${text}</span>&nbsp;`);
+            }}
+            showToast={showToast}
+          />
         </div>
       </div>
 
@@ -4786,41 +5489,427 @@ export default function App() {
         </div>
       )}
 
-      {/* CUSTOM CONTEXT MENU FOR NOTES */}
-      {contextMenu.visible && (
-        <div
-          className="custom-context-menu"
-          style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
-        >
-          {contextMenu.selectedText ? (
-            <>
-              <div className="context-menu-item" onClick={() => handleContextMenuAction('correggi')}>
-                ✨ Correggi grammatica
-              </div>
-              <div className="context-menu-item" onClick={() => handleContextMenuAction('migliora')}>
-                🚀 Migliora scrittura
-              </div>
-              <div className="context-menu-item" onClick={() => handleContextMenuAction('riassumi')}>
-                📝 Riassumi selezione
-              </div>
-              <div className="context-menu-item" onClick={() => handleContextMenuAction('spiega')}>
-                🧠 Spiegami questo
-              </div>
-              <div className="context-menu-item" onClick={() => handleContextMenuAction('traduci')}>
-                🌍 Traduci e Analizza
-              </div>
-            </>
-          ) : (
-            <div
-              className="context-menu-item"
-              onClick={() => handleContextMenuAction('incolla_ai')}
-              style={{ opacity: lastAIResponse ? 1 : 0.5, pointerEvents: lastAIResponse ? 'auto' : 'none' }}
-            >
-              📋 {lastAIResponse ? 'Incolla ultima risposta AI' : 'Nessuna risposta AI da incollare'}
+      {/* CUSTOM CONTEXT MENU FOR NOTES (ENHANCED WITH TOOLBOX, PIXEL SIZE, MATH & AI) */}
+      {contextMenu.visible && (() => {
+        const inlineMath = contextMenu.selectedText ? evaluateMathExpression(contextMenu.selectedText) : null;
+        const cleanedSelectedExpr = contextMenu.selectedText.replace(/=\s*$/, '').trim();
+        return (
+          <div
+            className="custom-context-menu"
+            style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Quick Formatting & Pixel Size Toolbar inside Right-Click Menu */}
+            <div className="ctx-menu-section-label">Stile Rapido &amp; Dimensione Testo (px)</div>
+            <div className="ctx-toolbar-row">
+              <button
+                type="button"
+                className="ctx-tool-btn"
+                onMouseDown={e => {
+                  e.preventDefault();
+                  handleFormatText('bold');
+                  setContextMenu(prev => ({ ...prev, visible: false }));
+                }}
+                title="Grassetto (Ctrl+B)"
+              >
+                <b>B</b>
+              </button>
+              <button
+                type="button"
+                className="ctx-tool-btn"
+                onMouseDown={e => {
+                  e.preventDefault();
+                  handleFormatText('italic');
+                  setContextMenu(prev => ({ ...prev, visible: false }));
+                }}
+                title="Corsivo (Ctrl+I)"
+              >
+                <i>I</i>
+              </button>
+              <button
+                type="button"
+                className="ctx-tool-btn"
+                onMouseDown={e => {
+                  e.preventDefault();
+                  handleFormatText('underline');
+                  setContextMenu(prev => ({ ...prev, visible: false }));
+                }}
+                title="Sottolineato (Ctrl+U)"
+              >
+                <u>U</u>
+              </button>
+              <button
+                type="button"
+                className="ctx-tool-btn"
+                onMouseDown={e => {
+                  e.preventDefault();
+                  handleFormatText('strikeThrough');
+                  setContextMenu(prev => ({ ...prev, visible: false }));
+                }}
+                title="Barrato"
+              >
+                <s>S</s>
+              </button>
+
+              {/* Quick Highlighters */}
+              <button
+                type="button"
+                className="ctx-swatch-btn"
+                style={{ background: '#fde047' }}
+                onMouseDown={e => {
+                  e.preventDefault();
+                  handleFormatText('hiliteColor', 'rgba(250, 204, 21, 0.38)');
+                  setContextMenu(prev => ({ ...prev, visible: false }));
+                }}
+                title="Evidenzia Giallo"
+              />
+              <button
+                type="button"
+                className="ctx-swatch-btn"
+                style={{ background: '#4ade80' }}
+                onMouseDown={e => {
+                  e.preventDefault();
+                  handleFormatText('hiliteColor', 'rgba(74, 222, 128, 0.35)');
+                  setContextMenu(prev => ({ ...prev, visible: false }));
+                }}
+                title="Evidenzia Verde"
+              />
+              <button
+                type="button"
+                className="ctx-swatch-btn"
+                style={{ background: '#38bdf8' }}
+                onMouseDown={e => {
+                  e.preventDefault();
+                  handleFormatText('hiliteColor', 'rgba(56, 189, 248, 0.35)');
+                  setContextMenu(prev => ({ ...prev, visible: false }));
+                }}
+                title="Evidenzia Azzurro"
+              />
+              <button
+                type="button"
+                className="ctx-swatch-btn"
+                style={{ background: '#f472b6' }}
+                onMouseDown={e => {
+                  e.preventDefault();
+                  handleFormatText('hiliteColor', 'rgba(244, 114, 182, 0.35)');
+                  setContextMenu(prev => ({ ...prev, visible: false }));
+                }}
+                title="Evidenzia Rosa"
+              />
             </div>
-          )}
+
+            {/* Pixel Size Stepper & Presets */}
+            <div className="ctx-toolbar-row" style={{ marginTop: '4px' }}>
+              <button
+                type="button"
+                className="ctx-tool-btn"
+                onMouseDown={e => {
+                  e.preventDefault();
+                  handleApplyPixelFontSize(toolbarPxSize - 2);
+                }}
+                title="Riduci di 2px"
+              >
+                A−
+              </button>
+              <span className="ctx-px-readout">{toolbarPxSize}px</span>
+              <button
+                type="button"
+                className="ctx-tool-btn"
+                onMouseDown={e => {
+                  e.preventDefault();
+                  handleApplyPixelFontSize(toolbarPxSize + 2);
+                }}
+                title="Ingrandisci di 2px"
+              >
+                A+
+              </button>
+              {[13, 16, 20, 26].map(px => (
+                <button
+                  key={px}
+                  type="button"
+                  className="ctx-tool-btn"
+                  style={{ width: 'auto', padding: '0 6px', fontSize: '0.7rem' }}
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    handleApplyPixelFontSize(px);
+                    setContextMenu(prev => ({ ...prev, visible: false }));
+                  }}
+                >
+                  {px}px
+                </button>
+              ))}
+            </div>
+
+            {/* Live Math Expression Result if Selection is Calculable */}
+            {inlineMath !== null && (
+              <div
+                className="ctx-math-banner"
+                onClick={() => handleContextMenuAction('calcola_selezione')}
+                title="Clicca per inserire il risultato negli appunti"
+              >
+                <span>🧮 <b>{cleanedSelectedExpr} = {inlineMath}</b></span>
+                <span className="ctx-math-action">Inserisci =</span>
+              </div>
+            )}
+
+            <div className="ctx-divider" />
+
+            {/* Insertions & Tools */}
+            <div className="ctx-menu-section-label">Inserisci &amp; Strumenti Appunti</div>
+            <div className="context-menu-item" onClick={() => handleContextMenuAction('citazione')}>
+              <span>💬 Citazione (Blockquote)</span>
+              <span className="ctx-shortcut">Quote</span>
+            </div>
+            <div className="context-menu-item" onClick={() => handleContextMenuAction('blocco_codice')}>
+              <span>💻 Blocco Codice Colorato</span>
+              <span className="ctx-shortcut">JS/Py/SQL</span>
+            </div>
+            <div className="context-menu-item" onClick={() => handleContextMenuAction('formula')}>
+              <span>∑ Formula / Calcolatrice Appunti</span>
+              <span className="ctx-shortcut">Math</span>
+            </div>
+            <div className="context-menu-item" onClick={() => handleContextMenuAction('cerca')}>
+              <span>🔍 Cerca e Sostituisci negli appunti</span>
+              <span className="ctx-shortcut">Ctrl+F</span>
+            </div>
+
+            <div className="ctx-divider" />
+
+            {/* Gemini AI Context Actions */}
+            <div className="ctx-menu-section-label">Azioni AI Gemini</div>
+            {contextMenu.selectedText ? (
+              <>
+                <div className="context-menu-item" onClick={() => handleContextMenuAction('correggi')}>
+                  <span>✨ Correggi grammatica</span>
+                </div>
+                <div className="context-menu-item" onClick={() => handleContextMenuAction('migliora')}>
+                  <span>🚀 Migliora scrittura</span>
+                </div>
+                <div className="context-menu-item" onClick={() => handleContextMenuAction('riassumi')}>
+                  <span>📝 Riassumi selezione</span>
+                </div>
+                <div className="context-menu-item" onClick={() => handleContextMenuAction('spiega')}>
+                  <span>🧠 Spiegami questo</span>
+                </div>
+                <div className="context-menu-item" onClick={() => handleContextMenuAction('traduci')}>
+                  <span>🌍 Traduci e Analizza</span>
+                </div>
+              </>
+            ) : (
+              <div
+                className="context-menu-item"
+                onClick={() => handleContextMenuAction('incolla_ai')}
+                style={{ opacity: lastAIResponse ? 1 : 0.5, pointerEvents: lastAIResponse ? 'auto' : 'none' }}
+              >
+                <span>📋 {lastAIResponse ? 'Incolla ultima risposta AI' : 'Seleziona testo per le azioni AI'}</span>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* MODALE INSERIMENTO BLOCCO DI CODICE CON SCELTA LINGUAGGIO E SYNTAX HIGHLIGHTING */}
+      {isCodeModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsCodeModalOpen(false)}>
+          <div className="modal-box" style={{ maxWidth: '640px', width: '94%' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">💻 Inserisci Blocco di Codice con Syntax Highlighting</span>
+              <button className="modal-close" onClick={() => setIsCodeModalOpen(false)}>
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                1. Seleziona il linguaggio di programmazione:
+              </div>
+              <div className="code-lang-pills">
+                {CODE_LANGUAGES.map(lang => (
+                  <button
+                    key={lang.id}
+                    type="button"
+                    className={`code-lang-pill ${codeModalLang === lang.id ? 'active' : ''}`}
+                    onClick={() => setCodeModalLang(lang.id)}
+                  >
+                    <span>[{lang.badge}]</span>
+                    <span>{lang.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', fontWeight: 600, marginTop: '4px' }}>
+                2. Scrivi o incolla il codice:
+              </div>
+              <textarea
+                value={codeModalText}
+                onChange={e => setCodeModalText(e.target.value)}
+                placeholder="Incolla o digita qui il tuo codice..."
+                rows={7}
+                style={{
+                  width: '100%',
+                  background: '#090d16',
+                  color: '#e2e8f0',
+                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                  borderRadius: '10px',
+                  padding: '12px',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '0.82rem',
+                  lineHeight: 1.55,
+                  resize: 'vertical',
+                  outline: 'none'
+                }}
+                autoFocus
+              />
+
+              {/* Anteprima Live Colorata */}
+              {codeModalText.trim() && (
+                <div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                    Anteprima colorazione sintassi ({CODE_LANGUAGES.find(l => l.id === codeModalLang)?.label}):
+                  </div>
+                  <div
+                    style={{ maxHeight: '150px', overflowY: 'auto' }}
+                    dangerouslySetInnerHTML={{
+                      __html: buildHighlightedCodeBlockHtml(codeModalText, codeModalLang)
+                    }}
+                  />
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
+                <button className="dialog-btn" onClick={() => setIsCodeModalOpen(false)}>
+                  Annulla
+                </button>
+                <button className="dialog-btn primary" onClick={handleInsertSyntaxCodeBlock}>
+                  💻 Inserisci Codice Colorato negli Appunti
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
+
+      {/* MODALE CALCOLO DIRETTO & INSERIMENTO FORMULA NEGLI APPUNTI */}
+      {isFormulaModalOpen && (() => {
+        const liveEval = evaluateMathExpression(formulaInput);
+        const cleanFormulaExpr = formulaInput.replace(/=\s*$/, '').trim();
+        return (
+          <div className="modal-overlay" onClick={() => setIsFormulaModalOpen(false)}>
+            <div className="modal-box" style={{ maxWidth: '560px', width: '94%' }} onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <span className="modal-title">∑ Calcolo Diretto &amp; Inserimento Formula negli Appunti</span>
+                <button className="modal-close" onClick={() => setIsFormulaModalOpen(false)}>
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                  Scrivi un'espressione matematica per calcolarla all'istante (es. <code>(125 * 4) + sqrt(144)</code>) oppure componi una formula con simboli scientifici da inserire come badge negli appunti.
+                </div>
+
+                <input
+                  type="text"
+                  value={formulaInput}
+                  onChange={e => setFormulaInput(e.target.value)}
+                  placeholder="Es. 250 * 1.22 oppure x = (-b ± √(b² - 4ac)) / 2a"
+                  style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '0.95rem',
+                    padding: '10px 14px',
+                    background: 'rgba(0,0,0,0.45)',
+                    border: '1px solid rgba(56, 189, 248, 0.4)',
+                    borderRadius: '10px',
+                    color: '#fff'
+                  }}
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleInsertFormulaFromModal(true);
+                    }
+                  }}
+                />
+
+                {/* Live Calculation Preview Banner */}
+                <div className="formula-live-preview">
+                  <div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>
+                      Risultato Calcolo in Tempo Reale
+                    </div>
+                    <div style={{ fontSize: '0.82rem', color: '#cbd5e1', marginTop: '2px' }}>
+                      {formulaInput.trim() || 'In attesa di espressione...'}
+                    </div>
+                  </div>
+                  <div className="formula-live-result">
+                    {liveEval !== null ? `= ${liveEval}` : 'Formula Testuale'}
+                  </div>
+                </div>
+
+                {/* Simboli Matematici Rapidi */}
+                <div>
+                  <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginBottom: '6px', fontWeight: 600 }}>
+                    Simboli Matematici Rapidi (clicca per aggiungere):
+                  </div>
+                  <div className="formula-symbol-grid">
+                    {FORMULA_SYMBOLS.map(s => (
+                      <button
+                        key={s.label}
+                        type="button"
+                        className="formula-sym-btn"
+                        onClick={() => setFormulaInput(prev => prev + s.sym)}
+                        title={s.label}
+                      >
+                        {s.sym}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Formule Pronte */}
+                <div>
+                  <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginBottom: '6px', fontWeight: 600 }}>
+                    Formule &amp; Modelli Pronti:
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {FORMULA_PRESETS.map(preset => (
+                      <button
+                        key={preset.name}
+                        type="button"
+                        className="code-lang-pill"
+                        onClick={() => setFormulaInput(preset.expr)}
+                      >
+                        <span>📐 {preset.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
+                  <button className="dialog-btn" onClick={() => setIsFormulaModalOpen(false)}>
+                    Annulla
+                  </button>
+                  {liveEval !== null && (
+                    <button
+                      className="dialog-btn"
+                      onClick={() => handleInsertFormulaFromModal(false)}
+                      title="Inserisci soltanto la formula senza il risultato"
+                    >
+                      Inserisci Solo Espressione
+                    </button>
+                  )}
+                  <button
+                    className="dialog-btn primary"
+                    onClick={() => handleInsertFormulaFromModal(true)}
+                  >
+                    ∑ {liveEval !== null ? `Inserisci "${cleanFormulaExpr} = ${liveEval}"` : 'Inserisci Formula negli Appunti'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* MODALE ANTEPRIMA FILE & PDF */}
       {isPreviewModalOpen && previewMaterial && (
@@ -5126,7 +6215,10 @@ export default function App() {
       {/* MODALE IMPOSTAZIONI DETTAGLIATE */}
       <SettingsModal
         isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
+        onClose={() => {
+          setIsSettingsModalOpen(false);
+          setSettingsInitialTab(undefined);
+        }}
         bgIndex={bgIndex}
         onSelectBackground={handleSelectBgIndex}
         compactMode={compactMode}
@@ -5149,6 +6241,18 @@ export default function App() {
         onToggleSidebarCollapsed={handleToggleSidebar}
         isChatCollapsed={isChatCollapsed}
         onToggleChatCollapsed={handleToggleChat}
+        columnLayout={columnLayout}
+        onSelectColumnLayout={handleChangeColumnLayout}
+        leftColumnWidth={leftColumnWidth}
+        onChangeLeftColumnWidth={handleChangeLeftColumnWidth}
+        rightColumnWidth={rightColumnWidth}
+        onChangeRightColumnWidth={handleChangeRightColumnWidth}
+        chatSplitRatio={chatSplitRatio}
+        onChangeChatSplitRatio={handleChangeChatSplitRatio}
+        customWidgets={customWidgets}
+        onUpdateCustomWidgets={handleUpdateCustomWidgets}
+        materials={activeDisplayMaterials}
+        initialTab={settingsInitialTab}
         selectedWeatherCity={selectedWeatherCity}
         onSelectCity={setSelectedWeatherCity}
         presetCities={PRESET_CITIES}

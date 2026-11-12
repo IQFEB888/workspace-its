@@ -1,6 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User } from 'firebase/auth';
 import { CityLocation } from '../services/weatherService';
+import {
+  ColumnLayoutPreset,
+  CustomWidget,
+  MaterialItem,
+  WidgetSlot,
+  WidgetType
+} from '../types';
 
 export interface BackgroundTheme {
   id: number;
@@ -229,8 +236,60 @@ export const GEMINI_MODELS = [
   { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (Ragionamento avanzato)' }
 ];
 
+export const WIDGET_CATALOG: Array<{
+  type: WidgetType;
+  icon: string;
+  name: string;
+  desc: string;
+  defaultSlot: WidgetSlot;
+}> = [
+  {
+    type: 'pdf_viewer',
+    icon: '📄',
+    name: 'Visualizzatore PDF / Dispensa',
+    desc: 'Leggi un PDF o slide del corso direttamente sotto la Chat AI mentre prendi appunti',
+    defaultSlot: 'right_bottom'
+  },
+  {
+    type: 'image_viewer',
+    icon: '🖼️',
+    name: 'Foto / Schema / Screenshot',
+    desc: 'Tieni visibile un diagramma, schema ER o screenshot (anche incollato con Ctrl+V) con zoom',
+    defaultSlot: 'right_bottom'
+  },
+  {
+    type: 'web_embed',
+    icon: '🌐',
+    name: 'Sito Web in Home (Mini-Browser)',
+    desc: 'Apri Wikipedia, Desmos, DevDocs o qualsiasi sito direttamente in un riquadro',
+    defaultSlot: 'right_bottom'
+  },
+  {
+    type: 'calculator',
+    icon: '🧮',
+    name: 'Calcolatrice Scientifica Live',
+    desc: 'Esegui calcoli ed espressioni al volo e inseriscili con 1 clic negli appunti',
+    defaultSlot: 'left_bottom'
+  },
+  {
+    type: 'pomodoro',
+    icon: '⏱️',
+    name: 'Timer Studio Pomodoro',
+    desc: 'Cronometro 25m Studio / 50m Focus / 5m Pausa per gestire le sessioni',
+    defaultSlot: 'left_bottom'
+  },
+  {
+    type: 'quick_scratch',
+    icon: '📌',
+    name: 'Post-it / Appunto Veloce',
+    desc: 'Blocco note adesivo sempre visibile per formule, codici o scadenze',
+    defaultSlot: 'left_bottom'
+  }
+];
+
 interface SettingsModalProps {
   isOpen: boolean;
+  initialTab?: 'appearance' | 'theme_bars' | 'widgets' | 'keys' | 'account';
   onClose: () => void;
   bgIndex: number;
   onSelectBackground: (index: number) => void;
@@ -244,6 +303,17 @@ interface SettingsModalProps {
   onChangePanelOpacity: (opacity: number) => void;
   showDriveBar: boolean;
   onToggleShowDriveBar: (show: boolean) => void;
+  columnLayout: ColumnLayoutPreset;
+  onSelectColumnLayout: (layout: ColumnLayoutPreset) => void;
+  leftColumnWidth: number;
+  onChangeLeftColumnWidth: (w: number) => void;
+  rightColumnWidth: number;
+  onChangeRightColumnWidth: (w: number) => void;
+  chatSplitRatio: number;
+  onChangeChatSplitRatio: (ratio: number) => void;
+  customWidgets: CustomWidget[];
+  onUpdateCustomWidgets: (widgets: CustomWidget[]) => void;
+  materials: MaterialItem[];
   fontFamily: string;
   onSelectFontFamily: (font: string) => void;
   fontSize: number;
@@ -271,6 +341,7 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
+  initialTab = 'appearance',
   onClose,
   bgIndex,
   onSelectBackground,
@@ -284,6 +355,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onChangePanelOpacity,
   showDriveBar,
   onToggleShowDriveBar,
+  columnLayout,
+  onSelectColumnLayout,
+  leftColumnWidth,
+  onChangeLeftColumnWidth,
+  rightColumnWidth,
+  onChangeRightColumnWidth,
+  chatSplitRatio,
+  onChangeChatSplitRatio,
+  customWidgets,
+  onUpdateCustomWidgets,
+  materials,
   fontFamily,
   onSelectFontFamily,
   fontSize,
@@ -308,7 +390,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenRestoreBackup,
   showToast
 }) => {
-  const [activeTab, setActiveTab] = useState<'appearance' | 'theme_bars' | 'widgets' | 'keys' | 'account'>('appearance');
+  const [activeTab, setActiveTab] = useState<'appearance' | 'theme_bars' | 'widgets' | 'keys' | 'account'>(initialTab);
+
+  useEffect(() => {
+    if (isOpen && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
 
   // Keys draft state
   const [keysDraft, setKeysDraft] = useState<string[]>(apiKeys || []);
@@ -319,6 +407,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const solidThemes = BACKGROUND_THEMES.filter(t => t.category === 'Monocolore');
   const photoThemes = BACKGROUND_THEMES.filter(t => t.category === 'Fotografico');
+
+  const handleAddWidget = (type: WidgetType, defaultTitle: string, defaultSlot: WidgetSlot) => {
+    const newW: CustomWidget = {
+      id: 'w_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      type,
+      title: defaultTitle,
+      slot: defaultSlot,
+      enabled: true,
+      height: defaultSlot === 'right_bottom' ? 300 : 250,
+      materialId: type === 'pdf_viewer' && materials.length > 0 ? String(materials[0].id) : '',
+      customUrl: type === 'web_embed' ? 'https://it.m.wikipedia.org/wiki/Informatica' : ''
+    };
+    onUpdateCustomWidgets([...customWidgets, newW]);
+    showToast(`🧩 Widget "${defaultTitle}" aggiunto nella Home!`);
+  };
+
+  const handlePatchWidget = (id: string, patch: Partial<CustomWidget>) => {
+    onUpdateCustomWidgets(customWidgets.map(w => (w.id === id ? { ...w, ...patch } : w)));
+  };
+
+  const handleDeleteWidget = (id: string) => {
+    onUpdateCustomWidgets(customWidgets.filter(w => w.id !== id));
+    showToast('Widget rimosso.');
+  };
 
   const handleAddKey = () => {
     const trimmed = newKeyInput.trim();
@@ -357,7 +469,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         className="modal-box"
         onClick={e => e.stopPropagation()}
         style={{
-          maxWidth: '760px',
+          maxWidth: '820px',
           width: '96%',
           maxHeight: '90vh',
           overflowY: 'auto',
@@ -376,10 +488,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <span style={{ fontSize: '1.5rem' }}>⚙️</span>
             <div>
               <h3 style={{ margin: 0, fontSize: '1.18rem', fontWeight: 700, color: '#f8fafc' }}>
-                Personalizzazione & Impostazioni
+                Personalizzazione, Layout Modulare & Widget Studio
               </h3>
               <p style={{ margin: 0, fontSize: '0.78rem', color: '#94a3b8' }}>
-                Sfondi monocolore, modalità minimal compatta, colore barre, font in pixel e AI
+                Sfondi monocolore, widget PDF/Siti/Calcolatrice, ordine colonne, dimensioni e temi
               </p>
             </div>
           </div>
@@ -413,9 +525,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           }}
         >
           {[
+            { id: 'widgets', label: '🧩 Layout & Widget' },
             { id: 'appearance', label: '🎨 Sfondi & Font' },
             { id: 'theme_bars', label: '🖌️ Tema & Barre' },
-            { id: 'widgets', label: '📐 Spazio & Layout' },
             { id: 'keys', label: '🔑 Gemini AI' },
             { id: 'account', label: '👤 Account & Backup' }
           ].map(tab => (
@@ -425,7 +537,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onClick={() => setActiveTab(tab.id as any)}
               style={{
                 flex: 1,
-                minWidth: '120px',
+                minWidth: '125px',
                 padding: '7px 10px',
                 borderRadius: '8px',
                 border: 'none',
@@ -445,6 +557,462 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           ))}
         </div>
+
+        {/* TAB: LAYOUT MODULARE & WIDGET PERSONALIZZABILI */}
+        {activeTab === 'widgets' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {/* 1. ORDINE E INVERSIONE COLONNE */}
+            <div
+              style={{
+                padding: '14px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '12px'
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#fff', marginBottom: '4px' }}>
+                🔀 Ordine e Disposizione delle Colonne (Inverti o Sposta Barre)
+              </div>
+              <p style={{ fontSize: '0.74rem', color: '#94a3b8', margin: '0 0 10px 0' }}>
+                Scegli dove posizionare la Barra Strumenti, gli Appunti e la Chat AI / Widget:
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(175px, 1fr))', gap: '8px' }}>
+                {[
+                  { id: 'tools-notes-chat', title: 'Classico', sub: 'Strumenti | Appunti | Chat' },
+                  { id: 'chat-notes-tools', title: 'Invertito (Chat a Sx)', sub: 'Chat | Appunti | Strumenti' },
+                  { id: 'notes-chat-tools', title: 'Appunti a Sinistra', sub: 'Appunti | Chat | Strumenti' },
+                  { id: 'tools-chat-notes', title: 'Appunti a Destra', sub: 'Strumenti | Chat | Appunti' }
+                ].map(lay => {
+                  const isSel = columnLayout === lay.id;
+                  return (
+                    <button
+                      key={lay.id}
+                      type="button"
+                      onClick={() => onSelectColumnLayout(lay.id as ColumnLayoutPreset)}
+                      style={{
+                        padding: '9px 11px',
+                        borderRadius: '9px',
+                        border: isSel ? '1.5px solid var(--accent-primary, #6366f1)' : '1px solid rgba(255,255,255,0.09)',
+                        background: isSel ? 'rgba(99, 102, 241, 0.16)' : 'rgba(255,255,255,0.02)',
+                        color: '#fff',
+                        textAlign: 'left',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <div style={{ fontSize: '0.79rem', fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
+                        <span>{lay.title}</span>
+                        {isSel && <span style={{ color: '#38bdf8' }}>✓</span>}
+                      </div>
+                      <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginTop: '2px' }}>{lay.sub}</div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Sliders per Larghezze Colonne & Split Chat/PDF */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginTop: '14px', borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '12px' }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '4px' }}>
+                    <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Larghezza Barra Strumenti</span>
+                    <b style={{ color: '#38bdf8' }}>{leftColumnWidth}px</b>
+                  </div>
+                  <input
+                    type="range"
+                    min={180}
+                    max={380}
+                    step={10}
+                    value={leftColumnWidth}
+                    onChange={e => onChangeLeftColumnWidth(parseInt(e.target.value, 10))}
+                    style={{ width: '100%', accentColor: 'var(--accent-primary, #6366f1)', cursor: 'pointer' }}
+                  />
+                </div>
+
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '4px' }}>
+                    <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Larghezza Colonna Chat / PDF</span>
+                    <b style={{ color: '#38bdf8' }}>{rightColumnWidth}px</b>
+                  </div>
+                  <input
+                    type="range"
+                    min={260}
+                    max={560}
+                    step={10}
+                    value={rightColumnWidth}
+                    onChange={e => onChangeRightColumnWidth(parseInt(e.target.value, 10))}
+                    style={{ width: '100%', accentColor: 'var(--accent-primary, #6366f1)', cursor: 'pointer' }}
+                  />
+                </div>
+
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '4px' }}>
+                    <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Altezza Chat vs Widget Sotto</span>
+                    <b style={{ color: '#38bdf8' }}>Chat {chatSplitRatio}% / Widget {100 - chatSplitRatio}%</b>
+                  </div>
+                  <input
+                    type="range"
+                    min={30}
+                    max={75}
+                    step={5}
+                    value={chatSplitRatio}
+                    onChange={e => onChangeChatSplitRatio(parseInt(e.target.value, 10))}
+                    style={{ width: '100%', accentColor: 'var(--accent-primary, #6366f1)', cursor: 'pointer' }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 2. AGGIUNGI NUOVO WIDGET NELLA SCHERMATA PRINCIPALE */}
+            <div
+              style={{
+                padding: '14px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '12px'
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#fff', marginBottom: '4px' }}>
+                ➕ Aggiungi Widget nella Schermata Principale
+              </div>
+              <p style={{ fontSize: '0.74rem', color: '#94a3b8', margin: '0 0 10px 0' }}>
+                Clicca su un widget per aggiungerlo subito alla tua Home (es. sotto la Chat AI così diventa più corta e sotto vedi il PDF o un sito mentre scrivi!):
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '8px' }}>
+                {WIDGET_CATALOG.map(cat => (
+                  <div
+                    key={cat.type}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: '10px',
+                      background: 'rgba(255,255,255,0.025)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      gap: '8px'
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>{cat.icon}</span>
+                        <span>{cat.name}</span>
+                      </div>
+                      <div style={{ fontSize: '0.71rem', color: '#94a3b8', marginTop: '3px', lineHeight: 1.35 }}>
+                        {cat.desc}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '5px' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleAddWidget(cat.type, cat.name, 'right_bottom')}
+                        style={{
+                          flex: 1,
+                          padding: '5px 8px',
+                          borderRadius: '6px',
+                          background: 'var(--accent-primary, #6366f1)',
+                          border: 'none',
+                          color: '#fff',
+                          fontSize: '0.71rem',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        + Sotto la Chat
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAddWidget(cat.type, cat.name, 'center_bottom')}
+                        style={{
+                          padding: '5px 8px',
+                          borderRadius: '6px',
+                          background: 'rgba(255,255,255,0.08)',
+                          border: '1px solid rgba(255,255,255,0.14)',
+                          color: '#e2e8f0',
+                          fontSize: '0.71rem',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                        title="Aggiungi sotto l'area degli Appunti"
+                      >
+                        + Sotto Appunti
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAddWidget(cat.type, cat.name, 'left_bottom')}
+                        style={{
+                          padding: '5px 8px',
+                          borderRadius: '6px',
+                          background: 'rgba(255,255,255,0.08)',
+                          border: '1px solid rgba(255,255,255,0.14)',
+                          color: '#e2e8f0',
+                          fontSize: '0.71rem',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                        title="Aggiungi nella colonna Strumenti"
+                      >
+                        + Sx
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 3. ELENCO WIDGET ATTIVI / CONFIGURATI */}
+            <div
+              style={{
+                padding: '14px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '12px'
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#fff', marginBottom: '8px' }}>
+                🎛️ I Tuoi Widget Configurati ({customWidgets.length})
+              </div>
+              {customWidgets.length === 0 ? (
+                <div style={{ fontSize: '0.78rem', color: '#94a3b8', padding: '12px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
+                  Nessun widget aggiunto. Clicca su uno dei pulsanti qui sopra (es. <b>Visualizzatore PDF</b> o <b>Sito Web in Home</b>) per inserirlo nella schermata principale!
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {customWidgets.map(w => (
+                    <div
+                      key={w.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '8px',
+                        flexWrap: 'wrap',
+                        padding: '9px 12px',
+                        borderRadius: '9px',
+                        background: w.enabled ? 'rgba(99, 102, 241, 0.1)' : 'rgba(255,255,255,0.02)',
+                        border: w.enabled ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid rgba(255,255,255,0.07)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: '170px' }}>
+                        <input
+                          type="checkbox"
+                          checked={w.enabled}
+                          onChange={e => handlePatchWidget(w.id, { enabled: e.target.checked })}
+                          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                        />
+                        <input
+                          type="text"
+                          value={w.title}
+                          onChange={e => handlePatchWidget(w.id, { title: e.target.value })}
+                          style={{
+                            background: 'rgba(0,0,0,0.35)',
+                            border: '1px solid rgba(255,255,255,0.12)',
+                            borderRadius: '6px',
+                            color: '#fff',
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                            padding: '4px 8px',
+                            width: '165px'
+                          }}
+                        />
+                      </div>
+
+                      {/* Posizione */}
+                      <select
+                        value={w.slot}
+                        onChange={e => handlePatchWidget(w.id, { slot: e.target.value as WidgetSlot })}
+                        style={{
+                          background: 'rgba(0,0,0,0.45)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '6px',
+                          color: '#e2e8f0',
+                          fontSize: '0.74rem',
+                          padding: '4px 8px'
+                        }}
+                      >
+                        <option value="right_bottom">📍 Sotto la Chat AI</option>
+                        <option value="center_bottom">📍 Sotto gli Appunti</option>
+                        <option value="left_bottom">📍 Sotto Barra Strumenti</option>
+                      </select>
+
+                      {/* Configurazione rapida URL o Materiale */}
+                      {w.type === 'pdf_viewer' && (
+                        <select
+                          value={w.materialId || ''}
+                          onChange={e => handlePatchWidget(w.id, { materialId: e.target.value })}
+                          style={{
+                            background: 'rgba(0,0,0,0.45)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '6px',
+                            color: '#e2e8f0',
+                            fontSize: '0.74rem',
+                            padding: '4px 8px',
+                            maxWidth: '170px'
+                          }}
+                        >
+                          <option value="">Scegli PDF corso...</option>
+                          {materials.map(m => (
+                            <option key={String(m.id)} value={String(m.id)}>
+                              {m.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+
+                      {w.type === 'web_embed' && (
+                        <input
+                          type="text"
+                          placeholder="https://..."
+                          value={w.customUrl || ''}
+                          onChange={e => handlePatchWidget(w.id, { customUrl: e.target.value })}
+                          style={{
+                            background: 'rgba(0,0,0,0.45)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '6px',
+                            color: '#e2e8f0',
+                            fontSize: '0.74rem',
+                            padding: '4px 8px',
+                            width: '150px'
+                          }}
+                        />
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteWidget(w.id)}
+                        style={{
+                          background: 'rgba(244, 63, 94, 0.14)',
+                          border: '1px solid rgba(244, 63, 94, 0.35)',
+                          color: '#fb7185',
+                          borderRadius: '6px',
+                          padding: '4px 9px',
+                          fontSize: '0.73rem',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🗑️ Rimuovi
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 4. ALTRE OPZIONI BARRE & METEO */}
+            <div
+              style={{
+                padding: '14px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '12px'
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#fff', marginBottom: '10px' }}>
+                📐 Opzioni Rapide Barre & Meteo
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => onToggleShowDriveBar(!showDriveBar)}
+                  style={{
+                    padding: '8px 11px',
+                    borderRadius: '8px',
+                    background: showDriveBar ? 'rgba(99, 102, 241, 0.16)' : 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    color: '#fff',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    textAlign: 'left'
+                  }}
+                >
+                  🔗 Barra Google Drive: <b>{showDriveBar ? 'Visibile' : 'Nascosta'}</b>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onToggleShowWeatherWidget(!showWeatherWidget)}
+                  style={{
+                    padding: '8px 11px',
+                    borderRadius: '8px',
+                    background: showWeatherWidget ? 'rgba(99, 102, 241, 0.16)' : 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    color: '#fff',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    textAlign: 'left'
+                  }}
+                >
+                  🌤️ Widget Meteo Sx: <b>{showWeatherWidget ? 'Visibile' : 'Nascosto'}</b>
+                </button>
+                <button
+                  type="button"
+                  onClick={onToggleSidebarCollapsed}
+                  style={{
+                    padding: '8px 11px',
+                    borderRadius: '8px',
+                    background: isSidebarCollapsed ? 'rgba(99, 102, 241, 0.16)' : 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    color: '#fff',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    textAlign: 'left'
+                  }}
+                >
+                  ⬅️ Barra Strumenti: <b>{isSidebarCollapsed ? 'Solo Icone' : 'Estesa'}</b>
+                </button>
+                <button
+                  type="button"
+                  onClick={onToggleChatCollapsed}
+                  style={{
+                    padding: '8px 11px',
+                    borderRadius: '8px',
+                    background: isChatCollapsed ? 'rgba(99, 102, 241, 0.16)' : 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    color: '#fff',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    textAlign: 'left'
+                  }}
+                >
+                  🤖 Colonna Chat AI: <b>{isChatCollapsed ? 'Compressa' : 'Aperta'}</b>
+                </button>
+              </div>
+
+              {/* Città Meteo */}
+              <div style={{ marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '10px' }}>
+                <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '6px' }}>
+                  📍 Città Meteo Predefinita:
+                </div>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {presetCities.map(city => {
+                    const isSelected = selectedWeatherCity.name === city.name;
+                    return (
+                      <button
+                        key={city.name}
+                        type="button"
+                        onClick={() => onSelectCity(city)}
+                        style={{
+                          padding: '5px 10px',
+                          borderRadius: '7px',
+                          border: isSelected ? '1px solid var(--accent-primary, #6366f1)' : '1px solid rgba(255, 255, 255, 0.08)',
+                          background: isSelected ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255, 255, 255, 0.02)',
+                          color: isSelected ? '#fff' : '#cbd5e1',
+                          fontSize: '0.74rem',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {city.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* TAB 1: SFONDI & TIPOGRAFIA */}
         {activeTab === 'appearance' && (
@@ -640,7 +1208,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     📏 Dimensione Predefinita Testo Appunti (in Pixel)
                   </label>
                   <span style={{ fontSize: '0.73rem', color: '#94a3b8' }}>
-                    Puoi anche cambiare la dimensione in px di singole parole direttamente dalla barra degli appunti
+                    Puoi anche cambiare la dimensione in px di singole parole dalla barra degli appunti o col tasto destro
                   </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -860,196 +1428,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </span>
                       {isSelected && <span style={{ color: ac.primary, fontWeight: 700 }}>✓</span>}
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: SPAZIO, WIDGET & LAYOUT */}
-        {activeTab === 'widgets' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {/* Ottimizzazione Spazio & Pannelli */}
-            <div
-              style={{
-                padding: '14px',
-                background: 'rgba(255, 255, 255, 0.03)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '12px'
-              }}
-            >
-              <div style={{ fontWeight: 700, fontSize: '0.86rem', color: '#fff', marginBottom: '10px' }}>
-                📐 Ottimizzazione Spazio & Barre del Workspace
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div>
-                    <div style={{ fontSize: '0.81rem', color: '#e2e8f0', fontWeight: 600 }}>Modalità Ultra-Compatta & Senza Sfondo</div>
-                    <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Riduce i margini tra i pannelli ed elimina lo sfondo fotografico</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onToggleCompactMode(!compactMode)}
-                    style={{
-                      padding: '5px 12px',
-                      borderRadius: '7px',
-                      background: compactMode ? 'var(--accent-primary, #6366f1)' : 'rgba(255,255,255,0.07)',
-                      border: 'none',
-                      color: '#fff',
-                      fontSize: '0.75rem',
-                      fontWeight: 600,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {compactMode ? 'Attiva' : 'Standard'}
-                  </button>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '10px' }}>
-                  <div>
-                    <div style={{ fontSize: '0.81rem', color: '#e2e8f0', fontWeight: 600 }}>Mostra Barra Link Google Drive sopra gli Appunti</div>
-                    <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Nascondila se vuoi ancora più spazio verticale per scrivere</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onToggleShowDriveBar(!showDriveBar)}
-                    style={{
-                      padding: '5px 12px',
-                      borderRadius: '7px',
-                      background: showDriveBar ? 'var(--accent-primary, #6366f1)' : 'rgba(255,255,255,0.07)',
-                      border: 'none',
-                      color: '#fff',
-                      fontSize: '0.75rem',
-                      fontWeight: 600,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {showDriveBar ? 'Visibile' : 'Nascosta'}
-                  </button>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '10px' }}>
-                  <div>
-                    <div style={{ fontSize: '0.81rem', color: '#e2e8f0', fontWeight: 600 }}>Barra Laterale Sinistra (Strumenti)</div>
-                    <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Comprimi in sole icone per allargare la colonna degli appunti</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={onToggleSidebarCollapsed}
-                    style={{
-                      padding: '5px 12px',
-                      borderRadius: '7px',
-                      background: isSidebarCollapsed ? 'var(--accent-primary, #6366f1)' : 'rgba(255,255,255,0.07)',
-                      border: 'none',
-                      color: '#fff',
-                      fontSize: '0.75rem',
-                      fontWeight: 600,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {isSidebarCollapsed ? 'Compressa (Icone)' : 'Estesa'}
-                  </button>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '10px' }}>
-                  <div>
-                    <div style={{ fontSize: '0.81rem', color: '#e2e8f0', fontWeight: 600 }}>Pannello Destro (Gemini AI Copilot)</div>
-                    <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Riduci la barra laterale AI quando prendi appunti a tutto schermo</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={onToggleChatCollapsed}
-                    style={{
-                      padding: '5px 12px',
-                      borderRadius: '7px',
-                      background: isChatCollapsed ? 'var(--accent-primary, #6366f1)' : 'rgba(255,255,255,0.07)',
-                      border: 'none',
-                      color: '#fff',
-                      fontSize: '0.75rem',
-                      fontWeight: 600,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {isChatCollapsed ? 'Compresso' : 'Aperto'}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Weather Widget Toggle */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '14px',
-                background: 'rgba(255, 255, 255, 0.03)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '12px'
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#fff' }}>
-                  🌤️ Mostra Widget Meteo nella Colonna Strumenti
-                </div>
-                <div style={{ fontSize: '0.73rem', color: '#94a3b8', marginTop: '2px' }}>
-                  Disattivalo per avere una colonna sinistra ancora più minimale
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => onToggleShowWeatherWidget(!showWeatherWidget)}
-                style={{
-                  padding: '5px 12px',
-                  borderRadius: '7px',
-                  background: showWeatherWidget ? 'var(--accent-primary, #6366f1)' : 'rgba(255,255,255,0.07)',
-                  border: 'none',
-                  color: '#fff',
-                  fontSize: '0.75rem',
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
-              >
-                {showWeatherWidget ? 'Visibile' : 'Nascosto'}
-              </button>
-            </div>
-
-            {/* Weather Default City Selector */}
-            <div
-              style={{
-                padding: '14px',
-                background: 'rgba(255, 255, 255, 0.03)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '12px'
-              }}
-            >
-              <label style={{ fontSize: '0.84rem', fontWeight: 600, color: '#fff', display: 'block', marginBottom: '8px' }}>
-                📍 Sede / Città Meteo Predefinita
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(125px, 1fr))', gap: '7px' }}>
-                {presetCities.map(city => {
-                  const isSelected = selectedWeatherCity.name === city.name;
-                  return (
-                    <button
-                      key={city.name}
-                      type="button"
-                      onClick={() => onSelectCity(city)}
-                      style={{
-                        padding: '7px 10px',
-                        borderRadius: '8px',
-                        border: isSelected ? '1px solid var(--accent-primary, #6366f1)' : '1px solid rgba(255, 255, 255, 0.08)',
-                        background: isSelected ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255, 255, 255, 0.02)',
-                        color: isSelected ? '#fff' : '#cbd5e1',
-                        fontSize: '0.76rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        textAlign: 'left'
-                      }}
-                    >
-                      <div>{city.name}</div>
-                      <div style={{ fontSize: '0.67rem', color: '#94a3b8', fontWeight: 400 }}>{city.region}</div>
-                    </button>
                   );
                 })}
               </div>
