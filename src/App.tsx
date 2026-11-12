@@ -23,6 +23,7 @@ import { saveFileToIndexedDB, getFileFromIndexedDB, deleteFileFromIndexedDB } fr
 import { WeatherModal } from './components/WeatherModal';
 import { SettingsModal, BACKGROUND_THEMES } from './components/SettingsModal';
 import { uploadNoteToDrive } from './services/googleDriveService';
+import { usePWAInstall } from './hooks/usePWAInstall';
 import {
   FullWeatherData,
   CityLocation,
@@ -69,6 +70,9 @@ interface ToastItem {
 }
 
 export default function App() {
+  // PWA Install state (auto-hides when installed or running standalone)
+  const { isInstallable, isInstalled, promptInstall } = usePWAInstall();
+
   // Auth state
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -1327,13 +1331,102 @@ export default function App() {
     }
   };
 
-  // Rich Text Formatting helper
+  // PWA Install Button Handler
+  const handleInstallAppClick = async () => {
+    if (isInstallable) {
+      const outcome = await promptInstall();
+      if (outcome === 'accepted') {
+        showToast('🎉 Workspace ITS installata sul tuo dispositivo!');
+      }
+      return;
+    }
+
+    const isInIframe = window.self !== window.top;
+    const confirmed = await openCustomDialog({
+      title: '💻 Scarica App su Desktop / Dispositivo',
+      description: isInIframe
+        ? `Per installare <b>Workspace ITS</b> sul Desktop come applicazione nativa, apri prima il sito in una scheda dedicata del browser (Chrome o Edge) e premi il pulsante <b>"Scarica App"</b> o l'icona di installazione nella barra degli indirizzi.<br/><br/>Una volta installata, il pulsante scomparirà automaticamente!`
+        : `Puoi installare <b>Workspace ITS</b> direttamente dal tuo browser:<br/><br/>• <b>Su PC (Chrome / Edge):</b> clicca sull'icona <b>Installa App (⊕)</b> a destra nella barra degli indirizzi.<br/>• <b>Su iPhone / iPad (Safari):</b> premi <b>Condividi</b> e seleziona <b>Aggiungi alla schermata Home</b>.<br/><br/>Una volta scaricata, il tasto scomparirà automaticamente.`,
+      confirmText: isInIframe ? '↗ Apri in Scheda Dedicata' : 'Ho capito'
+    });
+
+    if (confirmed && isInIframe) {
+      const a = document.createElement('a');
+      a.href = window.location.href;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  };
+
+  // Rich Text Formatting helper (preserves selection & supports CSS colors/highlights)
   const handleFormatText = (command: string, value: string | undefined = undefined) => {
-    document.execCommand(command, false, value);
     if (notesAreaRef.current) {
       notesAreaRef.current.focus();
     }
+    if (command === 'hiliteColor' || command === 'foreColor') {
+      try {
+        document.execCommand('styleWithCSS', false, 'true');
+      } catch {
+        // Ignore if unsupported
+      }
+      const ok = document.execCommand(command, false, value);
+      if (!ok && command === 'hiliteColor') {
+        document.execCommand('backColor', false, value);
+      }
+    } else {
+      document.execCommand(command, false, value);
+    }
     handleEditorInput();
+  };
+
+  // Helper to format material file names cleanly
+  const formatMaterialDisplayName = (rawName: string) => {
+    if (!rawName) return 'Documento senza titolo';
+    return rawName.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+  };
+
+  // Materials: Rename Resource
+  const handleRenameMaterial = async (material: MaterialItem) => {
+    const newName = await openCustomDialog({
+      title: '✏️ Rinomina File / Risorsa',
+      description: 'Inserisci un nome chiaro e leggibile per questo materiale.',
+      fields: [{ placeholder: 'Nome del documento...', value: material.name }],
+      confirmText: 'Salva Nome'
+    });
+
+    if (newName && newName.trim()) {
+      const updatedItem: MaterialItem = { ...material, name: newName.trim() };
+
+      if (chatSelectedMaterial && String(chatSelectedMaterial.id) === String(material.id)) {
+        setChatSelectedMaterial(updatedItem);
+      }
+
+      if (workspaceMode === 'shared') {
+        if (!activeRoomId) return;
+        setActiveRoomMaterials(prev =>
+          prev.map(m => (String(m.id) === String(material.id) ? updatedItem : m))
+        );
+        await WorkspaceService.saveRoomMaterial(activeRoomId, updatedItem);
+        showToast('Nome del file aggiornato per il gruppo!');
+        return;
+      }
+
+      const currentSubMaterials = materials[activeSubject] || [];
+      const updatedList = currentSubMaterials.map(m =>
+        String(m.id) === String(material.id) ? updatedItem : m
+      );
+      const nextMaterials = { ...materials, [activeSubject]: updatedList };
+      setMaterials(nextMaterials);
+      WorkspaceService.saveLocalMaterials(nextMaterials);
+
+      if (currentUser) {
+        await WorkspaceService.saveMaterialToCloud(currentUser.uid, activeSubject, updatedItem);
+      }
+      showToast('Nome del file aggiornato!');
+    }
   };
 
   // Materials: Open Add Modal
@@ -1361,10 +1454,14 @@ export default function App() {
       const base64Url = reader.result as string;
       const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
       const isImg = file.type.startsWith('image/');
-      const cleanName = file.name.replace(/\.[^/.]+$/, '');
+      const cleanName = file.name
+        .replace(/\.[^/.]+$/, '')
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 
       setUploadingFile({
-        name: cleanName,
+        name: cleanName || file.name,
         originalName: file.name,
         size: file.size,
         base64: base64Url,
@@ -1372,7 +1469,7 @@ export default function App() {
         fileType: isPdf ? 'pdf' : isImg ? 'image' : 'doc'
       });
       if (!customMaterialName) {
-        setCustomMaterialName(cleanName);
+        setCustomMaterialName(cleanName || file.name);
       }
     };
     reader.readAsDataURL(file);
@@ -2454,13 +2551,24 @@ export default function App() {
             <span style={{ fontSize: '1.4rem' }}>📚</span>
             <span>Workspace ITS</span>
           </div>
-          <button
-            className="top-btn"
-            onClick={() => setIsBackupModalOpen(true)}
-            title="Importa backup dati offline"
-          >
-            💾 Ripristina Backup
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {!isInstalled && (
+              <button
+                className="top-btn top-btn-install"
+                onClick={handleInstallAppClick}
+                title="Scarica e installa Workspace ITS sul desktop o dispositivo"
+              >
+                💻 Scarica App
+              </button>
+            )}
+            <button
+              className="top-btn"
+              onClick={() => setIsBackupModalOpen(true)}
+              title="Importa backup dati offline"
+            >
+              💾 Ripristina Backup
+            </button>
+          </div>
         </div>
 
         {/* Center Hero Card */}
@@ -2630,6 +2738,16 @@ export default function App() {
           </div>
 
           <div className="topbar-right">
+            {!isInstalled && (
+              <button
+                type="button"
+                className="top-btn top-btn-install"
+                onClick={handleInstallAppClick}
+                title="Scarica Workspace ITS sul Desktop o schermata Home (scompare automaticamente una volta installata)"
+              >
+                💻 Scarica App
+              </button>
+            )}
             {isAdmin && (
               <button
                 className="top-btn"
@@ -2835,31 +2953,51 @@ export default function App() {
         {/* Center Column: Workspace Notes & Materials */}
         <div className={`panel ${isNotesMaximized ? 'notes-maximized' : ''} ${mobileTab === 'notes' || mobileTab === 'materials' ? 'mobile-active' : ''}`} id="notes-panel">
           
-          {/* Top Workspace Mode Switcher (Personal vs Shared Study Rooms) */}
+          {/* Top Unified Bar: Mode Switcher (Personal vs Shared) + View Switcher (Appunti vs Materiali) */}
           <div className="workspace-mode-bar">
-            <div className="workspace-mode-selector">
-              <button
-                type="button"
-                className={`workspace-mode-btn ${workspaceMode === 'personal' ? 'active' : ''}`}
-                onClick={() => setWorkspaceMode('personal')}
-              >
-                🔒 Personale
-              </button>
-              <button
-                type="button"
-                className={`workspace-mode-btn ${workspaceMode === 'shared' ? 'active' : ''}`}
-                onClick={() => {
-                  setWorkspaceMode('shared');
-                  if (userRooms.length === 0) {
-                    setIsRoomModalOpen(true);
-                  }
-                }}
-              >
-                👥 Stanze di Gruppo
-                {userRooms.length > 0 && (
-                  <span className="mode-badge">{userRooms.length}</span>
-                )}
-              </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <div className="workspace-mode-selector">
+                <button
+                  type="button"
+                  className={`workspace-mode-btn ${workspaceMode === 'personal' ? 'active' : ''}`}
+                  onClick={() => setWorkspaceMode('personal')}
+                >
+                  🔒 Personale
+                </button>
+                <button
+                  type="button"
+                  className={`workspace-mode-btn ${workspaceMode === 'shared' ? 'active' : ''}`}
+                  onClick={() => {
+                    setWorkspaceMode('shared');
+                    if (userRooms.length === 0) {
+                      setIsRoomModalOpen(true);
+                    }
+                  }}
+                >
+                  👥 Stanze di Gruppo
+                  {userRooms.length > 0 && (
+                    <span className="mode-badge">{userRooms.length}</span>
+                  )}
+                </button>
+              </div>
+
+              {/* Segmented Control Tabs merged inline to maximize vertical editor space */}
+              <div className="tabs-container" style={{ marginBottom: 0 }}>
+                <button
+                  type="button"
+                  className={`tab-btn ${activeTab === 'notes' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('notes')}
+                >
+                  📝 Appunti
+                </button>
+                <button
+                  type="button"
+                  className={`tab-btn ${activeTab === 'materials' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('materials')}
+                >
+                  📚 Materiali ({activeDisplayMaterials.length})
+                </button>
+              </div>
             </div>
 
             {workspaceMode === 'shared' && (
@@ -2895,7 +3033,7 @@ export default function App() {
             <>
               <div className="notes-header">
                 <div className="notes-header-left">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--text-secondary)' }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                     <polyline points="14 2 14 8 20 8" />
                     <line x1="16" y1="13" x2="8" y2="13" />
@@ -2917,45 +3055,42 @@ export default function App() {
                   <button
                     type="button"
                     className="header-btn"
+                    onClick={handleAddNewSubject}
+                    title="Crea una nuova materia"
+                  >
+                    + Nuova Materia
+                  </button>
+
+                  <button
+                    type="button"
+                    className="header-btn"
                     onClick={() => handleDeleteSubject(activeSubject)}
-                    title={subjects.length > 1 ? `Elimina la materia "${activeSubject}"` : "Non puoi eliminare l'unica materia presente (creane prima un'altra con '+ Nuova')"}
+                    title={subjects.length > 1 ? `Elimina la materia "${activeSubject}"` : "Non puoi eliminare l'unica materia presente (creane prima un'altra con '+ Nuova Materia')"}
                     style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '5px',
                       color: '#f87171',
-                      borderColor: 'rgba(239, 68, 68, 0.45)',
-                      backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                      padding: '5px 10px',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      marginLeft: '8px',
-                      fontSize: '0.82rem',
-                      fontWeight: 600,
-                      opacity: subjects.length > 1 ? 1 : 0.65
+                      borderColor: 'rgba(239, 68, 68, 0.38)',
+                      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                      opacity: subjects.length > 1 ? 1 : 0.6
                     }}
                   >
                     🗑️ Elimina
                   </button>
                 </div>
                 <div className="notes-header-right">
-                  <button className="header-btn" onClick={handleAddNewSubject} title="Crea una nuova materia">
-                    + Nuova
-                  </button>
                   <button className="header-btn" id="fullscreen-btn" onClick={handleToggleFullscreenNotes}>
-                    {isNotesMaximized ? 'Riduci' : 'Massimizza'}
+                    {isNotesMaximized ? '🗗 Riduci' : '⛶ Massimizza Spazio'}
                   </button>
                 </div>
               </div>
 
-              {/* Drive Bar */}
+              {/* Compact Drive Bar */}
               <div className="drive-bar">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <path d="M22 12H12l-5 9h10l5-9z" /><path d="M6 12L2 5h10l4 7-10 9z" />
                 </svg>
                 <input
                   type="url"
-                  placeholder="Incolla qui il link della cartella Drive del corso..."
+                  placeholder="Link cartella Google Drive del corso..."
                   value={driveLink}
                   onChange={handleDriveLinkChange}
                 />
@@ -2968,7 +3103,7 @@ export default function App() {
             /* Shared Room Header */
             <div className="notes-header shared-room-header">
               <div className="notes-header-left" style={{ flexWrap: 'wrap', gap: '8px' }}>
-                <span style={{ fontSize: '1.2rem' }}>👥</span>
+                <span style={{ fontSize: '1.1rem' }}>👥</span>
                 {userRooms.length > 0 ? (
                   <>
                     <select
@@ -3018,7 +3153,7 @@ export default function App() {
                     )}
                   </>
                 ) : (
-                  <span style={{ fontSize: '0.86rem', color: 'var(--text-secondary)' }}>
+                  <span style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
                     Nessuna stanza attiva. Creane una o entra con un codice!
                   </span>
                 )}
@@ -3055,30 +3190,11 @@ export default function App() {
                   </button>
                 )}
                 <button className="header-btn" id="fullscreen-btn" onClick={handleToggleFullscreenNotes}>
-                  {isNotesMaximized ? 'Riduci' : 'Massimizza'}
+                  {isNotesMaximized ? '🗗 Riduci' : '⛶ Massimizza'}
                 </button>
               </div>
             </div>
           )}
-
-          {/* Segmented Control Tabs - Available in both Personal and Shared Room modes */}
-          <div className="tabs-container">
-            <button
-              className={`tab-btn ${activeTab === 'notes' ? 'active' : ''}`}
-              onClick={() => setActiveTab('notes')}
-            >
-              📝 Appunti
-            </button>
-            <button
-              className={`tab-btn ${activeTab === 'materials' ? 'active' : ''}`}
-              onClick={() => setActiveTab('materials')}
-            >
-              📚 Materiali (PDF/Link)
-              {workspaceMode === 'shared' && activeRoomMaterials.length > 0 && (
-                <span className="mode-badge" style={{ marginLeft: '6px' }}>{activeRoomMaterials.length}</span>
-              )}
-            </button>
-          </div>
 
           {/* Content Area */}
           <div className="content-area">
@@ -3170,28 +3286,27 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Editor Toolbar */}
+                {/* Rich Text Editor Toolbar - Complete Formatting & Zero Overflow */}
                 <div className="editor-toolbar">
-                  <button onClick={() => handleFormatText('bold')} title="Grassetto">
-                    <b>B</b>
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleFormatText('undo')}
+                    title="Annulla (Ctrl+Z)"
+                  >
+                    ↶
                   </button>
-                  <button onClick={() => handleFormatText('italic')} title="Corsivo">
-                    <i>I</i>
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleFormatText('redo')}
+                    title="Ripristina (Ctrl+Y)"
+                  >
+                    ↷
                   </button>
-                  <button onClick={() => handleFormatText('underline')} title="Sottolineato">
-                    <u>U</u>
-                  </button>
-                  <button onClick={() => handleFormatText('strikeThrough')} title="Barrato">
-                    <s>S</s>
-                  </button>
+
                   <span className="divider"></span>
-                  <button onClick={() => handleFormatText('insertUnorderedList')} title="Elenco puntato">
-                    •
-                  </button>
-                  <button onClick={() => handleFormatText('insertOrderedList')} title="Elenco numerato">
-                    1.
-                  </button>
-                  <span className="divider"></span>
+
                   <select
                     onChange={e => {
                       if (e.target.value) {
@@ -3200,62 +3315,184 @@ export default function App() {
                       }
                     }}
                     defaultValue=""
+                    title="Formato paragrafo o titolo"
                   >
                     <option value="" disabled>
-                      Stile Testo
+                      Formato
                     </option>
+                    <option value="P">Paragrafo</option>
                     <option value="H1">Titolo 1 (H1)</option>
                     <option value="H2">Titolo 2 (H2)</option>
                     <option value="H3">Titolo 3 (H3)</option>
-                    <option value="P">Paragrafo (Normale)</option>
+                    <option value="BLOCKQUOTE">Citazione</option>
+                    <option value="PRE">Blocco Codice</option>
                   </select>
-                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px' }}>
+
+                  <span className="divider"></span>
+
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleFormatText('bold')}
+                    title="Grassetto (Ctrl+B)"
+                  >
+                    <b>B</b>
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleFormatText('italic')}
+                    title="Corsivo (Ctrl+I)"
+                  >
+                    <i>I</i>
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleFormatText('underline')}
+                    title="Sottolineato (Ctrl+U)"
+                  >
+                    <u>U</u>
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleFormatText('strikeThrough')}
+                    title="Barrato"
+                  >
+                    <s>S</s>
+                  </button>
+
+                  <span className="divider"></span>
+
+                  {/* Highlighter Swatches */}
+                  <div className="toolbar-swatch-group" title="Evidenziatore testo">
+                    <span className="toolbar-swatch-label">🖍️</span>
+                    {[
+                      { color: '#fde047', label: 'Evidenzia Giallo' },
+                      { color: '#6ee7b7', label: 'Evidenzia Verde' },
+                      { color: '#7dd3fc', label: 'Evidenzia Azzurro' },
+                      { color: '#f9a8d4', label: 'Evidenzia Rosa' },
+                      { color: '#c4b5fd', label: 'Evidenzia Viola' }
+                    ].map(sw => (
+                      <button
+                        key={sw.color}
+                        type="button"
+                        className="swatch-dot-btn"
+                        style={{ backgroundColor: sw.color }}
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => {
+                          handleFormatText('hiliteColor', sw.color);
+                          handleFormatText('foreColor', '#09090b');
+                        }}
+                        title={sw.label}
+                      />
+                    ))}
                     <button
                       type="button"
+                      className="swatch-clear-btn"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => {
+                        handleFormatText('hiliteColor', 'transparent');
+                        handleFormatText('foreColor', '#ececf1');
+                      }}
+                      title="Rimuovi evidenziazione"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {/* Text Color Swatches */}
+                  <div className="toolbar-swatch-group" title="Colore del testo">
+                    <span className="toolbar-swatch-label">A</span>
+                    {[
+                      { color: '#f8fafc', label: 'Testo Bianco' },
+                      { color: '#818cf8', label: 'Testo Indaco' },
+                      { color: '#38bdf8', label: 'Testo Ciano' },
+                      { color: '#34d399', label: 'Testo Smeraldo' },
+                      { color: '#fbbf24', label: 'Testo Ambra' },
+                      { color: '#fb7185', label: 'Testo Corallo' }
+                    ].map(sw => (
+                      <button
+                        key={sw.color}
+                        type="button"
+                        className="swatch-dot-btn"
+                        style={{ backgroundColor: sw.color }}
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => handleFormatText('foreColor', sw.color)}
+                        title={sw.label}
+                      />
+                    ))}
+                  </div>
+
+                  <span className="divider"></span>
+
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleFormatText('insertUnorderedList')}
+                    title="Elenco puntato"
+                  >
+                    • Lista
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleFormatText('insertOrderedList')}
+                    title="Elenco numerato"
+                  >
+                    1. Num
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleFormatText('justifyLeft')}
+                    title="Allinea a sinistra"
+                  >
+                    ⬅
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleFormatText('justifyCenter')}
+                    title="Centra testo"
+                  >
+                    ⬌
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleFormatText('insertHorizontalRule')}
+                    title="Inserisci linea separatrice"
+                  >
+                    ―
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleFormatText('removeFormat')}
+                    title="Pulisci formattazione sul testo selezionato"
+                  >
+                    🧹
+                  </button>
+
+                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="editor-action-btn drive-save"
                       onClick={handleSaveNoteToGoogleDrive}
                       disabled={isSavingToDrive}
                       title="Salva questa nota come documento nel tuo Google Drive personale"
-                      style={{
-                        background: 'rgba(56, 189, 248, 0.15)',
-                        border: '1px solid rgba(56, 189, 248, 0.35)',
-                        color: '#38bdf8',
-                        borderRadius: '6px',
-                        padding: '4px 9px',
-                        fontSize: '0.74rem',
-                        fontWeight: 600,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '5px',
-                        cursor: isSavingToDrive ? 'not-allowed' : 'pointer'
-                      }}
                     >
-                      {isSavingToDrive ? '⏳...' : '☁️ Salva su Drive'}
+                      {isSavingToDrive ? '⏳ Salvataggio...' : '☁️ Salva su Drive'}
                     </button>
                     <button
                       type="button"
+                      className="editor-action-btn file-dl"
                       onClick={handleDownloadNoteFile}
                       title="Scarica questo appunto sul tuo computer (.html)"
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.05)',
-                        border: '1px solid rgba(255, 255, 255, 0.15)',
-                        color: '#cbd5e1',
-                        borderRadius: '6px',
-                        padding: '4px 8px',
-                        fontSize: '0.74rem',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        cursor: 'pointer'
-                      }}
                     >
                       💾 Scarica
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleFormatText('removeFormat')}
-                      title="Rimuovi formattazione"
-                    >
-                      ✕
                     </button>
                   </div>
                 </div>
@@ -3280,7 +3517,7 @@ export default function App() {
                   }}
                   contentEditable
                   suppressContentEditableWarning
-                  data-placeholder="Inizia a digitare o formatta usando i tasti sopra..."
+                  data-placeholder="Inizia a scrivere i tuoi appunti... Seleziona il testo per evidenziarlo, cambiare colore o usare il menu rapido AI (clic destro)."
                   onInput={handleEditorInput}
                   onContextMenu={handleNotesContextMenu}
                 />
@@ -3290,8 +3527,8 @@ export default function App() {
                 <div className="materials-header-bar">
                   <span className="materials-header-title">
                     {workspaceMode === 'shared'
-                      ? `Libreria Condivisa • ${activeRoom?.name || 'Stanza'}`
-                      : `Libreria File & PDF • ${activeSubject}`}
+                      ? `📁 Libreria Condivisa • ${activeRoom?.name || 'Stanza'}`
+                      : `📁 Libreria File & PDF • ${activeSubject}`}
                   </span>
                   <div className="materials-header-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <button className="add-material-btn" onClick={handleOpenAddMaterialModal}>
@@ -3309,31 +3546,63 @@ export default function App() {
                 ) : (
                   Object.entries(activeGroupedMaterials).map(([cat, items]) => (
                     <div key={cat} className="material-category">
-                      <div className="material-category-title">{cat}</div>
+                      <div className="material-category-title">
+                        <span>{cat}</span>
+                        <span style={{ opacity: 0.7, fontSize: '0.68rem' }}>{items.length} {items.length === 1 ? 'file' : 'file'}</span>
+                      </div>
                       <div className="materials-grid">
                         {items.map(f => {
                           const meta = getFileMeta(f.name, f.url, f.fileType);
+                          const displayName = formatMaterialDisplayName(f.name);
                           return (
                             <div key={f.id} className="material-card">
-                              <div className="material-info">
-                                <div
-                                  className="material-icon-box"
-                                  style={{ background: meta.color, border: `1px solid ${meta.border}` }}
-                                >
-                                  {meta.icon}
+                              <div className="material-card-top">
+                                <div className="material-info">
+                                  <div
+                                    className="material-icon-box"
+                                    style={{ background: meta.color, border: `1px solid ${meta.border}` }}
+                                  >
+                                    {meta.icon}
+                                  </div>
+                                  <div className="material-text">
+                                    <div className="material-name" title={f.name}>
+                                      {displayName}
+                                    </div>
+                                    <div className="material-sub">
+                                      <span className="material-type-pill">{meta.type}</span>
+                                      {f.fileSize ? (
+                                        <span>
+                                          • {f.fileSize >= 1024 * 1024
+                                            ? `${(f.fileSize / (1024 * 1024)).toFixed(1)} MB`
+                                            : `${Math.max(1, Math.round(f.fileSize / 1024))} KB`}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  </div>
                                 </div>
-                                <div className="material-text">
-                                  <div className="material-name" title={f.name}>
-                                    {f.name}
-                                  </div>
-                                  <div className="material-sub">
-                                    <span className="material-type-pill">{meta.type}</span>
-                                    {f.fileSize ? <span>• {(f.fileSize / 1024).toFixed(0)} KB</span> : null}
-                                  </div>
+                                <div className="material-top-tools">
+                                  <button
+                                    type="button"
+                                    className="material-rename-btn"
+                                    onClick={() => handleRenameMaterial(f)}
+                                    title="Rinomina file o documento"
+                                  >
+                                    ✏️
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="material-del-btn"
+                                    onClick={() => handleDeleteMaterial(f.id)}
+                                    title="Rimuovi risorsa"
+                                  >
+                                    ✕
+                                  </button>
                                 </div>
                               </div>
+
                               <div className="material-actions">
                                 <button
+                                  type="button"
                                   className="material-action-btn material-preview-btn"
                                   onClick={() => handleOpenPreview(f)}
                                   title="Visualizza anteprima documento o PDF"
@@ -3341,11 +3610,12 @@ export default function App() {
                                   👁️ Anteprima
                                 </button>
                                 <button
+                                  type="button"
                                   className="material-action-btn material-ai-btn"
                                   onClick={() => handleSelectMaterialForChat(f)}
                                   title="Chiedi spiegazioni a Gemini su questo materiale"
                                 >
-                                  🧠 AI
+                                  🧠 Chiedi all'AI
                                 </button>
                                 <a
                                   href={f.url && f.url.startsWith('http') ? (extractGoogleDriveId(f.url) ? `https://drive.google.com/file/d/${extractGoogleDriveId(f.url)}/view` : f.url) : '#'}
@@ -3362,13 +3632,6 @@ export default function App() {
                                 >
                                   ↗ Apri
                                 </a>
-                                <button
-                                  className="material-action-btn material-del-btn"
-                                  onClick={() => handleDeleteMaterial(f.id)}
-                                  title="Rimuovi risorsa"
-                                >
-                                  ✕
-                                </button>
                               </div>
                             </div>
                           );
