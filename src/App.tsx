@@ -171,7 +171,7 @@ export default function App() {
   const [customMaterialUrl, setCustomMaterialUrl] = useState<string>('');
 
   // Access Control & Admin Gate
-  const [isApproved, setIsApproved] = useState<boolean>(true);
+  const [isApproved, setIsApproved] = useState<boolean>(false);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [accessRequests, setAccessRequests] = useState<any[]>([]);
   const [approvedUsers, setApprovedUsers] = useState<any[]>([]);
@@ -398,31 +398,82 @@ export default function App() {
         activeListenersCleanupRef.current = null;
       }
 
-      setCurrentUser(user);
-      setAuthLoading(false);
-
       if (!user) {
+        setCurrentUser(null);
         setIsAdmin(false);
-        setIsApproved(true);
+        setIsApproved(false);
         setCloudSyncActive(false);
+        setAuthLoading(false);
         return;
       }
 
       const isUserSuperAdmin = WorkspaceService.isSuperAdmin(user.email, user.displayName);
-      setIsAdmin(isUserSuperAdmin);
-
       let userIsApproved = isUserSuperAdmin;
       if (!isUserSuperAdmin) {
         userIsApproved = await WorkspaceService.checkUserApproval(user.uid, user.email, user.displayName);
       }
 
+      // Batch state updates together AFTER approval check resolves to prevent unauthorized effect runs
+      setIsAdmin(isUserSuperAdmin);
+      setIsApproved(userIsApproved);
+      setCurrentUser(user);
+      setAuthLoading(false);
+
+      const attachWaitingModeListeners = (targetUser: User) => {
+        setIsApproved(false);
+        setCloudSyncActive(false);
+        WorkspaceService.submitAccessRequest(targetUser);
+
+        let unlocked = false;
+        const handleUnlock = () => {
+          if (unlocked) return;
+          unlocked = true;
+          if (activeListenersCleanupRef.current) {
+            activeListenersCleanupRef.current();
+            activeListenersCleanupRef.current = null;
+          }
+          setIsApproved(true);
+          setCloudSyncActive(true);
+          showToast('Accesso autorizzato dall\'amministratore! Benvenuto.');
+          startCloudSyncForUser(targetUser, false);
+        };
+
+        const unsubApproval = WorkspaceService.subscribeToUserApprovalStatus(targetUser.uid, targetUser.email, approved => {
+          if (approved) handleUnlock();
+        });
+
+        const autoCheckInterval = setInterval(async () => {
+          const approved = await WorkspaceService.checkUserApproval(targetUser.uid, targetUser.email, targetUser.displayName);
+          if (approved) handleUnlock();
+        }, 2500);
+
+        activeListenersCleanupRef.current = () => {
+          unsubApproval();
+          clearInterval(autoCheckInterval);
+        };
+      };
+
       const startCloudSyncForUser = async (targetUser: User, isAdminUser: boolean) => {
         let unsubAdminReq: (() => void) | null = null;
         let unsubAdminAppr: (() => void) | null = null;
+        let unsubRevokeWatch: (() => void) | null = null;
 
         if (isAdminUser) {
+          WorkspaceService.cleanupSuperAdminRecords(targetUser);
           unsubAdminReq = WorkspaceService.subscribeToAccessRequests(setAccessRequests);
           unsubAdminAppr = WorkspaceService.subscribeToApprovedUsers(setApprovedUsers);
+        } else {
+          // Watch for live revocation by admin
+          unsubRevokeWatch = WorkspaceService.subscribeToUserApprovalStatus(targetUser.uid, targetUser.email, stillApproved => {
+            if (!stillApproved) {
+              if (activeListenersCleanupRef.current) {
+                activeListenersCleanupRef.current();
+                activeListenersCleanupRef.current = null;
+              }
+              showToast('L\'accesso è stato revocato dall\'amministratore.');
+              attachWaitingModeListeners(targetUser);
+            }
+          });
         }
 
         // Auto-sync local notes to Cloud Firestore in background without annoying popups
@@ -435,7 +486,7 @@ export default function App() {
             if (result.pagesCount > 0) {
               console.log(`Appunti auto-sincronizzati su Cloud Firestore (${result.pagesCount} pagine).`);
             }
-          }).catch(err => console.warn('Auto cloud sync error:', err));
+          }).catch(() => {});
         }
 
         // Subscribe to Realtime Firestore updates
@@ -480,48 +531,16 @@ export default function App() {
           unsubFirestore();
           if (unsubAdminReq) unsubAdminReq();
           if (unsubAdminAppr) unsubAdminAppr();
+          if (unsubRevokeWatch) unsubRevokeWatch();
         };
       };
 
       if (!userIsApproved) {
-        setIsApproved(false);
-        setCloudSyncActive(false);
-        await WorkspaceService.submitAccessRequest(user);
-
-        // Real-time listener: auto-unlocks as soon as admin approves
-        const unsubApproval = WorkspaceService.subscribeToUserApprovalStatus(user.uid, user.email, approved => {
-          if (approved) {
-            setIsApproved(true);
-            setCloudSyncActive(true);
-            showToast('Accesso autorizzato dall\'amministratore! Benvenuto.');
-            startCloudSyncForUser(user, false);
-          }
-        });
-
-        // Continuous auto-check every 2.5 seconds (eliminates manual rechecking)
-        const autoCheckInterval = setInterval(async () => {
-          const approved = await WorkspaceService.checkUserApproval(user.uid, user.email, user.displayName);
-          if (approved) {
-            clearInterval(autoCheckInterval);
-            setIsApproved(true);
-            setCloudSyncActive(true);
-            showToast('Accesso autorizzato dall\'amministratore! Benvenuto.');
-            startCloudSyncForUser(user, false);
-          }
-        }, 2500);
-
-        activeListenersCleanupRef.current = () => {
-          unsubApproval();
-          clearInterval(autoCheckInterval);
-        };
+        attachWaitingModeListeners(user);
         return;
       }
 
-      setIsApproved(true);
       setCloudSyncActive(true);
-      if (isUserSuperAdmin) {
-        WorkspaceService.selfApproveBeccalli(user).catch(() => {});
-      }
       showToast(`Benvenuto, ${user.displayName || user.email}! Sincronizzazione cloud attiva.`, 'info');
       startCloudSyncForUser(user, isUserSuperAdmin);
     });
@@ -671,10 +690,10 @@ export default function App() {
       }
       await signOut(auth);
     } catch (e) {
-      console.warn('Logout error:', e);
+      // Ignore signout error
     } finally {
       setCurrentUser(null);
-      setIsApproved(true);
+      setIsApproved(false);
       setIsAdmin(false);
       setCloudSyncActive(false);
       showToast('Disconnesso con successo.');
@@ -690,13 +709,13 @@ export default function App() {
       }
       await signOut(auth);
       setCurrentUser(null);
-      setIsApproved(true);
+      setIsApproved(false);
       setIsAdmin(false);
       setCloudSyncActive(false);
       // Immediately open Google Login popup
       await handleGoogleLogin();
     } catch (e) {
-      console.warn('Switch account error:', e);
+      // Ignore switch account error
     }
   };
 
@@ -1615,7 +1634,7 @@ export default function App() {
           if (isSuper) {
             setIsApproved(true);
             setIsAdmin(true);
-            WorkspaceService.selfApproveBeccalli(result.user).catch(() => {});
+            WorkspaceService.cleanupSuperAdminRecords(result.user);
           }
         }
         return token;
@@ -4142,7 +4161,7 @@ export default function App() {
                             className="dialog-btn danger"
                             style={{ padding: '6px 10px', fontSize: '0.75rem' }}
                             onClick={async () => {
-                              await WorkspaceService.removeApprovedUser(req.userId || req.id);
+                              await WorkspaceService.removeApprovedUser(req);
                               showToast(`Richiesta di ${req.email} rimossa.`);
                             }}
                           >
@@ -4159,7 +4178,7 @@ export default function App() {
                   </div>
                 ) : (
                   approvedUsers.map((u) => (
-                    <div key={u.userId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.03)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--panel-border)' }}>
+                    <div key={u.id || u.userId || u.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.03)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--panel-border)' }}>
                       <div>
                         <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#fff' }}>{u.displayName || u.email}</div>
                         <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
@@ -4172,7 +4191,7 @@ export default function App() {
                             className="dialog-btn danger"
                             style={{ padding: '6px 12px', fontSize: '0.75rem' }}
                             onClick={async () => {
-                              await WorkspaceService.revokeApprovedUser(u.userId);
+                              await WorkspaceService.revokeApprovedUser(u);
                               showToast(`Accesso revocato per ${u.email}`);
                             }}
                           >
@@ -4196,8 +4215,8 @@ export default function App() {
                           className="dialog-btn"
                           style={{ padding: '6px 8px', fontSize: '0.75rem' }}
                           onClick={async () => {
-                            await WorkspaceService.removeApprovedUser(u.userId);
-                            showToast(`Utente ${u.email} rimosso.`);
+                            await WorkspaceService.removeApprovedUser(u);
+                            showToast(`Utente ${u.email} rimosso definitivamente.`);
                           }}
                         >
                           ✕

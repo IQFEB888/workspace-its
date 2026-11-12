@@ -14,14 +14,29 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn() &&
              'email' in request.auth.token &&
-             request.auth.token.email == "beccalli.fabio4@gmail.com";
+             (request.auth.token.email == "beccalli.fabio4@gmail.com" ||
+              request.auth.token.email.lower() == "beccalli.fabio4@gmail.com");
     }
 
-    // Approved User check: Admin or active status in approved_users collection
+    function isApprovedByUid(userId) {
+      return exists(/databases/$(database)/documents/approved_users/$(userId)) &&
+             get(/databases/$(database)/documents/approved_users/$(userId)).data.status == 'active';
+    }
+
+    function isRevokedByUid(userId) {
+      return exists(/databases/$(database)/documents/approved_users/$(userId)) &&
+             get(/databases/$(database)/documents/approved_users/$(userId)).data.status == 'revoked';
+    }
+
+    function isApprovedByEmail() {
+      return 'email' in request.auth.token &&
+             exists(/databases/$(database)/documents/approved_users/$(request.auth.token.email.lower())) &&
+             get(/databases/$(database)/documents/approved_users/$(request.auth.token.email.lower())).data.status == 'active';
+    }
+
+    // Approved User check: Admin or active status in approved_users collection (by UID or email)
     function isApprovedUser(userId) {
-      return isAdmin() ||
-             (exists(/databases/$(database)/documents/approved_users/$(userId)) &&
-              get(/databases/$(database)/documents/approved_users/$(userId)).data.status == 'active');
+      return isAdmin() || (!isRevokedByUid(userId) && (isApprovedByUid(userId) || isApprovedByEmail()));
     }
 
     // Health check endpoint
@@ -38,10 +53,10 @@ service cloud.firestore {
     }
 
     // Approved Users directory:
-    // Any signed-in user can check their OWN approval status
-    // Admin can list, create, update, and delete all records
+    // Any signed-in user can read individual approval docs to verify their status without error
+    // Only Admin can list, create, update, and delete approval records
     match /approved_users/{userId} {
-      allow get: if isOwner(userId) || isAdmin();
+      allow get: if isSignedIn();
       allow list, create, update, delete: if isAdmin();
     }
 

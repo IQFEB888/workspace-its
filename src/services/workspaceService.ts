@@ -567,11 +567,21 @@ export class WorkspaceService {
     try {
       // 1. Direct check by userId
       const snap = await getDoc(doc(db, 'approved_users', userId));
-      if (snap.exists() && snap.data().status === 'active') return true;
+      if (snap.exists()) {
+        const st = snap.data().status;
+        if (st === 'active') return true;
+        if (st === 'revoked') return false;
+      }
 
-      // 2. Also check if approved by email directly
+      // 2. Check by exact lowercase email and legacy normalized email ID
       if (email) {
         const emailClean = email.toLowerCase().trim();
+        const snapExactEmail = await getDoc(doc(db, 'approved_users', emailClean));
+        if (snapExactEmail.exists()) {
+          const st = snapExactEmail.data().status;
+          if (st === 'active') return true;
+          if (st === 'revoked') return false;
+        }
         const emailUid = 'user_' + emailClean.replace(/[^a-zA-Z0-9]/g, '_');
         const snapEmail = await getDoc(doc(db, 'approved_users', emailUid));
         if (snapEmail.exists() && snapEmail.data().status === 'active') return true;
@@ -584,28 +594,56 @@ export class WorkspaceService {
 
   static subscribeToUserApprovalStatus(userId: string, email: string | null | undefined, callback: (isApproved: boolean) => void): Unsubscribe {
     const unsubs: Unsubscribe[] = [];
-    const docRef = doc(db, 'approved_users', userId);
+    let uidActive = false;
+    let exactEmailActive = false;
+    let legacyEmailActive = false;
+    let isRevoked = false;
 
+    const evaluate = () => {
+      if (isRevoked) {
+        callback(false);
+      } else {
+        callback(uidActive || exactEmailActive || legacyEmailActive);
+      }
+    };
+
+    const docRef = doc(db, 'approved_users', userId);
     unsubs.push(
       onSnapshot(docRef, snap => {
-        if (snap.exists() && snap.data().status === 'active') {
-          callback(true);
+        if (snap.exists()) {
+          const st = snap.data().status;
+          uidActive = st === 'active';
+          isRevoked = st === 'revoked';
+        } else {
+          uidActive = false;
+          isRevoked = false;
         }
-      }, err => {
-        console.warn('Approval status listener:', err);
-      })
+        evaluate();
+      }, () => {})
     );
 
     if (email) {
       const emailClean = email.toLowerCase().trim();
+      if (emailClean !== userId) {
+        unsubs.push(
+          onSnapshot(doc(db, 'approved_users', emailClean), snap => {
+            if (snap.exists()) {
+              const st = snap.data().status;
+              exactEmailActive = st === 'active';
+              if (st === 'revoked') isRevoked = true;
+            } else {
+              exactEmailActive = false;
+            }
+            evaluate();
+          }, () => {})
+        );
+      }
       const emailUid = 'user_' + emailClean.replace(/[^a-zA-Z0-9]/g, '_');
       if (emailUid !== userId) {
-        const emailDocRef = doc(db, 'approved_users', emailUid);
         unsubs.push(
-          onSnapshot(emailDocRef, snap => {
-            if (snap.exists() && snap.data().status === 'active') {
-              callback(true);
-            }
+          onSnapshot(doc(db, 'approved_users', emailUid), snap => {
+            legacyEmailActive = snap.exists() && snap.data().status === 'active';
+            evaluate();
           }, () => {})
         );
       }
@@ -616,28 +654,26 @@ export class WorkspaceService {
     };
   }
 
-  static async selfApproveBeccalli(user: { uid: string; email?: string | null; displayName?: string | null }): Promise<boolean> {
+  static async cleanupSuperAdminRecords(user: { uid: string; email?: string | null }): Promise<void> {
+    if (!this.isSuperAdmin(user.email)) return;
     try {
-      const approvedRef = doc(db, 'approved_users', user.uid);
-      await setDoc(approvedRef, {
-        userId: user.uid,
-        email: user.email || '',
-        displayName: user.displayName || 'Fabio Beccalli',
-        approvedAt: new Date().toISOString(),
-        approvedBy: 'self_superadmin_beccalli',
-        status: 'active'
-      }, { merge: true });
-      return true;
+      await deleteDoc(doc(db, 'approved_users', user.uid)).catch(() => {});
+      await deleteDoc(doc(db, 'access_requests', user.uid)).catch(() => {});
+      if (user.email) {
+        const cleanEmail = user.email.toLowerCase().trim();
+        await deleteDoc(doc(db, 'approved_users', cleanEmail)).catch(() => {});
+        const emailDocId = 'user_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
+        await deleteDoc(doc(db, 'approved_users', emailDocId)).catch(() => {});
+      }
     } catch (e) {
-      console.warn('Self-approve error:', e);
-      return false;
+      // Ignore cleanup errors
     }
   }
 
   static async submitAccessRequest(user: { uid: string; email?: string | null; displayName?: string | null; photoURL?: string | null }): Promise<void> {
+    if (this.isSuperAdmin(user.email)) return;
     try {
       const reqRef = doc(db, 'access_requests', user.uid);
-      // Overwrite request to force status to 'pending'
       await setDoc(reqRef, {
         userId: user.uid,
         email: (user.email || '').toLowerCase().trim(),
@@ -647,7 +683,7 @@ export class WorkspaceService {
         status: 'pending'
       });
     } catch (e) {
-      console.warn('Access request submission:', e);
+      // Silent fallback
     }
   }
 
@@ -657,52 +693,69 @@ export class WorkspaceService {
       const items: any[] = [];
       snap.forEach(d => {
         const data = d.data();
-        items.push({ id: d.id, userId: d.id, ...data });
+        const email = (data.email || '').toLowerCase().trim();
+        if (this.isSuperAdmin(email)) return;
+        items.push({ ...data, id: d.id, userId: data.userId || d.id, email });
       });
       callback(items);
-    }, (err) => console.warn('Access requests listener:', err));
+    }, () => {});
   }
 
   static subscribeToApprovedUsers(callback: (users: any[]) => void): Unsubscribe {
     const colRef = collection(db, 'approved_users');
     return onSnapshot(colRef, (snap) => {
-      const items: any[] = [];
+      const rawItems: any[] = [];
       snap.forEach(d => {
         const data = d.data();
-        items.push({ id: d.id, userId: d.id, ...data });
+        const email = (data.email || '').toLowerCase().trim();
+        if (this.isSuperAdmin(email)) return;
+        rawItems.push({ ...data, id: d.id, userId: data.userId || d.id, email });
       });
-      callback(items);
-    }, (err) => console.warn('Approved users listener:', err));
+
+      // Deduplicate by email (prefer real Firebase UID doc over email/placeholder doc)
+      const byKey = new Map<string, any>();
+      for (const item of rawItems) {
+        const key = item.email || item.id;
+        const existing = byKey.get(key);
+        if (!existing) {
+          byKey.set(key, item);
+        } else {
+          const itemIsRealUid = !String(item.id).startsWith('user_') && !String(item.id).includes('@');
+          if (itemIsRealUid) {
+            byKey.set(key, item);
+          }
+        }
+      }
+      callback(Array.from(byKey.values()));
+    }, () => {});
   }
 
   static async approveUserRequest(request: any, adminEmail: string): Promise<void> {
     const targetUid = request.userId || request.id;
     const cleanEmail = (request.email || '').toLowerCase().trim();
-    const approvedRef = doc(db, 'approved_users', targetUid);
-    await setDoc(approvedRef, {
+    const payload = {
       userId: targetUid,
       email: cleanEmail,
-      displayName: request.displayName || request.email,
+      displayName: request.displayName || cleanEmail || targetUid,
       approvedAt: new Date().toISOString(),
       approvedBy: adminEmail,
       status: 'active'
-    });
-    // Also store normalized email doc if email exists
-    if (cleanEmail) {
+    };
+    await setDoc(doc(db, 'approved_users', targetUid), payload);
+    if (cleanEmail && cleanEmail !== targetUid) {
+      await setDoc(doc(db, 'approved_users', cleanEmail), payload, { merge: true });
       const emailDocId = 'user_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
       if (emailDocId !== targetUid) {
-        await setDoc(doc(db, 'approved_users', emailDocId), {
-          userId: targetUid,
-          email: cleanEmail,
-          displayName: request.displayName || request.email,
-          approvedAt: new Date().toISOString(),
-          approvedBy: adminEmail,
-          status: 'active'
-        }, { merge: true });
+        await setDoc(doc(db, 'approved_users', emailDocId), payload, { merge: true });
       }
     }
     const reqRef = doc(db, 'access_requests', targetUid);
-    await setDoc(reqRef, { status: 'approved' }, { merge: true });
+    await setDoc(reqRef, {
+      userId: targetUid,
+      email: cleanEmail,
+      displayName: request.displayName || cleanEmail,
+      status: 'approved'
+    }, { merge: true });
   }
 
   static async manualApproveEmail(targetEmail: string, adminEmail: string): Promise<void> {
@@ -720,16 +773,22 @@ export class WorkspaceService {
       }
     });
 
-    const targetUid = matchedUserId || 'user_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
-    const approvedRef = doc(db, 'approved_users', targetUid);
-    await setDoc(approvedRef, {
+    const emailDocId = 'user_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
+    const targetUid = matchedUserId || cleanEmail;
+    const approvedData = {
       userId: targetUid,
       email: cleanEmail,
       displayName: matchedDisplayName || cleanEmail.split('@')[0],
       approvedAt: new Date().toISOString(),
       approvedBy: adminEmail,
       status: 'active'
-    });
+    };
+
+    await setDoc(doc(db, 'approved_users', targetUid), approvedData);
+    if (cleanEmail !== targetUid) {
+      await setDoc(doc(db, 'approved_users', cleanEmail), approvedData);
+    }
+    await setDoc(doc(db, 'approved_users', emailDocId), approvedData);
 
     if (matchedUserId) {
       const reqRef = doc(db, 'access_requests', matchedUserId);
@@ -737,16 +796,92 @@ export class WorkspaceService {
     }
   }
 
-  static async revokeApprovedUser(userId: string): Promise<void> {
-    const approvedRef = doc(db, 'approved_users', userId);
-    await setDoc(approvedRef, { status: 'revoked' }, { merge: true });
+  static async revokeApprovedUser(target: string | { id?: string; userId?: string; email?: string; displayName?: string }): Promise<void> {
+    const targetId = typeof target === 'string' ? target : (target.id || target.userId || '');
+    const targetUid = typeof target === 'string' ? target : (target.userId || target.id || '');
+    let targetEmail = typeof target === 'object' && target.email ? target.email.toLowerCase().trim() : '';
+    let targetDisplayName = typeof target === 'object' && target.displayName ? target.displayName : '';
+
+    // 1. Update direct doc(s)
+    if (targetId) {
+      const snap = await getDoc(doc(db, 'approved_users', targetId)).catch(() => null);
+      if (snap && snap.exists()) {
+        const d = snap.data();
+        if (!targetEmail && d.email) targetEmail = d.email.toLowerCase().trim();
+        if (!targetDisplayName && d.displayName) targetDisplayName = d.displayName;
+        await setDoc(doc(db, 'approved_users', targetId), { status: 'revoked' }, { merge: true });
+      }
+    }
+    if (targetUid && targetUid !== targetId) {
+      await setDoc(doc(db, 'approved_users', targetUid), { status: 'revoked' }, { merge: true }).catch(() => {});
+    }
+
+    // 2. Also update any matching email docs in approved_users
+    if (targetEmail) {
+      await setDoc(doc(db, 'approved_users', targetEmail), { status: 'revoked' }, { merge: true }).catch(() => {});
+      const emailDocId = 'user_' + targetEmail.replace(/[^a-zA-Z0-9]/g, '_');
+      await setDoc(doc(db, 'approved_users', emailDocId), { status: 'revoked' }, { merge: true }).catch(() => {});
+      const allApproved = await getDocs(collection(db, 'approved_users')).catch(() => null);
+      if (allApproved) {
+        for (const d of allApproved.docs) {
+          if ((d.data().email || '').toLowerCase().trim() === targetEmail) {
+            await setDoc(d.ref, { status: 'revoked' }, { merge: true });
+          }
+        }
+      }
+    }
+
+    // 3. Put the user back in access_requests as 'pending' so admin sees them in pending requests too
+    const reqDocId = (targetUid && !targetUid.startsWith('user_') && !targetUid.includes('@')) ? targetUid : targetId;
+    if (reqDocId && !reqDocId.startsWith('user_') && !reqDocId.includes('@')) {
+      await setDoc(doc(db, 'access_requests', reqDocId), {
+        userId: reqDocId,
+        email: targetEmail,
+        displayName: targetDisplayName || targetEmail || reqDocId,
+        requestedAt: new Date().toISOString(),
+        status: 'pending'
+      }, { merge: true }).catch(() => {});
+    }
   }
 
-  static async removeApprovedUser(userId: string): Promise<void> {
-    const approvedRef = doc(db, 'approved_users', userId);
-    await deleteDoc(approvedRef);
-    const reqRef = doc(db, 'access_requests', userId);
-    await deleteDoc(reqRef).catch(() => {});
+  static async removeApprovedUser(target: string | { id?: string; userId?: string; email?: string }): Promise<void> {
+    const targetId = typeof target === 'string' ? target : (target.id || target.userId || '');
+    const targetUid = typeof target === 'string' ? target : (target.userId || target.id || '');
+    let targetEmail = typeof target === 'object' && target.email ? target.email.toLowerCase().trim() : '';
+
+    if (targetId) {
+      const snap = await getDoc(doc(db, 'approved_users', targetId)).catch(() => null);
+      if (snap && snap.exists() && !targetEmail && snap.data().email) {
+        targetEmail = snap.data().email.toLowerCase().trim();
+      }
+      await deleteDoc(doc(db, 'approved_users', targetId)).catch(() => {});
+      await deleteDoc(doc(db, 'access_requests', targetId)).catch(() => {});
+    }
+    if (targetUid && targetUid !== targetId) {
+      await deleteDoc(doc(db, 'approved_users', targetUid)).catch(() => {});
+      await deleteDoc(doc(db, 'access_requests', targetUid)).catch(() => {});
+    }
+    if (targetEmail) {
+      await deleteDoc(doc(db, 'approved_users', targetEmail)).catch(() => {});
+      const emailDocId = 'user_' + targetEmail.replace(/[^a-zA-Z0-9]/g, '_');
+      await deleteDoc(doc(db, 'approved_users', emailDocId)).catch(() => {});
+      const allApproved = await getDocs(collection(db, 'approved_users')).catch(() => null);
+      if (allApproved) {
+        for (const d of allApproved.docs) {
+          if ((d.data().email || '').toLowerCase().trim() === targetEmail) {
+            await deleteDoc(d.ref).catch(() => {});
+          }
+        }
+      }
+      const allReqs = await getDocs(collection(db, 'access_requests')).catch(() => null);
+      if (allReqs) {
+        for (const d of allReqs.docs) {
+          if ((d.data().email || '').toLowerCase().trim() === targetEmail) {
+            await deleteDoc(d.ref).catch(() => {});
+          }
+        }
+      }
+    }
   }
 
   // ==========================================================================
