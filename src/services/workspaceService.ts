@@ -65,7 +65,7 @@ export class WorkspaceService {
   static getLocalPreferences(): UserPreferences {
     return {
       bgIndex: parseInt(localStorage.getItem('workspace_bg_index') || '0', 10),
-      isImmersion: localStorage.getItem('workspace_immersion') === 'true',
+      isImmersion: false,
       isSidebarCollapsed: localStorage.getItem('workspace_sidebar_collapsed') === 'true',
       isChatCollapsed: localStorage.getItem('workspace_chat_collapsed') === 'true',
       activeSubject: localStorage.getItem('workspace_active_subject') || 'Database',
@@ -73,7 +73,12 @@ export class WorkspaceService {
       selectedModel: localStorage.getItem('workspace_gemini_model') || 'gemini-3.8-flash',
       fontFamily: localStorage.getItem('workspace_font_family') || 'plus-jakarta',
       fontSize: parseInt(localStorage.getItem('workspace_font_size') || '15', 10),
-      showWeatherWidget: localStorage.getItem('workspace_show_weather') !== 'false'
+      showWeatherWidget: localStorage.getItem('workspace_show_weather') !== 'false',
+      compactMode: localStorage.getItem('workspace_compact_mode') === 'true',
+      accentColor: localStorage.getItem('workspace_accent_color') || 'indigo',
+      panelTheme: localStorage.getItem('workspace_panel_theme') || 'default',
+      panelOpacity: parseInt(localStorage.getItem('workspace_panel_opacity') || '82', 10),
+      showDriveBar: localStorage.getItem('workspace_show_drive_bar') !== 'false'
     };
   }
 
@@ -145,6 +150,11 @@ export class WorkspaceService {
     if (pref.fontFamily !== undefined) localStorage.setItem('workspace_font_family', pref.fontFamily);
     if (pref.fontSize !== undefined) localStorage.setItem('workspace_font_size', String(pref.fontSize));
     if (pref.showWeatherWidget !== undefined) localStorage.setItem('workspace_show_weather', String(pref.showWeatherWidget));
+    if (pref.compactMode !== undefined) localStorage.setItem('workspace_compact_mode', String(pref.compactMode));
+    if (pref.accentColor !== undefined) localStorage.setItem('workspace_accent_color', pref.accentColor);
+    if (pref.panelTheme !== undefined) localStorage.setItem('workspace_panel_theme', pref.panelTheme);
+    if (pref.panelOpacity !== undefined) localStorage.setItem('workspace_panel_opacity', String(pref.panelOpacity));
+    if (pref.showDriveBar !== undefined) localStorage.setItem('workspace_show_drive_bar', String(pref.showDriveBar));
   }
 
   static saveLocalPages(pages: Record<string, PageItem[]>): void {
@@ -200,7 +210,15 @@ export class WorkspaceService {
                 isSidebarCollapsed: data.isSidebarCollapsed,
                 isChatCollapsed: data.isChatCollapsed,
                 activeSubject: data.activeSubject,
-                selectedModel: data.selectedModel
+                selectedModel: data.selectedModel,
+                fontFamily: data.fontFamily,
+                fontSize: data.fontSize,
+                showWeatherWidget: data.showWeatherWidget,
+                compactMode: data.compactMode,
+                accentColor: data.accentColor,
+                panelTheme: data.panelTheme,
+                panelOpacity: data.panelOpacity,
+                showDriveBar: data.showDriveBar
               });
             }
           }
@@ -360,6 +378,14 @@ export class WorkspaceService {
       if (pref.isChatCollapsed !== undefined) payload.isChatCollapsed = pref.isChatCollapsed;
       if (pref.activeSubject !== undefined) payload.activeSubject = pref.activeSubject;
       if (pref.selectedModel !== undefined) payload.selectedModel = pref.selectedModel;
+      if (pref.fontFamily !== undefined) payload.fontFamily = pref.fontFamily;
+      if (pref.fontSize !== undefined) payload.fontSize = pref.fontSize;
+      if (pref.showWeatherWidget !== undefined) payload.showWeatherWidget = pref.showWeatherWidget;
+      if (pref.compactMode !== undefined) payload.compactMode = pref.compactMode;
+      if (pref.accentColor !== undefined) payload.accentColor = pref.accentColor;
+      if (pref.panelTheme !== undefined) payload.panelTheme = pref.panelTheme;
+      if (pref.panelOpacity !== undefined) payload.panelOpacity = pref.panelOpacity;
+      if (pref.showDriveBar !== undefined) payload.showDriveBar = pref.showDriveBar;
 
       await setDoc(userDocRef, payload, { merge: true });
     } catch (e) {

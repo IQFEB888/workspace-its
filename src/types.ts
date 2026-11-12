@@ -50,6 +50,11 @@ export interface UserPreferences {
   fontFamily?: string;
   fontSize?: number;
   showWeatherWidget?: boolean;
+  compactMode?: boolean;
+  accentColor?: string;
+  panelTheme?: string;
+  panelOpacity?: number;
+  showDriveBar?: boolean;
 }
 
 export interface AttachedFile {

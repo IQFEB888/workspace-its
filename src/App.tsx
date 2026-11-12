@@ -21,7 +21,7 @@ import {
 import { WorkspaceService, DEFAULT_SUBJECTS, DEFAULT_PAGES } from './services/workspaceService';
 import { saveFileToIndexedDB, getFileFromIndexedDB, deleteFileFromIndexedDB } from './services/fileStorage';
 import { WeatherModal } from './components/WeatherModal';
-import { SettingsModal, BACKGROUND_THEMES } from './components/SettingsModal';
+import { SettingsModal, BACKGROUND_THEMES, ACCENT_THEMES, PANEL_THEMES } from './components/SettingsModal';
 import { uploadNoteToDrive } from './services/googleDriveService';
 import { usePWAInstall } from './hooks/usePWAInstall';
 import {
@@ -89,8 +89,15 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'notes' | 'materials'>('notes');
   const [fontFamily, setFontFamily] = useState<string>('plus-jakarta');
   const [fontSize, setFontSize] = useState<number>(15);
+  const [toolbarPxSize, setToolbarPxSize] = useState<number>(15);
   const [showWeatherWidget, setShowWeatherWidget] = useState<boolean>(true);
+  const [compactMode, setCompactMode] = useState<boolean>(false);
+  const [accentColor, setAccentColor] = useState<string>('indigo');
+  const [panelTheme, setPanelTheme] = useState<string>('default');
+  const [panelOpacity, setPanelOpacity] = useState<number>(82);
+  const [showDriveBar, setShowDriveBar] = useState<boolean>(true);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
+  const lastEditorRangeRef = useRef<Range | null>(null);
 
   // Time & Date
   const [currentTime, setCurrentTime] = useState<string>('00:00');
@@ -343,14 +350,32 @@ export default function App() {
   useEffect(() => {
     const localPref = WorkspaceService.getLocalPreferences();
     setBgIndex(localPref.bgIndex);
-    setIsImmersion(localPref.isImmersion);
+    setIsImmersion(false);
     setIsSidebarCollapsed(localPref.isSidebarCollapsed);
     setIsChatCollapsed(localPref.isChatCollapsed);
     setSelectedModel(localPref.selectedModel);
     if (localPref.fontFamily) setFontFamily(localPref.fontFamily);
-    if (localPref.fontSize) setFontSize(localPref.fontSize);
+    if (localPref.fontSize) {
+      setFontSize(localPref.fontSize);
+      setToolbarPxSize(localPref.fontSize);
+    }
     if (typeof localPref.showWeatherWidget === 'boolean') {
       setShowWeatherWidget(localPref.showWeatherWidget);
+    }
+    if (typeof localPref.compactMode === 'boolean') {
+      setCompactMode(localPref.compactMode);
+    }
+    if (localPref.accentColor) {
+      setAccentColor(localPref.accentColor);
+    }
+    if (localPref.panelTheme) {
+      setPanelTheme(localPref.panelTheme);
+    }
+    if (typeof localPref.panelOpacity === 'number') {
+      setPanelOpacity(localPref.panelOpacity);
+    }
+    if (typeof localPref.showDriveBar === 'boolean') {
+      setShowDriveBar(localPref.showDriveBar);
     }
 
     const localSubs = WorkspaceService.getLocalSubjects();
@@ -379,19 +404,42 @@ export default function App() {
     setSelectedKeyIndex(localKeys.selectedIndex);
   }, []);
 
-  // Set Background Image on body
+  // Apply Background (Monocolor or Photographic) and Compact Mode
   useEffect(() => {
-    document.body.style.backgroundImage = BACKGROUNDS[bgIndex] || BACKGROUNDS[0];
-  }, [bgIndex]);
-
-  // Set Full Immersion mode on body
-  useEffect(() => {
-    if (isImmersion) {
-      document.body.classList.add('full-immersion');
+    const selectedBg = BACKGROUND_THEMES.find(t => t.id === bgIndex) || BACKGROUND_THEMES[0];
+    if (compactMode) {
+      document.body.classList.add('compact-mode');
+      document.body.style.backgroundImage = 'none';
+      if (selectedBg?.solidColor) {
+        document.documentElement.style.setProperty('--bg-base', selectedBg.solidColor);
+      }
     } else {
-      document.body.classList.remove('full-immersion');
+      document.body.classList.remove('compact-mode');
+      document.body.style.backgroundImage = selectedBg?.cssUrl || BACKGROUNDS[0];
+      if (selectedBg?.solidColor) {
+        document.documentElement.style.setProperty('--bg-base', selectedBg.solidColor);
+      } else {
+        document.documentElement.style.setProperty('--bg-base', '#070709');
+      }
     }
-  }, [isImmersion]);
+  }, [bgIndex, compactMode]);
+
+  // Apply Accent Color & Panel/Sidebar/Topbar Theme CSS Variables
+  useEffect(() => {
+    const root = document.documentElement;
+    const accentObj = ACCENT_THEMES.find(a => a.id === accentColor) || ACCENT_THEMES[0];
+    root.style.setProperty('--accent-primary', accentObj.primary);
+    root.style.setProperty('--accent-secondary', accentObj.secondary);
+    root.style.setProperty('--accent-gradient', `linear-gradient(135deg, ${accentObj.primary} 0%, ${accentObj.secondary} 100%)`);
+    root.style.setProperty('--accent-surface', accentObj.surface);
+    root.style.setProperty('--accent-border', accentObj.border);
+
+    const panelObj = PANEL_THEMES.find(p => p.id === panelTheme) || PANEL_THEMES[0];
+    const alpha = Math.max(0.55, Math.min(1, panelOpacity / 100));
+    const topbarAlpha = Math.max(0.75, Math.min(1, (panelOpacity + 8) / 100));
+    root.style.setProperty('--panel-bg', `rgba(${panelObj.rgb}, ${alpha})`);
+    root.style.setProperty('--topbar-bg', `rgba(${panelObj.topbarRgb}, ${topbarAlpha})`);
+  }, [accentColor, panelTheme, panelOpacity]);
 
   // Firebase Auth State Listener & Cloud Sync Setup
   useEffect(() => {
@@ -497,13 +545,20 @@ export default function App() {
         const unsubFirestore = WorkspaceService.subscribeToUserData(targetUser.uid, {
           onPreferences: pref => {
             if (pref.bgIndex !== undefined) setBgIndex(pref.bgIndex);
-            if (pref.isImmersion !== undefined) setIsImmersion(pref.isImmersion);
             if (pref.isSidebarCollapsed !== undefined) setIsSidebarCollapsed(pref.isSidebarCollapsed);
             if (pref.isChatCollapsed !== undefined) setIsChatCollapsed(pref.isChatCollapsed);
             if (pref.selectedModel !== undefined) setSelectedModel(pref.selectedModel);
             if (pref.fontFamily !== undefined) setFontFamily(pref.fontFamily);
-            if (pref.fontSize !== undefined) setFontSize(pref.fontSize);
+            if (pref.fontSize !== undefined) {
+              setFontSize(pref.fontSize);
+              setToolbarPxSize(pref.fontSize);
+            }
             if (pref.showWeatherWidget !== undefined) setShowWeatherWidget(pref.showWeatherWidget);
+            if (pref.compactMode !== undefined) setCompactMode(pref.compactMode);
+            if (pref.accentColor !== undefined) setAccentColor(pref.accentColor);
+            if (pref.panelTheme !== undefined) setPanelTheme(pref.panelTheme);
+            if (pref.panelOpacity !== undefined) setPanelOpacity(pref.panelOpacity);
+            if (pref.showDriveBar !== undefined) setShowDriveBar(pref.showDriveBar);
             if (pref.activeSubject !== undefined) {
               setActiveSubject(prev => pref.activeSubject || prev);
             }
@@ -742,10 +797,12 @@ export default function App() {
   };
 
   const handleSelectFontSize = (size: number) => {
-    setFontSize(size);
-    WorkspaceService.saveLocalPreferences({ fontSize: size });
+    const clamped = Math.max(8, Math.min(96, size));
+    setFontSize(clamped);
+    setToolbarPxSize(clamped);
+    WorkspaceService.saveLocalPreferences({ fontSize: clamped });
     if (currentUser) {
-      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { fontSize: size });
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { fontSize: clamped });
     }
   };
 
@@ -755,6 +812,51 @@ export default function App() {
     WorkspaceService.saveLocalPreferences({ showWeatherWidget: show });
     if (currentUser) {
       WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { showWeatherWidget: show });
+    }
+  };
+
+  // Compact / No-Wallpaper mode toggle
+  const handleToggleCompactMode = (compact: boolean) => {
+    setCompactMode(compact);
+    WorkspaceService.saveLocalPreferences({ compactMode: compact });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { compactMode: compact });
+    }
+  };
+
+  // Accent color handler
+  const handleSelectAccentColor = (accent: string) => {
+    setAccentColor(accent);
+    WorkspaceService.saveLocalPreferences({ accentColor: accent });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { accentColor: accent });
+    }
+  };
+
+  // Panel / Topbar / Sidebar theme color handler
+  const handleSelectPanelTheme = (theme: string) => {
+    setPanelTheme(theme);
+    WorkspaceService.saveLocalPreferences({ panelTheme: theme });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { panelTheme: theme });
+    }
+  };
+
+  // Panel opacity handler
+  const handleChangePanelOpacity = (opacity: number) => {
+    setPanelOpacity(opacity);
+    WorkspaceService.saveLocalPreferences({ panelOpacity: opacity });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { panelOpacity: opacity });
+    }
+  };
+
+  // Show/Hide Google Drive link bar
+  const handleToggleShowDriveBar = (show: boolean) => {
+    setShowDriveBar(show);
+    WorkspaceService.saveLocalPreferences({ showDriveBar: show });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { showDriveBar: show });
     }
   };
 
@@ -1359,6 +1461,93 @@ export default function App() {
       a.click();
       document.body.removeChild(a);
     }
+  };
+
+  // Record current selection in notes editor so toolbar pixel input can resize selected text
+  const handleRecordEditorSelection = () => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !notesAreaRef.current) return;
+    const range = sel.getRangeAt(0);
+    if (notesAreaRef.current.contains(range.commonAncestorContainer)) {
+      lastEditorRangeRef.current = range.cloneRange();
+      const parentEl =
+        range.startContainer.nodeType === Node.ELEMENT_NODE
+          ? (range.startContainer as HTMLElement)
+          : range.startContainer.parentElement;
+      if (parentEl && notesAreaRef.current.contains(parentEl)) {
+        const computedPx = parseInt(window.getComputedStyle(parentEl).fontSize, 10);
+        if (!isNaN(computedPx) && computedPx >= 8 && computedPx <= 96) {
+          setToolbarPxSize(computedPx);
+        }
+      }
+    }
+  };
+
+  // Apply exact pixel (px) font size to selected text in notes, or to whole note if no text is selected
+  const handleApplyPixelFontSize = (rawPx: number) => {
+    const px = Math.max(8, Math.min(96, Math.round(rawPx)));
+    setToolbarPxSize(px);
+
+    if (!notesAreaRef.current) {
+      handleSelectFontSize(px);
+      return;
+    }
+
+    const sel = window.getSelection();
+    let activeRange: Range | null = null;
+    if (sel && sel.rangeCount > 0 && !sel.isCollapsed && notesAreaRef.current.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      activeRange = sel.getRangeAt(0);
+    } else if (lastEditorRangeRef.current && !lastEditorRangeRef.current.collapsed && notesAreaRef.current.contains(lastEditorRangeRef.current.commonAncestorContainer)) {
+      activeRange = lastEditorRangeRef.current;
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(activeRange);
+      }
+    }
+
+    if (activeRange && !activeRange.collapsed) {
+      notesAreaRef.current.focus();
+      try {
+        document.execCommand('styleWithCSS', false, 'false');
+      } catch {
+        // Ignore
+      }
+      document.execCommand('fontSize', false, '7');
+      const fontElements = notesAreaRef.current.querySelectorAll('font[size="7"]');
+      let firstCreatedSpan: HTMLElement | null = null;
+      let lastCreatedSpan: HTMLElement | null = null;
+      fontElements.forEach(fontEl => {
+        const span = document.createElement('span');
+        span.style.fontSize = `${px}px`;
+        span.innerHTML = fontEl.innerHTML;
+        fontEl.parentNode?.replaceChild(span, fontEl);
+        if (!firstCreatedSpan) firstCreatedSpan = span;
+        lastCreatedSpan = span;
+      });
+      if (firstCreatedSpan && lastCreatedSpan && sel) {
+        const newRange = document.createRange();
+        newRange.setStartBefore(firstCreatedSpan);
+        newRange.setEndAfter(lastCreatedSpan);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+        lastEditorRangeRef.current = newRange.cloneRange();
+      }
+      handleEditorInput();
+    } else {
+      // No text selected: change default note pixel font size
+      handleSelectFontSize(px);
+    }
+  };
+
+  // Copy whole note plain text to clipboard
+  const handleCopyWholeNote = () => {
+    const text = notesAreaRef.current?.innerText?.trim() || '';
+    if (!text) {
+      showToast('L\'appunto è vuoto.', 'error');
+      return;
+    }
+    navigator.clipboard.writeText(text);
+    showToast('📋 Testo degli appunti copiato!');
   };
 
   // Rich Text Formatting helper (preserves selection & supports CSS colors/highlights)
@@ -2531,6 +2720,14 @@ export default function App() {
   const activeDisplayMaterials = workspaceMode === 'shared' ? activeRoomMaterials : currentSubMaterials;
   const activeGroupedMaterials = workspaceMode === 'shared' ? groupedRoomMaterials : groupedPersonalMaterials;
 
+  // Word count for active note
+  const activeNoteRawHtml =
+    workspaceMode === 'shared'
+      ? (activeRoomPages.find(p => p.id === activeRoomPageId) || activeRoomPages[0])?.content || ''
+      : (currentSubPages.find(p => p.id === activePageId) || currentSubPages[0])?.content || '';
+  const activeNotePlainText = activeNoteRawHtml.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').trim();
+  const activeNoteWordCount = activeNotePlainText ? activeNotePlainText.split(/\s+/).filter(Boolean).length : 0;
+
   // 1. Loading screen while Firebase Auth initializes
   if (authLoading) {
     return (
@@ -2793,19 +2990,31 @@ export default function App() {
             </button>
             <button
               className="top-btn"
+              onClick={() => handleToggleCompactMode(!compactMode)}
+              title="Attiva/Disattiva Modalità Minimal Senza Sfondo & Spazi Compatti"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                background: compactMode ? 'var(--accent-surface)' : 'transparent',
+                borderColor: compactMode ? 'var(--accent-border)' : 'transparent',
+                color: compactMode ? '#fff' : undefined
+              }}
+            >
+              ⚡ {compactMode ? 'Minimal Attiva' : 'Minimal'}
+            </button>
+            <button
+              className="top-btn"
               onClick={() => setIsBackupModalOpen(true)}
               title="Salva o Ripristina il backup dei tuoi appunti e corsi"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
             >
               💾 Backup
             </button>
-            <button className="top-btn" id="immersion-btn" onClick={handleToggleImmersion} title="Attiva modalità concentrazione">
-              Focus Mode
-            </button>
             <button
               className="top-btn"
               onClick={() => setIsSettingsModalOpen(true)}
-              title="Personalizza sfondi, font, meteo e chiavi API"
+              title="Personalizza sfondi monocolore, colore barre, font in pixel, meteo e chiavi API"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
             >
               ⚙️ Impostazioni
@@ -2820,17 +3029,6 @@ export default function App() {
             </button>
           </div>
         </header>
-      )}
-
-      {/* Floating Exit Button ONLY when in Full Focus/Immersion mode */}
-      {isImmersion && (
-        <button
-          className="immersion-exit-pill"
-          onClick={handleToggleImmersion}
-          title="Esci dalla modalità Focus"
-        >
-          ✕ Esci da Focus
-        </button>
       )}
 
       {/* Main 3-Column Dashboard Container */}
@@ -3083,21 +3281,23 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Compact Drive Bar */}
-              <div className="drive-bar">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M22 12H12l-5 9h10l5-9z" /><path d="M6 12L2 5h10l4 7-10 9z" />
-                </svg>
-                <input
-                  type="url"
-                  placeholder="Link cartella Google Drive del corso..."
-                  value={driveLink}
-                  onChange={handleDriveLinkChange}
-                />
-                <button className="drive-btn" onClick={handleOpenDrive}>
-                  🔗 Apri Drive
-                </button>
-              </div>
+              {/* Compact Drive Bar (can be hidden in Settings for extra vertical space) */}
+              {showDriveBar && (
+                <div className="drive-bar">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M22 12H12l-5 9h10l5-9z" /><path d="M6 12L2 5h10l4 7-10 9z" />
+                  </svg>
+                  <input
+                    type="url"
+                    placeholder="Link cartella Google Drive del corso..."
+                    value={driveLink}
+                    onChange={handleDriveLinkChange}
+                  />
+                  <button className="drive-btn" onClick={handleOpenDrive}>
+                    🔗 Apri Drive
+                  </button>
+                </div>
+              )}
             </>
           ) : (
             /* Shared Room Header */
@@ -3286,7 +3486,7 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Rich Text Editor Toolbar - Complete Formatting & Zero Overflow */}
+                {/* Minimal & Intuitive Rich Text Toolbar with Exact Pixel (px) Font Size */}
                 <div className="editor-toolbar">
                   <button
                     type="button"
@@ -3307,26 +3507,80 @@ export default function App() {
 
                   <span className="divider"></span>
 
-                  <select
-                    onChange={e => {
-                      if (e.target.value) {
-                        handleFormatText('formatBlock', e.target.value);
-                        e.target.selectedIndex = 0;
-                      }
-                    }}
-                    defaultValue=""
-                    title="Formato paragrafo o titolo"
+                  {/* Exact Pixel (px) Font Size Controller */}
+                  <div
+                    className="toolbar-px-group"
+                    title="Dimensione testo in Pixel (px): seleziona del testo per ridimensionarlo o cambia la grandezza predefinita della nota"
                   >
-                    <option value="" disabled>
-                      Formato
-                    </option>
-                    <option value="P">Paragrafo</option>
-                    <option value="H1">Titolo 1 (H1)</option>
-                    <option value="H2">Titolo 2 (H2)</option>
-                    <option value="H3">Titolo 3 (H3)</option>
-                    <option value="BLOCKQUOTE">Citazione</option>
-                    <option value="PRE">Blocco Codice</option>
-                  </select>
+                    <button
+                      type="button"
+                      className="px-step-btn"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => handleApplyPixelFontSize(toolbarPxSize - 1)}
+                      title="Riduci di 1px"
+                    >
+                      −
+                    </button>
+                    <div className="toolbar-px-input-wrap">
+                      <input
+                        type="number"
+                        className="toolbar-px-input"
+                        min={8}
+                        max={96}
+                        value={toolbarPxSize}
+                        onChange={e => {
+                          const val = parseInt(e.target.value, 10);
+                          if (!isNaN(val)) {
+                            setToolbarPxSize(val);
+                          }
+                        }}
+                        onBlur={e => {
+                          const val = parseInt(e.target.value, 10);
+                          if (!isNaN(val)) {
+                            handleApplyPixelFontSize(val);
+                          } else {
+                            setToolbarPxSize(fontSize);
+                          }
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const val = parseInt((e.target as HTMLInputElement).value, 10);
+                            if (!isNaN(val)) {
+                              handleApplyPixelFontSize(val);
+                            }
+                          }
+                        }}
+                        title="Inserisci dimensione esatta in pixel (8–96px) e premi Invio"
+                      />
+                      <span className="toolbar-px-unit">px</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="px-step-btn"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => handleApplyPixelFontSize(toolbarPxSize + 1)}
+                      title="Aumenta di 1px"
+                    >
+                      +
+                    </button>
+
+                    {/* Quick Pixel Presets */}
+                    <div className="toolbar-px-presets">
+                      {[13, 15, 18, 22, 28].map(pSize => (
+                        <button
+                          key={pSize}
+                          type="button"
+                          className={`px-preset-btn ${toolbarPxSize === pSize ? 'active' : ''}`}
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => handleApplyPixelFontSize(pSize)}
+                          title={`Imposta dimensione a ${pSize}px`}
+                        >
+                          {pSize}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
                   <span className="divider"></span>
 
@@ -3353,14 +3607,6 @@ export default function App() {
                     title="Sottolineato (Ctrl+U)"
                   >
                     <u>U</u>
-                  </button>
-                  <button
-                    type="button"
-                    onMouseDown={e => e.preventDefault()}
-                    onClick={() => handleFormatText('strikeThrough')}
-                    title="Barrato"
-                  >
-                    <s>S</s>
                   </button>
 
                   <span className="divider"></span>
@@ -3446,30 +3692,6 @@ export default function App() {
                   <button
                     type="button"
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => handleFormatText('justifyLeft')}
-                    title="Allinea a sinistra"
-                  >
-                    ⬅
-                  </button>
-                  <button
-                    type="button"
-                    onMouseDown={e => e.preventDefault()}
-                    onClick={() => handleFormatText('justifyCenter')}
-                    title="Centra testo"
-                  >
-                    ⬌
-                  </button>
-                  <button
-                    type="button"
-                    onMouseDown={e => e.preventDefault()}
-                    onClick={() => handleFormatText('insertHorizontalRule')}
-                    title="Inserisci linea separatrice"
-                  >
-                    ―
-                  </button>
-                  <button
-                    type="button"
-                    onMouseDown={e => e.preventDefault()}
                     onClick={() => handleFormatText('removeFormat')}
                     title="Pulisci formattazione sul testo selezionato"
                   >
@@ -3477,6 +3699,17 @@ export default function App() {
                   </button>
 
                   <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                    <span className="notes-stats-pill" title="Conteggio parole nella pagina corrente">
+                      {activeNoteWordCount} {activeNoteWordCount === 1 ? 'parola' : 'parole'}
+                    </span>
+                    <button
+                      type="button"
+                      className="editor-action-btn file-dl"
+                      onClick={handleCopyWholeNote}
+                      title="Copia tutto il testo della nota negli appunti"
+                    >
+                      📋 Copia
+                    </button>
                     <button
                       type="button"
                       className="editor-action-btn drive-save"
@@ -3484,7 +3717,7 @@ export default function App() {
                       disabled={isSavingToDrive}
                       title="Salva questa nota come documento nel tuo Google Drive personale"
                     >
-                      {isSavingToDrive ? '⏳ Salvataggio...' : '☁️ Salva su Drive'}
+                      {isSavingToDrive ? '⏳...' : '☁️ Drive'}
                     </button>
                     <button
                       type="button"
@@ -3517,8 +3750,10 @@ export default function App() {
                   }}
                   contentEditable
                   suppressContentEditableWarning
-                  data-placeholder="Inizia a scrivere i tuoi appunti... Seleziona il testo per evidenziarlo, cambiare colore o usare il menu rapido AI (clic destro)."
+                  data-placeholder="Inizia a scrivere i tuoi appunti... Seleziona il testo per cambiarne la grandezza in px, evidenziarlo o usare il menu rapido AI (clic destro)."
                   onInput={handleEditorInput}
+                  onMouseUp={handleRecordEditorSelection}
+                  onKeyUp={handleRecordEditorSelection}
                   onContextMenu={handleNotesContextMenu}
                 />
               </div>
@@ -4894,16 +5129,26 @@ export default function App() {
         onClose={() => setIsSettingsModalOpen(false)}
         bgIndex={bgIndex}
         onSelectBackground={handleSelectBgIndex}
+        compactMode={compactMode}
+        onToggleCompactMode={handleToggleCompactMode}
+        accentColor={accentColor}
+        onSelectAccentColor={handleSelectAccentColor}
+        panelTheme={panelTheme}
+        onSelectPanelTheme={handleSelectPanelTheme}
+        panelOpacity={panelOpacity}
+        onChangePanelOpacity={handleChangePanelOpacity}
+        showDriveBar={showDriveBar}
+        onToggleShowDriveBar={handleToggleShowDriveBar}
         fontFamily={fontFamily}
         onSelectFontFamily={handleSelectFontFamily}
         fontSize={fontSize}
         onSelectFontSize={handleSelectFontSize}
         showWeatherWidget={showWeatherWidget}
         onToggleShowWeatherWidget={handleToggleWeatherWidget}
-        isImmersion={isImmersion}
-        onToggleImmersion={handleToggleImmersion}
         isSidebarCollapsed={isSidebarCollapsed}
         onToggleSidebarCollapsed={handleToggleSidebar}
+        isChatCollapsed={isChatCollapsed}
+        onToggleChatCollapsed={handleToggleChat}
         selectedWeatherCity={selectedWeatherCity}
         onSelectCity={setSelectedWeatherCity}
         presetCities={PRESET_CITIES}
