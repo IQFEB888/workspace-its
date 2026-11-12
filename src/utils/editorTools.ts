@@ -586,3 +586,351 @@ export function compressImageFromBlob(
     reader.readAsDataURL(blob);
   });
 }
+
+// ============================================================================
+// APP VERSION & PROGRAMMABLE KEYBOARD SHORTCUTS
+// ============================================================================
+
+export const APP_VERSION = 'v2.6.0';
+
+export interface ShortcutDefinition {
+  id:
+    | 'insert_code'
+    | 'insert_formula'
+    | 'insert_table'
+    | 'toggle_pen'
+    | 'insert_quote'
+    | 'open_find'
+    | 'highlight_text'
+    | 'new_page'
+    | 'toggle_chat'
+    | 'toggle_sidebar'
+    | 'toggle_compact';
+  label: string;
+  desc: string;
+  defaultCombo: string;
+}
+
+export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
+  {
+    id: 'insert_code',
+    label: '💻 Inserisci Box Codice',
+    desc: 'Inserisce una box di codice con syntax highlighting e menu linguaggio',
+    defaultCombo: 'Alt+C'
+  },
+  {
+    id: 'insert_formula',
+    label: '∑ Inserisci Box Formula Live',
+    desc: 'Inserisce una box matematica che calcola il risultato in tempo reale',
+    defaultCombo: 'Alt+F'
+  },
+  {
+    id: 'insert_table',
+    label: '📊 Inserisci Tabella',
+    desc: 'Inserisce una tabella modificabile (righe e colonne) negli appunti',
+    defaultCombo: 'Alt+T'
+  },
+  {
+    id: 'toggle_pen',
+    label: '✏️ Attiva / Disattiva Penna Disegno',
+    desc: 'Apre la modalità disegno a mano libera (frecce, penna, evidenziatore) su appunti e foto',
+    defaultCombo: 'Alt+P'
+  },
+  {
+    id: 'insert_quote',
+    label: '💬 Inserisci Citazione',
+    desc: 'Inserisce un blocco citazione / definizione importante',
+    defaultCombo: 'Alt+Q'
+  },
+  {
+    id: 'open_find',
+    label: '🔍 Cerca e Sostituisci negli Appunti',
+    desc: 'Apre la barra di ricerca rapida dentro gli appunti',
+    defaultCombo: 'Ctrl+F'
+  },
+  {
+    id: 'highlight_text',
+    label: '🖍️ Evidenzia Testo Selezionato',
+    desc: 'Evidenzia rapidamente il testo selezionato con il primo colore rapido',
+    defaultCombo: 'Alt+H'
+  },
+  {
+    id: 'new_page',
+    label: '📄 Nuova Scheda Appunti',
+    desc: 'Crea una nuova scheda di appunti nella materia corrente',
+    defaultCombo: 'Alt+N'
+  },
+  {
+    id: 'toggle_chat',
+    label: '🤖 Apri / Chiudi Chat AI Gemini',
+    desc: 'Mostra o riduce il pannello laterale di Gemini Copilot',
+    defaultCombo: 'Alt+A'
+  },
+  {
+    id: 'toggle_sidebar',
+    label: '🛠️ Apri / Chiudi Barra Strumenti',
+    desc: 'Mostra o riduce il pannello laterale sinistro degli strumenti',
+    defaultCombo: 'Alt+S'
+  },
+  {
+    id: 'toggle_compact',
+    label: '⚡ Modalità Minimal Senza Sfondo',
+    desc: 'Attiva o disattiva la modalità compatta ad alto contrasto',
+    defaultCombo: 'Alt+M'
+  }
+];
+
+export const DEFAULT_SHORTCUTS: Record<string, string> = SHORTCUT_DEFINITIONS.reduce(
+  (acc, item) => ({ ...acc, [item.id]: item.defaultCombo }),
+  {} as Record<string, string>
+);
+
+/**
+ * Converts a KeyboardEvent-like object into a normalized shortcut combo string (e.g. "Ctrl+Shift+K", "Alt+C").
+ * Returns null if only modifier keys were pressed.
+ */
+export function formatKeyboardEventToCombo(e: {
+  key: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+}): string | null {
+  if (!e || !e.key) return null;
+  const rawKey = e.key;
+  if (['Control', 'Shift', 'Alt', 'Meta', 'OS', 'CapsLock'].includes(rawKey)) {
+    return null;
+  }
+
+  const parts: string[] = [];
+  if (e.ctrlKey || e.metaKey) parts.push('Ctrl');
+  if (e.altKey) parts.push('Alt');
+  if (e.shiftKey) parts.push('Shift');
+
+  // Require at least one modifier (Ctrl, Alt, or Function key F1..F12) so normal typing isn't hijacked
+  const isFunctionKey = /^F([1-9]|1[0-2])$/i.test(rawKey);
+  if (parts.length === 0 && !isFunctionKey) {
+    return null;
+  }
+
+  const normalizedKey =
+    rawKey === ' '
+      ? 'Space'
+      : rawKey.length === 1
+      ? rawKey.toUpperCase()
+      : rawKey.charAt(0).toUpperCase() + rawKey.slice(1);
+
+  parts.push(normalizedKey);
+  return parts.join('+');
+}
+
+/**
+ * Checks whether a KeyboardEvent matches a configured shortcut combo string.
+ */
+export function matchesShortcutCombo(
+  e: {
+    key: string;
+    ctrlKey?: boolean;
+    metaKey?: boolean;
+    altKey?: boolean;
+    shiftKey?: boolean;
+  },
+  targetCombo: string
+): boolean {
+  if (!targetCombo || !targetCombo.trim()) return false;
+  const current = formatKeyboardEventToCombo(e);
+  if (!current) return false;
+  return current.toLowerCase() === targetCombo.trim().toLowerCase();
+}
+
+// ============================================================================
+// CUSTOM COLOR PALETTES (TEXT, HIGHLIGHT, PEN) WITH ADD / DELETE
+// ============================================================================
+
+export const DEFAULT_TEXT_COLORS = [
+  '#f8fafc',
+  '#38bdf8',
+  '#facc15',
+  '#4ade80',
+  '#f43f5e',
+  '#c084fc'
+];
+
+export const DEFAULT_HIGHLIGHT_COLORS = [
+  '#fde047',
+  '#4ade80',
+  '#38bdf8',
+  '#f472b6',
+  '#c084fc'
+];
+
+export const DEFAULT_PEN_COLORS = [
+  '#38bdf8',
+  '#f43f5e',
+  '#facc15',
+  '#4ade80',
+  '#c084fc',
+  '#ffffff'
+];
+
+export function addColorToPalette(palette: string[], newHex: string, maxColors = 14): string[] {
+  const clean = (newHex || '').trim().toLowerCase();
+  if (!/^#[0-9a-f]{3,8}$/i.test(clean)) return palette;
+  const filtered = palette.filter(c => c.toLowerCase() !== clean);
+  return [...filtered, clean].slice(-maxColors);
+}
+
+export function removeColorFromPalette(palette: string[], colorToRemove: string): string[] {
+  const target = (colorToRemove || '').trim().toLowerCase();
+  return palette.filter(c => c.toLowerCase() !== target);
+}
+
+export function hexToHighlightRgba(hex: string, alpha = 0.36): string {
+  const clean = (hex || '').replace('#', '').trim();
+  if (clean.length === 3) {
+    const r = parseInt(clean[0] + clean[0], 16);
+    const g = parseInt(clean[1] + clean[1], 16);
+    const b = parseInt(clean[2] + clean[2], 16);
+    if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+  } else if (clean.length >= 6) {
+    const r = parseInt(clean.slice(0, 2), 16);
+    const g = parseInt(clean.slice(2, 4), 16);
+    const b = parseInt(clean.slice(4, 6), 16);
+    if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+  }
+  return hex;
+}
+
+// ============================================================================
+// INTERACTIVE TABLES IN NOTES (INSERT & MODIFY ROWS / COLUMNS)
+// ============================================================================
+
+export function buildInteractiveTableHtml(rows = 3, cols = 3, tableId?: string): string {
+  const rCount = Math.max(1, Math.min(20, rows));
+  const cCount = Math.max(1, Math.min(12, cols));
+  const id = tableId || `tbl_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+  let headerCells = '';
+  for (let c = 1; c <= cCount; c++) {
+    headerCells += `<th>Intestazione ${c}</th>`;
+  }
+
+  let bodyRows = '';
+  for (let r = 1; r < rCount; r++) {
+    let cells = '';
+    for (let c = 1; c <= cCount; c++) {
+      cells += `<td>Dato ${r}.${c}</td>`;
+    }
+    bodyRows += `<tr>${cells}</tr>`;
+  }
+
+  return `<div class="note-table-wrapper" id="${id}" data-table-wrapper="true"><table class="note-table"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div><p><br></p>`;
+}
+
+// ============================================================================
+// LEGACY CODE BLOCK SANITIZER (REMOVES OLD STUCK CODE BLOCK AT TOP OF NOTES)
+// ============================================================================
+
+/**
+ * Cleans up legacy code blocks at the top of a note page (from older versions that lacked
+ * the delete button or were stuck at the top of "Appunti Principali") and ensures all
+ * remaining `.note-code-block` elements have a `.note-code-del-btn` delete button.
+ */
+export function sanitizeAndUpgradeNoteHtml(rawHtml: string): { cleanedHtml: string; changed: boolean } {
+  if (!rawHtml || typeof rawHtml !== 'string') {
+    return { cleanedHtml: rawHtml || '', changed: false };
+  }
+
+  let html = rawHtml;
+  let changed = false;
+
+  // 1. Remove any .note-code-block at the very beginning of the note (preceded only by whitespace or empty <p>/<br>)
+  const leadingCodeBlockRegex =
+    /^(?:\s|<p>\s*(?:<br\s*\/?>|&nbsp;)?\s*<\/p>|<br\s*\/?>)*<div[^>]*class="[^"]*note-code-block[^"]*"[^>]*>[\s\S]*?<\/pre><\/div>(?:<p><br\s*\/?><\/p>)?/i;
+  if (leadingCodeBlockRegex.test(html)) {
+    html = html.replace(leadingCodeBlockRegex, '');
+    changed = true;
+  }
+
+  // 2. Also remove any old-version .note-code-block that lacks `note-code-del-btn` anywhere in the note
+  if (html.includes('note-code-block') && !html.includes('note-code-del-btn')) {
+    const oldBlockRegex =
+      /<div[^>]*class="[^"]*note-code-block[^"]*"[^>]*>(?:(?!note-code-del-btn)[\s\S])*?<\/pre><\/div>/gi;
+    const nextHtml = html.replace(oldBlockRegex, '');
+    if (nextHtml !== html) {
+      html = nextHtml;
+      changed = true;
+    }
+  }
+
+  return { cleanedHtml: html, changed };
+}
+
+// ============================================================================
+// SVG FREEHAND DRAWING HELPERS (PEN, HIGHLIGHTER, ARROW, LINE, RECT)
+// ============================================================================
+
+export interface Point2D {
+  x: number;
+  y: number;
+}
+
+export function buildSvgElementString(
+  tool: 'pen' | 'highlighter' | 'arrow' | 'line' | 'rect',
+  points: Point2D[],
+  color: string,
+  strokeWidth: number
+): string {
+  if (!points || points.length === 0) return '';
+  const strokeId = `stroke_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+  if (tool === 'pen' || tool === 'highlighter') {
+    if (points.length === 1) {
+      const p = points[0];
+      const r = Math.max(2, strokeWidth / 2);
+      const opacity = tool === 'highlighter' ? '0.38' : '1';
+      return `<circle id="${strokeId}" data-stroke="true" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" fill="${color}" opacity="${opacity}" />`;
+    }
+    const d = points
+      .map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+      .join(' ');
+    const width = tool === 'highlighter' ? Math.max(14, strokeWidth * 2.6) : strokeWidth;
+    const opacity = tool === 'highlighter' ? '0.36' : '0.96';
+    return `<path id="${strokeId}" data-stroke="true" d="${d}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" opacity="${opacity}" />`;
+  }
+
+  const start = points[0];
+  const end = points[points.length - 1];
+
+  if (tool === 'line') {
+    return `<line id="${strokeId}" data-stroke="true" x1="${start.x.toFixed(1)}" y1="${start.y.toFixed(1)}" x2="${end.x.toFixed(1)}" y2="${end.y.toFixed(1)}" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round" />`;
+  }
+
+  if (tool === 'rect') {
+    const x = Math.min(start.x, end.x);
+    const y = Math.min(start.y, end.y);
+    const w = Math.max(4, Math.abs(end.x - start.x));
+    const h = Math.max(4, Math.abs(end.y - start.y));
+    return `<rect id="${strokeId}" data-stroke="true" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="6" fill="none" stroke="${color}" stroke-width="${strokeWidth}" />`;
+  }
+
+  if (tool === 'arrow') {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const angle = Math.atan2(dy, dx);
+    const headLen = Math.max(10, strokeWidth * 3.2);
+    const x1 = end.x - headLen * Math.cos(angle - Math.PI / 6);
+    const y1 = end.y - headLen * Math.sin(angle - Math.PI / 6);
+    const x2 = end.x - headLen * Math.cos(angle + Math.PI / 6);
+    const y2 = end.y - headLen * Math.sin(angle + Math.PI / 6);
+    const d = `M ${start.x.toFixed(1)} ${start.y.toFixed(1)} L ${end.x.toFixed(1)} ${end.y.toFixed(1)} M ${end.x.toFixed(1)} ${end.y.toFixed(1)} L ${x1.toFixed(1)} ${y1.toFixed(1)} M ${end.x.toFixed(1)} ${end.y.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+    return `<path id="${strokeId}" data-stroke="true" d="${d}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" />`;
+  }
+
+  return '';
+}
+

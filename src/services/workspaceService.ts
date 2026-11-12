@@ -28,6 +28,13 @@ import {
   SharedRoomMember,
   SharedChatMessage
 } from '../types';
+import {
+  sanitizeAndUpgradeNoteHtml,
+  DEFAULT_SHORTCUTS,
+  DEFAULT_TEXT_COLORS,
+  DEFAULT_HIGHLIGHT_COLORS,
+  DEFAULT_PEN_COLORS
+} from '../utils/editorTools';
 
 export const DEFAULT_SUBJECTS: SubjectItem[] = [
   { id: 'Database', name: 'Database' }
@@ -84,7 +91,11 @@ export class WorkspaceService {
       rightColumnWidth: parseInt(localStorage.getItem('workspace_right_col_w') || '340', 10),
       widgetColumnWidth: parseInt(localStorage.getItem('workspace_widget_col_w') || '420', 10),
       chatSplitRatio: parseInt(localStorage.getItem('workspace_chat_split_ratio') || '52', 10),
-      customWidgets: this.localGet('workspace_custom_widgets', [])
+      customWidgets: this.localGet('workspace_custom_widgets', []),
+      customShortcuts: this.localGet('workspace_custom_shortcuts', DEFAULT_SHORTCUTS),
+      savedTextColors: this.localGet('workspace_saved_text_colors', DEFAULT_TEXT_COLORS),
+      savedHighlightColors: this.localGet('workspace_saved_highlight_colors', DEFAULT_HIGHLIGHT_COLORS),
+      savedPenColors: this.localGet('workspace_saved_pen_colors', DEFAULT_PEN_COLORS)
     };
   }
 
@@ -123,6 +134,19 @@ export class WorkspaceService {
       pages = { ...DEFAULT_PAGES };
       migrated = true;
     }
+
+    // Sanitize any stuck legacy code block at the top of notes
+    for (const sub in pages) {
+      pages[sub] = (pages[sub] || []).map(p => {
+        const { cleanedHtml, changed } = sanitizeAndUpgradeNoteHtml(p.content || '');
+        if (changed) {
+          migrated = true;
+          return { ...p, content: cleanedHtml };
+        }
+        return p;
+      });
+    }
+
     if (migrated) {
       this.localSet('workspace_pages', pages);
     }
@@ -167,6 +191,10 @@ export class WorkspaceService {
     if (pref.widgetColumnWidth !== undefined) localStorage.setItem('workspace_widget_col_w', String(pref.widgetColumnWidth));
     if (pref.chatSplitRatio !== undefined) localStorage.setItem('workspace_chat_split_ratio', String(pref.chatSplitRatio));
     if (pref.customWidgets !== undefined) this.localSet('workspace_custom_widgets', pref.customWidgets);
+    if (pref.customShortcuts !== undefined) this.localSet('workspace_custom_shortcuts', pref.customShortcuts);
+    if (pref.savedTextColors !== undefined) this.localSet('workspace_saved_text_colors', pref.savedTextColors);
+    if (pref.savedHighlightColors !== undefined) this.localSet('workspace_saved_highlight_colors', pref.savedHighlightColors);
+    if (pref.savedPenColors !== undefined) this.localSet('workspace_saved_pen_colors', pref.savedPenColors);
   }
 
   static saveLocalPages(pages: Record<string, PageItem[]>): void {
@@ -236,7 +264,11 @@ export class WorkspaceService {
                 rightColumnWidth: data.rightColumnWidth,
                 widgetColumnWidth: data.widgetColumnWidth,
                 chatSplitRatio: data.chatSplitRatio,
-                customWidgets: data.customWidgets
+                customWidgets: data.customWidgets,
+                customShortcuts: data.customShortcuts,
+                savedTextColors: data.savedTextColors,
+                savedHighlightColors: data.savedHighlightColors,
+                savedPenColors: data.savedPenColors
               });
             }
           }
@@ -283,12 +315,18 @@ export class WorkspaceService {
             const d = docSnap.data();
             const sub = d.subjectId || 'Database';
             if (!pagesBySubject[sub]) pagesBySubject[sub] = [];
-            pagesBySubject[sub].push({
+            const rawContent = d.content || '';
+            const { cleanedHtml, changed } = sanitizeAndUpgradeNoteHtml(rawContent);
+            const pageItem: PageItem = {
               id: d.id || docSnap.id,
               name: d.name || 'Pagina',
-              content: d.content || '',
+              content: cleanedHtml,
               order: d.order || 0
-            });
+            };
+            pagesBySubject[sub].push(pageItem);
+            if (changed && auth.currentUser && auth.currentUser.uid === userId) {
+              this.savePageToCloud(userId, sub, pageItem).catch(() => {});
+            }
           });
           // Sort pages by order or id
           for (const s in pagesBySubject) {
@@ -417,6 +455,10 @@ export class WorkspaceService {
           imageData: w.imageData && w.imageData.length < 150000 ? w.imageData : ''
         }));
       }
+      if (pref.customShortcuts !== undefined) payload.customShortcuts = pref.customShortcuts;
+      if (pref.savedTextColors !== undefined) payload.savedTextColors = pref.savedTextColors;
+      if (pref.savedHighlightColors !== undefined) payload.savedHighlightColors = pref.savedHighlightColors;
+      if (pref.savedPenColors !== undefined) payload.savedPenColors = pref.savedPenColors;
 
       await setDoc(userDocRef, payload, { merge: true });
     } catch (e) {

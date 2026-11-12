@@ -18,7 +18,10 @@ import {
   SharedRoomMember,
   SharedChatMessage,
   CustomWidget,
-  ColumnLayoutPreset
+  ColumnLayoutPreset,
+  ShortcutActionId,
+  ImageLayoutMode,
+  DrawingToolType
 } from './types';
 import { WorkspaceService, DEFAULT_SUBJECTS, DEFAULT_PAGES } from './services/workspaceService';
 import { saveFileToIndexedDB, getFileFromIndexedDB, deleteFileFromIndexedDB } from './services/fileStorage';
@@ -26,9 +29,21 @@ import { WeatherModal } from './components/WeatherModal';
 import { SettingsModal, BACKGROUND_THEMES, ACCENT_THEMES, PANEL_THEMES } from './components/SettingsModal';
 import { WorkspaceWidgetsDock } from './components/WorkspaceWidgetsDock';
 import {
+  APP_VERSION,
   CODE_LANGUAGES,
   FORMULA_SYMBOLS,
   FORMULA_PRESETS,
+  DEFAULT_SHORTCUTS,
+  matchesShortcutCombo,
+  DEFAULT_TEXT_COLORS,
+  DEFAULT_HIGHLIGHT_COLORS,
+  DEFAULT_PEN_COLORS,
+  addColorToPalette,
+  removeColorFromPalette,
+  hexToHighlightRgba,
+  buildInteractiveTableHtml,
+  sanitizeAndUpgradeNoteHtml,
+  buildSvgElementString,
   evaluateMathExpression,
   highlightCodeSyntax,
   buildHighlightedCodeBlockHtml,
@@ -119,9 +134,48 @@ export default function App() {
   const [widgetColumnWidth, setWidgetColumnWidth] = useState<number>(420);
   const [chatSplitRatio, setChatSplitRatio] = useState<number>(52);
   const [customWidgets, setCustomWidgets] = useState<CustomWidget[]>([]);
+  const [customShortcuts, setCustomShortcuts] = useState<Record<ShortcutActionId, string>>(() => ({
+    ...(DEFAULT_SHORTCUTS as Record<ShortcutActionId, string>)
+  }));
+  const [savedTextColors, setSavedTextColors] = useState<string[]>(DEFAULT_TEXT_COLORS);
+  const [savedHighlightColors, setSavedHighlightColors] = useState<string[]>(DEFAULT_HIGHLIGHT_COLORS);
+  const [savedPenColors, setSavedPenColors] = useState<string[]>(DEFAULT_PEN_COLORS);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<'appearance' | 'theme_bars' | 'widgets' | 'keys' | 'account' | undefined>(undefined);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<
+    'appearance' | 'theme_bars' | 'widgets' | 'shortcuts' | 'keys' | 'account' | undefined
+  >(undefined);
   const lastEditorRangeRef = useRef<Range | null>(null);
+
+  // Freehand Drawing Pen Tool State in Notes
+  const [isDrawingMode, setIsDrawingMode] = useState<boolean>(false);
+  const [drawingTool, setDrawingTool] = useState<DrawingToolType>('pen');
+  const [drawingColor, setDrawingColor] = useState<string>('#38bdf8');
+  const [drawingWidth, setDrawingWidth] = useState<number>(3);
+  const activeDrawPointsRef = useRef<Array<{ x: number; y: number }>>([]);
+  const isPointerDrawingRef = useRef<boolean>(false);
+  const tempDrawElementRef = useRef<SVGElement | null>(null);
+
+  // Selected Movable / Anchored Image State in Notes
+  const [selectedImageEl, setSelectedImageEl] = useState<HTMLImageElement | null>(null);
+  const [selectedImageMeta, setSelectedImageMeta] = useState<{
+    layout: ImageLayoutMode;
+    pinned: boolean;
+    widthPct: number;
+  }>({
+    layout: 'inline',
+    pinned: false,
+    widthPct: 60
+  });
+  const draggingImageRef = useRef<{
+    img: HTMLImageElement;
+    startX: number;
+    startY: number;
+    origLeft: number;
+    origTop: number;
+  } | null>(null);
+
+  // Active Interactive Table Cell State in Notes
+  const [activeTableCell, setActiveTableCell] = useState<HTMLTableCellElement | null>(null);
 
   // Notes Find & Replace (Ctrl+F), Code Block Modal & Formula Modal State
   const [isFindBarOpen, setIsFindBarOpen] = useState<boolean>(false);
@@ -438,6 +492,21 @@ export default function App() {
     if (Array.isArray(localPref.customWidgets)) {
       setCustomWidgets(localPref.customWidgets);
     }
+    if (localPref.customShortcuts) {
+      setCustomShortcuts({
+        ...(DEFAULT_SHORTCUTS as Record<ShortcutActionId, string>),
+        ...localPref.customShortcuts
+      });
+    }
+    if (Array.isArray(localPref.savedTextColors)) {
+      setSavedTextColors(localPref.savedTextColors);
+    }
+    if (Array.isArray(localPref.savedHighlightColors)) {
+      setSavedHighlightColors(localPref.savedHighlightColors);
+    }
+    if (Array.isArray(localPref.savedPenColors)) {
+      setSavedPenColors(localPref.savedPenColors);
+    }
 
     const localSubs = WorkspaceService.getLocalSubjects();
     setSubjects(localSubs);
@@ -488,12 +557,20 @@ export default function App() {
   // Apply Accent Color, Panel/Sidebar/Topbar Theme & Column Dimension CSS Variables
   useEffect(() => {
     const root = document.documentElement;
-    const accentObj = ACCENT_THEMES.find(a => a.id === accentColor) || ACCENT_THEMES[0];
-    root.style.setProperty('--accent-primary', accentObj.primary);
-    root.style.setProperty('--accent-secondary', accentObj.secondary);
-    root.style.setProperty('--accent-gradient', `linear-gradient(135deg, ${accentObj.primary} 0%, ${accentObj.secondary} 100%)`);
-    root.style.setProperty('--accent-surface', accentObj.surface);
-    root.style.setProperty('--accent-border', accentObj.border);
+    const presetAccent = ACCENT_THEMES.find(a => a.id === accentColor);
+    if (presetAccent) {
+      root.style.setProperty('--accent-primary', presetAccent.primary);
+      root.style.setProperty('--accent-secondary', presetAccent.secondary);
+      root.style.setProperty('--accent-gradient', `linear-gradient(135deg, ${presetAccent.primary} 0%, ${presetAccent.secondary} 100%)`);
+      root.style.setProperty('--accent-surface', presetAccent.surface);
+      root.style.setProperty('--accent-border', presetAccent.border);
+    } else if (accentColor && accentColor.startsWith('#')) {
+      root.style.setProperty('--accent-primary', accentColor);
+      root.style.setProperty('--accent-secondary', accentColor);
+      root.style.setProperty('--accent-gradient', `linear-gradient(135deg, ${accentColor} 0%, #38bdf8 100%)`);
+      root.style.setProperty('--accent-surface', hexToHighlightRgba(accentColor, 0.2));
+      root.style.setProperty('--accent-border', hexToHighlightRgba(accentColor, 0.45));
+    }
 
     const panelObj = PANEL_THEMES.find(p => p.id === panelTheme) || PANEL_THEMES[0];
     const alpha = Math.max(0.55, Math.min(1, panelOpacity / 100));
@@ -644,6 +721,15 @@ export default function App() {
             if (pref.widgetColumnWidth !== undefined) setWidgetColumnWidth(pref.widgetColumnWidth);
             if (pref.chatSplitRatio !== undefined) setChatSplitRatio(pref.chatSplitRatio);
             if (pref.customWidgets !== undefined) setCustomWidgets(pref.customWidgets);
+            if (pref.customShortcuts !== undefined) {
+              setCustomShortcuts({
+                ...(DEFAULT_SHORTCUTS as Record<ShortcutActionId, string>),
+                ...pref.customShortcuts
+              });
+            }
+            if (pref.savedTextColors !== undefined) setSavedTextColors(pref.savedTextColors);
+            if (pref.savedHighlightColors !== undefined) setSavedHighlightColors(pref.savedHighlightColors);
+            if (pref.savedPenColors !== undefined) setSavedPenColors(pref.savedPenColors);
             if (pref.activeSubject !== undefined) {
               setActiveSubject(prev => pref.activeSubject || prev);
             }
@@ -745,7 +831,8 @@ export default function App() {
         currentRoomPage = activeRoomPages[0];
         setActiveRoomPageId(currentRoomPage.id);
       }
-      const targetContent = currentRoomPage ? currentRoomPage.content : '';
+      const rawContent = currentRoomPage ? currentRoomPage.content : '';
+      const targetContent = sanitizeAndUpgradeNoteHtml(rawContent).cleanedHtml;
       if (notesAreaRef.current && notesAreaRef.current.innerHTML !== targetContent) {
         notesAreaRef.current.innerHTML = targetContent;
       }
@@ -758,7 +845,8 @@ export default function App() {
       currentPage = currentSubPages[0];
       setActivePageId(currentPage.id);
     }
-    const targetContent = currentPage ? currentPage.content : '';
+    const rawContent = currentPage ? currentPage.content : '';
+    const targetContent = sanitizeAndUpgradeNoteHtml(rawContent).cleanedHtml;
     if (notesAreaRef.current && notesAreaRef.current.innerHTML !== targetContent) {
       notesAreaRef.current.innerHTML = targetContent;
     }
@@ -1007,6 +1095,39 @@ export default function App() {
     const nextList = customWidgets.filter(w => w.id !== widgetId);
     handleUpdateCustomWidgets(nextList);
     showToast('Widget rimosso.');
+  };
+
+  // Programmable Keyboard Shortcuts & Saved Color Palettes Persistence
+  const handleUpdateCustomShortcuts = (shortcuts: Record<ShortcutActionId, string>) => {
+    setCustomShortcuts(shortcuts);
+    WorkspaceService.saveLocalPreferences({ customShortcuts: shortcuts });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { customShortcuts: shortcuts });
+    }
+  };
+
+  const handleUpdateSavedTextColors = (colors: string[]) => {
+    setSavedTextColors(colors);
+    WorkspaceService.saveLocalPreferences({ savedTextColors: colors });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { savedTextColors: colors });
+    }
+  };
+
+  const handleUpdateSavedHighlightColors = (colors: string[]) => {
+    setSavedHighlightColors(colors);
+    WorkspaceService.saveLocalPreferences({ savedHighlightColors: colors });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { savedHighlightColors: colors });
+    }
+  };
+
+  const handleUpdateSavedPenColors = (colors: string[]) => {
+    setSavedPenColors(colors);
+    WorkspaceService.saveLocalPreferences({ savedPenColors: colors });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { savedPenColors: colors });
+    }
   };
 
   // Model & API Key handlers for SettingsModal
@@ -1967,6 +2088,374 @@ export default function App() {
       }
       return;
     }
+
+    // Track if user clicked an image inside #notes-area (Word-style movable & anchored image bar)
+    const clickedImg = target.closest('img') as HTMLImageElement | null;
+    if (clickedImg && notesAreaRef.current?.contains(clickedImg)) {
+      notesAreaRef.current.querySelectorAll('img.selected-note-image').forEach(el => {
+        if (el !== clickedImg) el.classList.remove('selected-note-image');
+      });
+      clickedImg.classList.add('selected-note-image');
+      const layout = (clickedImg.getAttribute('data-layout') as ImageLayoutMode) || 'inline';
+      const pinned = clickedImg.getAttribute('data-pinned') === 'true';
+      const rawW = parseInt(clickedImg.getAttribute('data-width-pct') || '60', 10);
+      setSelectedImageEl(clickedImg);
+      setSelectedImageMeta({
+        layout,
+        pinned,
+        widthPct: isNaN(rawW) ? 60 : rawW
+      });
+    } else if (selectedImageEl) {
+      notesAreaRef.current?.querySelectorAll('img.selected-note-image').forEach(el => {
+        el.classList.remove('selected-note-image');
+      });
+      setSelectedImageEl(null);
+    }
+
+    // Track if user clicked inside an interactive table cell (.note-table td or th)
+    const clickedCell = target.closest('.note-table td, .note-table th') as HTMLTableCellElement | null;
+    if (clickedCell && notesAreaRef.current?.contains(clickedCell)) {
+      setActiveTableCell(clickedCell);
+    } else if (activeTableCell) {
+      setActiveTableCell(null);
+    }
+  };
+
+  // ==========================================
+  // INTERACTIVE TABLES IN NOTES (INSERT & EDIT ROWS/COLS)
+  // ==========================================
+  const handleInsertInteractiveTable = (rows = 3, cols = 3) => {
+    if (!notesAreaRef.current) return;
+    const tableHtml = buildInteractiveTableHtml(rows, cols);
+    insertHtmlAtEditorCursor(tableHtml);
+    setTimeout(() => {
+      if (!notesAreaRef.current) return;
+      const tables = notesAreaRef.current.querySelectorAll('table.note-table');
+      const lastTable = tables[tables.length - 1] as HTMLTableElement | undefined;
+      const firstCell = lastTable?.querySelector('td, th') as HTMLTableCellElement | null;
+      if (firstCell) {
+        firstCell.focus();
+        setActiveTableCell(firstCell);
+      }
+    }, 25);
+    showToast('📊 Tabella inserita negli appunti! Clicca su una cella per aggiungere/rimuovere righe o colonne.');
+  };
+
+  const handleTableOperation = (
+    op: 'row-above' | 'row-below' | 'col-left' | 'col-right' | 'del-row' | 'del-col' | 'del-table'
+  ) => {
+    if (!activeTableCell || !notesAreaRef.current?.contains(activeTableCell)) {
+      showToast('Seleziona prima una cella della tabella.', 'error');
+      return;
+    }
+    const table = activeTableCell.closest('table.note-table') as HTMLTableElement | null;
+    const wrapper = activeTableCell.closest('.note-table-wrapper') as HTMLElement | null;
+    const currentRow = activeTableCell.closest('tr') as HTMLTableRowElement | null;
+    if (!table || !currentRow) return;
+
+    const allRows = Array.from(table.querySelectorAll('tr'));
+    const colIndex = Array.from(currentRow.children).indexOf(activeTableCell);
+    const colCount = currentRow.children.length;
+
+    if (op === 'del-table') {
+      (wrapper || table).remove();
+      setActiveTableCell(null);
+      handleEditorInput();
+      showToast('🗑️ Tabella rimossa.');
+      return;
+    }
+
+    if (op === 'row-above' || op === 'row-below') {
+      const newRow = document.createElement('tr');
+      for (let c = 0; c < colCount; c++) {
+        const td = document.createElement('td');
+        td.innerHTML = '&nbsp;';
+        newRow.appendChild(td);
+      }
+      if (op === 'row-above') {
+        currentRow.parentNode?.insertBefore(newRow, currentRow);
+      } else {
+        currentRow.parentNode?.insertBefore(newRow, currentRow.nextSibling);
+      }
+      handleEditorInput();
+      showToast(op === 'row-above' ? '+ Riga aggiunta sopra.' : '+ Riga aggiunta sotto.');
+      return;
+    }
+
+    if (op === 'del-row') {
+      if (allRows.length <= 1) {
+        (wrapper || table).remove();
+        setActiveTableCell(null);
+      } else {
+        currentRow.remove();
+        const nextCell = table.querySelector('td, th') as HTMLTableCellElement | null;
+        setActiveTableCell(nextCell);
+      }
+      handleEditorInput();
+      showToast('− Riga eliminata.');
+      return;
+    }
+
+    if (op === 'col-left' || op === 'col-right') {
+      allRows.forEach((tr, rIdx) => {
+        const isHeader = tr.parentElement?.tagName === 'THEAD' || rIdx === 0;
+        const cell = document.createElement(isHeader ? 'th' : 'td');
+        cell.innerHTML = isHeader ? `Col ${colCount + 1}` : '&nbsp;';
+        const refCell = tr.children[colIndex] || null;
+        if (op === 'col-left') {
+          tr.insertBefore(cell, refCell);
+        } else {
+          tr.insertBefore(cell, refCell ? refCell.nextSibling : null);
+        }
+      });
+      handleEditorInput();
+      showToast(op === 'col-left' ? '+ Colonna aggiunta a sinistra.' : '+ Colonna aggiunta a destra.');
+      return;
+    }
+
+    if (op === 'del-col') {
+      if (colCount <= 1) {
+        (wrapper || table).remove();
+        setActiveTableCell(null);
+      } else {
+        allRows.forEach(tr => {
+          const targetCell = tr.children[colIndex];
+          if (targetCell) targetCell.remove();
+        });
+        const nextCell = table.querySelector('td, th') as HTMLTableCellElement | null;
+        setActiveTableCell(nextCell);
+      }
+      handleEditorInput();
+      showToast('− Colonna eliminata.');
+    }
+  };
+
+  // ==========================================
+  // MOVABLE & ANCHORED IMAGES IN NOTES (WORD-STYLE)
+  // ==========================================
+  const handleImageLayoutChange = (mode: ImageLayoutMode) => {
+    if (!selectedImageEl || !notesAreaRef.current?.contains(selectedImageEl)) return;
+    selectedImageEl.setAttribute('data-layout', mode);
+    if (mode === 'front' || mode === 'behind') {
+      selectedImageEl.style.position = 'absolute';
+      if (!selectedImageEl.style.left) selectedImageEl.style.left = '32px';
+      if (!selectedImageEl.style.top) {
+        const editorRect = notesAreaRef.current.getBoundingClientRect();
+        const imgRect = selectedImageEl.getBoundingClientRect();
+        const relTop = Math.max(16, Math.round(imgRect.top - editorRect.top + notesAreaRef.current.scrollTop));
+        selectedImageEl.style.top = `${relTop}px`;
+      }
+    } else {
+      selectedImageEl.style.position = '';
+      selectedImageEl.style.left = '';
+      selectedImageEl.style.top = '';
+    }
+    setSelectedImageMeta(prev => ({ ...prev, layout: mode }));
+    handleEditorInput();
+    const labels: Record<ImageLayoutMode, string> = {
+      inline: 'In linea col testo',
+      'wrap-left': 'Affiancata a Sinistra',
+      'wrap-right': 'Affiancata a Destra',
+      behind: 'Dietro al testo (libera)',
+      front: 'Davanti al testo (libera)'
+    };
+    showToast(`🖼️ Posizione foto: ${labels[mode]}`);
+  };
+
+  const handleToggleImagePin = () => {
+    if (!selectedImageEl || !notesAreaRef.current?.contains(selectedImageEl)) return;
+    const nextPinned = !selectedImageMeta.pinned;
+    selectedImageEl.setAttribute('data-pinned', nextPinned ? 'true' : 'false');
+    setSelectedImageMeta(prev => ({ ...prev, pinned: nextPinned }));
+    handleEditorInput();
+    showToast(
+      nextPinned
+        ? '📌 Foto ancorata e fissata nella posizione attuale!'
+        : '🔓 Ancora sbloccata: puoi trascinare liberamente la foto negli appunti!'
+    );
+  };
+
+  const handleImageWidthChange = (nextPct: number) => {
+    if (!selectedImageEl || !notesAreaRef.current?.contains(selectedImageEl)) return;
+    const clamped = Math.max(15, Math.min(100, Math.round(nextPct)));
+    selectedImageEl.setAttribute('data-width-pct', String(clamped));
+    selectedImageEl.style.width = `${clamped}%`;
+    selectedImageEl.style.maxWidth = `${clamped}%`;
+    setSelectedImageMeta(prev => ({ ...prev, widthPct: clamped }));
+    handleEditorInput();
+  };
+
+  const handleDeleteSelectedImage = () => {
+    if (!selectedImageEl) return;
+    selectedImageEl.remove();
+    setSelectedImageEl(null);
+    handleEditorInput();
+    showToast('🗑️ Immagine rimossa dagli appunti.');
+  };
+
+  // Dragging unpinned images inside #notes-area
+  const handleNotesMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!notesAreaRef.current) return;
+    const target = e.target as HTMLElement;
+
+    // 1. If in Drawing Mode, start drawing stroke on SVG overlay
+    if (isDrawingMode) {
+      if (
+        target.closest('.note-image-floating-bar') ||
+        target.closest('.note-table-floating-bar') ||
+        target.closest('.notes-drawing-bar')
+      ) {
+        return;
+      }
+      e.preventDefault();
+      const editor = notesAreaRef.current;
+      let svg = editor.querySelector('svg.note-drawing-svg') as SVGSVGElement | null;
+      if (!svg) {
+        svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'note-drawing-svg');
+        svg.setAttribute('data-drawing-layer', 'true');
+        editor.appendChild(svg);
+      }
+      const totalH = Math.max(editor.scrollHeight, editor.clientHeight);
+      svg.style.height = `${totalH}px`;
+
+      // If eraser tool is active, clicking a stroke deletes it
+      if (drawingTool === 'eraser') {
+        const hitDrawItem = target.closest('[data-draw-item="true"]');
+        if (hitDrawItem && svg.contains(hitDrawItem)) {
+          hitDrawItem.remove();
+          handleEditorInput();
+        }
+        return;
+      }
+
+      const rect = editor.getBoundingClientRect();
+      const x = e.clientX - rect.left + editor.scrollLeft;
+      const y = e.clientY - rect.top + editor.scrollTop;
+      activeDrawPointsRef.current = [{ x, y }];
+      isPointerDrawingRef.current = true;
+
+      const wrapper = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      wrapper.innerHTML = buildSvgElementString(drawingTool, [{ x, y }], drawingColor, drawingWidth);
+      const firstChild = wrapper.firstElementChild as SVGElement | null;
+      if (firstChild) {
+        svg.appendChild(firstChild);
+        tempDrawElementRef.current = firstChild;
+      }
+      return;
+    }
+
+    // 2. If clicking an image that is NOT pinned, allow dragging it freely
+    const imgEl = target.closest('img') as HTMLImageElement | null;
+    if (imgEl && notesAreaRef.current.contains(imgEl)) {
+      const isPinned = imgEl.getAttribute('data-pinned') === 'true';
+      const layout = (imgEl.getAttribute('data-layout') as ImageLayoutMode) || 'inline';
+      if (!isPinned && (layout === 'front' || layout === 'behind' || e.altKey)) {
+        e.preventDefault();
+        if (layout !== 'front' && layout !== 'behind') {
+          imgEl.setAttribute('data-layout', 'front');
+          imgEl.style.position = 'absolute';
+        }
+        const editorRect = notesAreaRef.current.getBoundingClientRect();
+        const imgRect = imgEl.getBoundingClientRect();
+        const origLeft =
+          parseFloat(imgEl.style.left) ||
+          Math.max(0, Math.round(imgRect.left - editorRect.left + notesAreaRef.current.scrollLeft));
+        const origTop =
+          parseFloat(imgEl.style.top) ||
+          Math.max(0, Math.round(imgRect.top - editorRect.top + notesAreaRef.current.scrollTop));
+
+        imgEl.style.left = `${origLeft}px`;
+        imgEl.style.top = `${origTop}px`;
+        draggingImageRef.current = {
+          img: imgEl,
+          startX: e.clientX,
+          startY: e.clientY,
+          origLeft,
+          origTop
+        };
+      }
+    }
+  };
+
+  const handleNotesMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!notesAreaRef.current) return;
+
+    // 1. Live SVG Drawing update
+    if (isDrawingMode && isPointerDrawingRef.current && drawingTool !== 'eraser') {
+      const editor = notesAreaRef.current;
+      const svg = editor.querySelector('svg.note-drawing-svg') as SVGSVGElement | null;
+      if (!svg) return;
+      const rect = editor.getBoundingClientRect();
+      const x = e.clientX - rect.left + editor.scrollLeft;
+      const y = e.clientY - rect.top + editor.scrollTop;
+      activeDrawPointsRef.current.push({ x, y });
+
+      if (tempDrawElementRef.current) {
+        tempDrawElementRef.current.remove();
+        tempDrawElementRef.current = null;
+      }
+      const wrapper = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      wrapper.innerHTML = buildSvgElementString(
+        drawingTool,
+        activeDrawPointsRef.current,
+        drawingColor,
+        drawingWidth
+      );
+      const nextChild = wrapper.firstElementChild as SVGElement | null;
+      if (nextChild) {
+        svg.appendChild(nextChild);
+        tempDrawElementRef.current = nextChild;
+      }
+      return;
+    }
+
+    // 2. Live Image Drag update
+    if (draggingImageRef.current) {
+      const { img, startX, startY, origLeft, origTop } = draggingImageRef.current;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      const nextLeft = Math.max(0, Math.round(origLeft + dx));
+      const nextTop = Math.max(0, Math.round(origTop + dy));
+      img.style.left = `${nextLeft}px`;
+      img.style.top = `${nextTop}px`;
+    }
+  };
+
+  const handleNotesMouseUp = () => {
+    if (isPointerDrawingRef.current) {
+      isPointerDrawingRef.current = false;
+      tempDrawElementRef.current = null;
+      activeDrawPointsRef.current = [];
+      handleEditorInput();
+    }
+    if (draggingImageRef.current) {
+      draggingImageRef.current = null;
+      handleEditorInput();
+    }
+  };
+
+  const handleUndoLastDrawing = () => {
+    if (!notesAreaRef.current) return;
+    const svg = notesAreaRef.current.querySelector('svg.note-drawing-svg');
+    const items = svg?.querySelectorAll('[data-draw-item="true"]');
+    if (items && items.length > 0) {
+      items[items.length - 1].remove();
+      handleEditorInput();
+      showToast('↩️ Ultimo tratto rimosso.');
+    } else {
+      showToast('Nessun tratto disegnato da annullare.', 'error');
+    }
+  };
+
+  const handleClearAllDrawings = () => {
+    if (!notesAreaRef.current) return;
+    const svg = notesAreaRef.current.querySelector('svg.note-drawing-svg');
+    if (svg) {
+      svg.remove();
+      handleEditorInput();
+      showToast('🧹 Tutti i disegni sulla pagina sono stati rimossi.');
+    }
   };
 
   // Handle language <select> change inside #notes-area code blocks
@@ -2199,30 +2688,121 @@ export default function App() {
     }
   };
 
-  // Ctrl+F Keyboard Shortcut for Searching Inside Notes
+  // Programmable Keyboard Shortcuts Listener (Configurable in Impostazioni -> Scorciatoie Tasti)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
-        if (activeTab === 'notes' && currentUser && isApproved) {
+      if (e.key === 'Escape') {
+        if (isFindBarOpen) setIsFindBarOpen(false);
+        if (isDrawingMode) setIsDrawingMode(false);
+        return;
+      }
+
+      if (!currentUser || !isApproved) return;
+
+      const s = {
+        ...(DEFAULT_SHORTCUTS as Record<ShortcutActionId, string>),
+        ...customShortcuts
+      };
+
+      if (matchesShortcutCombo(e, s.open_find)) {
+        if (activeTab === 'notes') {
           e.preventDefault();
           setIsFindBarOpen(true);
           const sel = window.getSelection();
           const selText = sel && !sel.isCollapsed ? sel.toString().trim() : '';
-          if (selText) {
-            setFindQuery(selText);
-          }
+          if (selText) setFindQuery(selText);
           setTimeout(() => {
             findInputRef.current?.focus();
             findInputRef.current?.select();
           }, 40);
         }
-      } else if (e.key === 'Escape' && isFindBarOpen) {
-        setIsFindBarOpen(false);
+        return;
+      }
+
+      if (matchesShortcutCombo(e, s.insert_code)) {
+        e.preventDefault();
+        setActiveTab('notes');
+        handleInsertDirectCodeBlock();
+        return;
+      }
+
+      if (matchesShortcutCombo(e, s.insert_formula)) {
+        e.preventDefault();
+        setActiveTab('notes');
+        handleInsertDirectFormulaBox();
+        return;
+      }
+
+      if (matchesShortcutCombo(e, s.insert_table)) {
+        e.preventDefault();
+        setActiveTab('notes');
+        handleInsertInteractiveTable(3, 3);
+        return;
+      }
+
+      if (matchesShortcutCombo(e, s.toggle_pen)) {
+        e.preventDefault();
+        setActiveTab('notes');
+        setIsDrawingMode(prev => !prev);
+        return;
+      }
+
+      if (matchesShortcutCombo(e, s.insert_quote)) {
+        e.preventDefault();
+        setActiveTab('notes');
+        handleInsertBlockquote();
+        return;
+      }
+
+      if (matchesShortcutCombo(e, s.highlight_text)) {
+        e.preventDefault();
+        const topColor = savedHighlightColors[0] || '#fde047';
+        handleFormatText('hiliteColor', topColor);
+        handleFormatText('foreColor', '#09090b');
+        return;
+      }
+
+      if (matchesShortcutCombo(e, s.new_page)) {
+        e.preventDefault();
+        if (workspaceMode === 'shared') {
+          handleAddNewRoomPage();
+        } else {
+          handleAddNewPage();
+        }
+        return;
+      }
+
+      if (matchesShortcutCombo(e, s.toggle_chat)) {
+        e.preventDefault();
+        handleToggleChat();
+        return;
+      }
+
+      if (matchesShortcutCombo(e, s.toggle_sidebar)) {
+        e.preventDefault();
+        handleToggleSidebar();
+        return;
+      }
+
+      if (matchesShortcutCombo(e, s.toggle_compact)) {
+        e.preventDefault();
+        handleToggleCompactMode(!compactMode);
+        return;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTab, currentUser, isApproved, isFindBarOpen]);
+  }, [
+    activeTab,
+    currentUser,
+    isApproved,
+    isFindBarOpen,
+    isDrawingMode,
+    customShortcuts,
+    savedHighlightColors,
+    workspaceMode,
+    compactMode
+  ]);
 
   // Count matches whenever findQuery or note content changes
   useEffect(() => {
@@ -3295,6 +3875,17 @@ export default function App() {
       return;
     }
 
+    if (action === 'tabella') {
+      restoreSavedRange();
+      handleInsertInteractiveTable(3, 3);
+      return;
+    }
+
+    if (action === 'penna') {
+      setIsDrawingMode(prev => !prev);
+      return;
+    }
+
     if (action === 'cerca') {
       setIsFindBarOpen(true);
       if (selectedText) setFindQuery(selectedText);
@@ -3721,6 +4312,12 @@ export default function App() {
               <span>{t.message}</span>
             </div>
           ))}
+        </div>
+
+        {/* Version Badge in Bottom-Left Corner */}
+        <div className="app-version-badge" title="Versione attiva di Workspace ITS">
+          <span className="app-version-dot"></span>
+          <span>Workspace ITS {APP_VERSION}</span>
         </div>
       </div>
     );
@@ -4471,29 +5068,55 @@ export default function App() {
 
                   <span className="divider"></span>
 
-                  {/* Highlighter Swatches */}
-                  <div className="toolbar-swatch-group" title="Evidenziatore testo">
+                  {/* Highlighter Swatches (with Color Wheel + Deletable Rapid Swatches) */}
+                  <div className="toolbar-swatch-group" title="Evidenziatore testo (passa sopra un colore per eliminarlo o usa la ruota 🎨)">
                     <span className="toolbar-swatch-label">🖍️</span>
-                    {[
-                      { color: '#fde047', label: 'Evidenzia Giallo' },
-                      { color: '#6ee7b7', label: 'Evidenzia Verde' },
-                      { color: '#7dd3fc', label: 'Evidenzia Azzurro' },
-                      { color: '#f9a8d4', label: 'Evidenzia Rosa' },
-                      { color: '#c4b5fd', label: 'Evidenzia Viola' }
-                    ].map(sw => (
-                      <button
-                        key={sw.color}
-                        type="button"
-                        className="swatch-dot-btn"
-                        style={{ backgroundColor: sw.color }}
-                        onMouseDown={e => e.preventDefault()}
-                        onClick={() => {
-                          handleFormatText('hiliteColor', sw.color);
+                    {savedHighlightColors.map(color => (
+                      <div key={color} className="swatch-dot-wrap">
+                        <button
+                          type="button"
+                          className="swatch-dot-btn"
+                          style={{ backgroundColor: color }}
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => {
+                            handleFormatText('hiliteColor', color);
+                            handleFormatText('foreColor', '#09090b');
+                          }}
+                          title={`Evidenzia ${color}`}
+                        />
+                        <button
+                          type="button"
+                          className="swatch-del-badge"
+                          onMouseDown={e => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                          onClick={e => {
+                            e.stopPropagation();
+                            handleUpdateSavedHighlightColors(removeColorFromPalette(savedHighlightColors, color));
+                          }}
+                          title="Elimina questo colore rapido"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    <label
+                      className="color-wheel-label-btn"
+                      title="Ruota colori personalizzata Evidenziatore (salva automaticamente nei colori rapidi)"
+                      onMouseDown={e => e.stopPropagation()}
+                    >
+                      <input
+                        type="color"
+                        defaultValue="#fde047"
+                        onChange={e => {
+                          const hex = e.target.value;
+                          handleUpdateSavedHighlightColors(addColorToPalette(savedHighlightColors, hex));
+                          handleFormatText('hiliteColor', hex);
                           handleFormatText('foreColor', '#09090b');
                         }}
-                        title={sw.label}
                       />
-                    ))}
+                    </label>
                     <button
                       type="button"
                       className="swatch-clear-btn"
@@ -4508,27 +5131,51 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Text Color Swatches */}
-                  <div className="toolbar-swatch-group" title="Colore del testo">
+                  {/* Text Color Swatches (with Color Wheel + Deletable Rapid Swatches) */}
+                  <div className="toolbar-swatch-group" title="Colore del testo (passa sopra un colore per eliminarlo o usa la ruota 🎨)">
                     <span className="toolbar-swatch-label">A</span>
-                    {[
-                      { color: '#f8fafc', label: 'Testo Bianco' },
-                      { color: '#818cf8', label: 'Testo Indaco' },
-                      { color: '#38bdf8', label: 'Testo Ciano' },
-                      { color: '#34d399', label: 'Testo Smeraldo' },
-                      { color: '#fbbf24', label: 'Testo Ambra' },
-                      { color: '#fb7185', label: 'Testo Corallo' }
-                    ].map(sw => (
-                      <button
-                        key={sw.color}
-                        type="button"
-                        className="swatch-dot-btn"
-                        style={{ backgroundColor: sw.color }}
-                        onMouseDown={e => e.preventDefault()}
-                        onClick={() => handleFormatText('foreColor', sw.color)}
-                        title={sw.label}
-                      />
+                    {savedTextColors.map(color => (
+                      <div key={color} className="swatch-dot-wrap">
+                        <button
+                          type="button"
+                          className="swatch-dot-btn"
+                          style={{ backgroundColor: color }}
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => handleFormatText('foreColor', color)}
+                          title={`Testo ${color}`}
+                        />
+                        <button
+                          type="button"
+                          className="swatch-del-badge"
+                          onMouseDown={e => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                          onClick={e => {
+                            e.stopPropagation();
+                            handleUpdateSavedTextColors(removeColorFromPalette(savedTextColors, color));
+                          }}
+                          title="Elimina questo colore rapido"
+                        >
+                          ×
+                        </button>
+                      </div>
                     ))}
+                    <label
+                      className="color-wheel-label-btn"
+                      title="Ruota colori personalizzata Testo (salva automaticamente nei colori rapidi)"
+                      onMouseDown={e => e.stopPropagation()}
+                    >
+                      <input
+                        type="color"
+                        defaultValue="#38bdf8"
+                        onChange={e => {
+                          const hex = e.target.value;
+                          handleUpdateSavedTextColors(addColorToPalette(savedTextColors, hex));
+                          handleFormatText('foreColor', hex);
+                        }}
+                      />
+                    </label>
                   </div>
 
                   <span className="divider"></span>
@@ -4550,12 +5197,42 @@ export default function App() {
                     1. Num
                   </button>
 
+                  {/* Interactive Table Insertion */}
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleInsertInteractiveTable(3, 3)}
+                    title={`Inserisci Tabella modificabile negli appunti (${customShortcuts.insert_table || 'Alt+T'})`}
+                  >
+                    📊 Tabella
+                  </button>
+
+                  {/* Freehand Drawing Pen Tool */}
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => setIsDrawingMode(prev => !prev)}
+                    title={`Attiva/Disattiva Penna Disegno a mano libera su appunti e foto (${customShortcuts.toggle_pen || 'Alt+P'})`}
+                    style={
+                      isDrawingMode
+                        ? {
+                            background: 'var(--accent-gradient)',
+                            color: '#fff',
+                            borderColor: 'transparent',
+                            boxShadow: '0 2px 10px rgba(99, 102, 241, 0.45)'
+                          }
+                        : undefined
+                    }
+                  >
+                    ✏️ {isDrawingMode ? 'Penna Attiva' : 'Penna'}
+                  </button>
+
                   {/* Restored Citazione & Syntax-Highlighted Code Block */}
                   <button
                     type="button"
                     onMouseDown={e => e.preventDefault()}
                     onClick={handleInsertBlockquote}
-                    title="Inserisci Citazione / Definizione (Blockquote)"
+                    title={`Inserisci Citazione / Definizione (${customShortcuts.insert_quote || 'Alt+Q'})`}
                   >
                     💬 Citazione
                   </button>
@@ -4563,7 +5240,7 @@ export default function App() {
                     type="button"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => handleInsertDirectCodeBlock()}
-                    title="Inserisci direttamente Box di Codice negli appunti con menu a tendina per il linguaggio e indentazione Tab automatica"
+                    title={`Inserisci Box di Codice negli appunti (${customShortcuts.insert_code || 'Alt+C'})`}
                   >
                     💻 Codice
                   </button>
@@ -4573,7 +5250,7 @@ export default function App() {
                     type="button"
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => handleInsertDirectFormulaBox()}
-                    title="Inserisci direttamente Box Formula negli appunti che esegue e calcola in tempo reale ciò che scrivi"
+                    title={`Inserisci Box Formula Live negli appunti (${customShortcuts.insert_formula || 'Alt+F'})`}
                     style={{
                       color: '#6ee7b7',
                       borderColor: 'rgba(16, 185, 129, 0.35)',
@@ -4591,7 +5268,7 @@ export default function App() {
                       setIsFindBarOpen(prev => !prev);
                       setTimeout(() => findInputRef.current?.focus(), 40);
                     }}
-                    title="Cerca e Sostituisci negli appunti (Ctrl+F)"
+                    title={`Cerca e Sostituisci negli appunti (${customShortcuts.open_find || 'Ctrl+F'})`}
                   >
                     🔍 Cerca
                   </button>
@@ -4636,6 +5313,254 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+
+                {/* Floating Freehand Drawing Studio Bar (when ✏️ Penna is active) */}
+                {isDrawingMode && (
+                  <div className="notes-drawing-bar">
+                    <span style={{ fontSize: '0.76rem', fontWeight: 700, color: '#a5b4fc' }}>
+                      ✏️ Disegno su Appunti &amp; Foto:
+                    </span>
+                    {(
+                      [
+                        { id: 'pen', label: '✏️ Penna' },
+                        { id: 'highlighter', label: '🖍️ Evidenziatore' },
+                        { id: 'arrow', label: '↗️ Freccia' },
+                        { id: 'line', label: '📏 Linea' },
+                        { id: 'rect', label: '▭ Box' },
+                        { id: 'eraser', label: '🧹 Gomma Tratto' }
+                      ] as Array<{ id: DrawingToolType; label: string }>
+                    ).map(t => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        className={`drawing-tool-pill ${drawingTool === t.id ? 'active' : ''}`}
+                        onClick={() => setDrawingTool(t.id)}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+
+                    <span className="divider" style={{ height: '18px' }}></span>
+
+                    {/* Pen Color Swatches + Custom Color Wheel + Delete */}
+                    <div className="toolbar-swatch-group" title="Colore Penna / Freccia">
+                      {savedPenColors.map(c => (
+                        <div key={c} className="swatch-dot-wrap">
+                          <button
+                            type="button"
+                            className="swatch-dot-btn"
+                            style={{
+                              backgroundColor: c,
+                              outline: drawingColor === c ? '2px solid #ffffff' : 'none'
+                            }}
+                            onClick={() => setDrawingColor(c)}
+                            title={`Colore tratto ${c}`}
+                          />
+                          <button
+                            type="button"
+                            className="swatch-del-badge"
+                            onClick={e => {
+                              e.stopPropagation();
+                              handleUpdateSavedPenColors(removeColorFromPalette(savedPenColors, c));
+                            }}
+                            title="Elimina colore rapido penna"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                      <label
+                        className="color-wheel-label-btn"
+                        title="Scegli colore penna dalla ruota colori (salva nei rapidi)"
+                      >
+                        <input
+                          type="color"
+                          value={drawingColor.startsWith('#') ? drawingColor : '#38bdf8'}
+                          onChange={e => {
+                            const hex = e.target.value;
+                            setDrawingColor(hex);
+                            handleUpdateSavedPenColors(addColorToPalette(savedPenColors, hex));
+                          }}
+                        />
+                      </label>
+                    </div>
+
+                    {/* Stroke Widths */}
+                    {[2, 4, 7, 12].map(w => (
+                      <button
+                        key={w}
+                        type="button"
+                        className={`drawing-tool-pill ${drawingWidth === w ? 'active' : ''}`}
+                        onClick={() => setDrawingWidth(w)}
+                        title={`Spessore tratto ${w}px`}
+                      >
+                        {w}px
+                      </button>
+                    ))}
+
+                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <button
+                        type="button"
+                        className="drawing-tool-pill"
+                        onClick={handleUndoLastDrawing}
+                        title="Annulla ultimo tratto disegnato"
+                      >
+                        ↩️ Annulla Tratto
+                      </button>
+                      <button
+                        type="button"
+                        className="drawing-tool-pill danger"
+                        onClick={handleClearAllDrawings}
+                        title="Cancella tutti i disegni da questa pagina"
+                      >
+                        🗑️ Pulisci Tutto
+                      </button>
+                      <button
+                        type="button"
+                        className="drawing-tool-pill"
+                        onClick={() => setIsDrawingMode(false)}
+                        title="Torna alla modalità scrittura testo (Esc)"
+                      >
+                        ✓ Fine Disegno
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Floating Interactive Table Editing Bar (when cursor is inside a .note-table) */}
+                {activeTableCell && (
+                  <div className="note-table-floating-bar">
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#38bdf8' }}>
+                      📊 Gestione Tabella:
+                    </span>
+                    <button
+                      type="button"
+                      className="drawing-tool-pill"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => handleTableOperation('row-above')}
+                    >
+                      + Riga Sopra
+                    </button>
+                    <button
+                      type="button"
+                      className="drawing-tool-pill"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => handleTableOperation('row-below')}
+                    >
+                      + Riga Sotto
+                    </button>
+                    <button
+                      type="button"
+                      className="drawing-tool-pill"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => handleTableOperation('col-left')}
+                    >
+                      + Col Sinistra
+                    </button>
+                    <button
+                      type="button"
+                      className="drawing-tool-pill"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => handleTableOperation('col-right')}
+                    >
+                      + Col Destra
+                    </button>
+                    <button
+                      type="button"
+                      className="drawing-tool-pill danger"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => handleTableOperation('del-row')}
+                    >
+                      − Elimina Riga
+                    </button>
+                    <button
+                      type="button"
+                      className="drawing-tool-pill danger"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => handleTableOperation('del-col')}
+                    >
+                      − Elimina Colonna
+                    </button>
+                    <button
+                      type="button"
+                      className="drawing-tool-pill danger"
+                      style={{ marginLeft: 'auto' }}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => handleTableOperation('del-table')}
+                    >
+                      🗑️ Elimina Tabella
+                    </button>
+                  </div>
+                )}
+
+                {/* Floating Word-Style Image Layout & Anchor Toolbar (when clicking an image in #notes-area) */}
+                {selectedImageEl && (
+                  <div className="note-image-floating-bar">
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#a5b4fc' }}>
+                      🖼️ Layout &amp; Ancora Foto:
+                    </span>
+                    {(
+                      [
+                        { id: 'inline', label: '═ In linea' },
+                        { id: 'wrap-left', label: '◧ Testo a Destra' },
+                        { id: 'wrap-right', label: '◨ Testo a Sinistra' },
+                        { id: 'behind', label: '🌅 Dietro al Testo' },
+                        { id: 'front', label: '🚀 Davanti al Testo (Libera)' }
+                      ] as Array<{ id: ImageLayoutMode; label: string }>
+                    ).map(m => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        className={`drawing-tool-pill ${selectedImageMeta.layout === m.id ? 'active' : ''}`}
+                        onClick={() => handleImageLayoutChange(m.id)}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+
+                    <button
+                      type="button"
+                      className={`drawing-tool-pill ${selectedImageMeta.pinned ? 'active' : ''}`}
+                      onClick={handleToggleImagePin}
+                      title="Blocca/Fissa la foto con l'ancora oppure sbloccala per trascinarla liberamente col mouse"
+                    >
+                      {selectedImageMeta.pinned ? '📌 Fissata (Sblocca)' : '🔓 Sbloccata (Fissa Ancora)'}
+                    </button>
+
+                    <span className="divider" style={{ height: '18px' }}></span>
+
+                    {[25, 50, 75, 100].map(pct => (
+                      <button
+                        key={pct}
+                        type="button"
+                        className={`drawing-tool-pill ${selectedImageMeta.widthPct === pct ? 'active' : ''}`}
+                        onClick={() => handleImageWidthChange(pct)}
+                        title={`Dimensione foto ${pct}%`}
+                      >
+                        {pct}%
+                      </button>
+                    ))}
+
+                    <button
+                      type="button"
+                      className="drawing-tool-pill"
+                      onClick={() => setIsDrawingMode(true)}
+                      title="Attiva la penna per disegnare frecce o appunti direttamente sopra questa foto"
+                    >
+                      ✏️ Disegna su Foto
+                    </button>
+
+                    <button
+                      type="button"
+                      className="drawing-tool-pill danger"
+                      style={{ marginLeft: 'auto' }}
+                      onClick={handleDeleteSelectedImage}
+                      title="Elimina questa immagine dagli appunti"
+                    >
+                      🗑️ Elimina Foto
+                    </button>
+                  </div>
+                )}
 
                 {/* Floating Ctrl+F Search & Replace Bar */}
                 {isFindBarOpen && (
@@ -4711,33 +5636,41 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Contenteditable Notes Area (Supports Ctrl+V Screenshot Paste & Code Copy) */}
+                {/* Contenteditable Notes Area (Supports Ctrl+V Screenshot Paste, Tables, Movable Photos & SVG Pen) */}
                 <div
                   id="notes-area"
-                  className={`font-${fontFamily}`}
+                  className={`font-${fontFamily} ${isDrawingMode ? 'drawing-mode-active' : ''} ${
+                    isDrawingMode && drawingTool === 'eraser' ? 'eraser-active' : ''
+                  }`}
                   style={{ fontSize: `${fontSize}px` }}
                   ref={el => {
                     (notesAreaRef as any).current = el;
                     if (el) {
                       const currentSubPages = pages[activeSubject] || [];
                       const currentPage = currentSubPages.find(p => p.id === activePageId) || currentSubPages[0];
-                      const targetContent = workspaceMode === 'shared'
+                      const rawTarget = workspaceMode === 'shared'
                         ? (activeRoomPages.find(p => p.id === activeRoomPageId) || activeRoomPages[0])?.content || ''
                         : (currentPage?.content || '');
+                      const targetContent = sanitizeAndUpgradeNoteHtml(rawTarget).cleanedHtml;
                       if (el.innerHTML !== targetContent) {
                         el.innerHTML = targetContent;
                       }
                     }
                   }}
-                  contentEditable
+                  contentEditable={!isDrawingMode}
                   suppressContentEditableWarning
-                  data-placeholder="Inizia a scrivere i tuoi appunti... Incolla screenshot (Ctrl+V), cerca (Ctrl+F), inserisci box codice o formule live, oppure usa il tasto destro."
+                  data-placeholder="Inizia a scrivere i tuoi appunti... Incolla screenshot (Ctrl+V), inserisci tabelle, disegna con la penna o usa le scorciatoie."
                   onInput={handleNotesAreaInput}
                   onChange={handleNotesAreaChange}
                   onKeyDown={handleNotesAreaKeyDown}
                   onPaste={handleNotesPaste}
                   onClick={handleNotesAreaClick}
-                  onMouseUp={handleRecordEditorSelection}
+                  onMouseDown={handleNotesMouseDown}
+                  onMouseMove={handleNotesMouseMove}
+                  onMouseUp={e => {
+                    handleNotesMouseUp();
+                    handleRecordEditorSelection();
+                  }}
                   onKeyUp={handleRecordEditorSelection}
                   onContextMenu={handleNotesContextMenu}
                 />
@@ -5923,51 +6856,37 @@ export default function App() {
                   <s>S</s>
                 </button>
 
-                {/* Quick Highlighters */}
-                <button
-                  type="button"
-                  className="ctx-swatch-btn"
-                  style={{ background: '#fde047' }}
-                  onMouseDown={e => {
-                    e.preventDefault();
-                    handleFormatText('hiliteColor', 'rgba(250, 204, 21, 0.38)');
-                    setContextMenu(prev => ({ ...prev, visible: false }));
-                  }}
-                  title="Evidenzia Giallo"
-                />
-                <button
-                  type="button"
-                  className="ctx-swatch-btn"
-                  style={{ background: '#4ade80' }}
-                  onMouseDown={e => {
-                    e.preventDefault();
-                    handleFormatText('hiliteColor', 'rgba(74, 222, 128, 0.35)');
-                    setContextMenu(prev => ({ ...prev, visible: false }));
-                  }}
-                  title="Evidenzia Verde"
-                />
-                <button
-                  type="button"
-                  className="ctx-swatch-btn"
-                  style={{ background: '#38bdf8' }}
-                  onMouseDown={e => {
-                    e.preventDefault();
-                    handleFormatText('hiliteColor', 'rgba(56, 189, 248, 0.35)');
-                    setContextMenu(prev => ({ ...prev, visible: false }));
-                  }}
-                  title="Evidenzia Azzurro"
-                />
-                <button
-                  type="button"
-                  className="ctx-swatch-btn"
-                  style={{ background: '#f472b6' }}
-                  onMouseDown={e => {
-                    e.preventDefault();
-                    handleFormatText('hiliteColor', 'rgba(244, 114, 182, 0.35)');
-                    setContextMenu(prev => ({ ...prev, visible: false }));
-                  }}
-                  title="Evidenzia Rosa"
-                />
+                {/* Quick Highlighters + Custom Color Wheel */}
+                {savedHighlightColors.slice(0, 4).map(color => (
+                  <button
+                    key={color}
+                    type="button"
+                    className="ctx-swatch-btn"
+                    style={{ background: color }}
+                    onMouseDown={e => {
+                      e.preventDefault();
+                      handleFormatText('hiliteColor', hexToHighlightRgba(color, 0.38));
+                      setContextMenu(prev => ({ ...prev, visible: false }));
+                    }}
+                    title={`Evidenzia ${color}`}
+                  />
+                ))}
+                <label
+                  className="color-wheel-label-btn"
+                  title="Scegli colore personalizzato dalla ruota colori"
+                  onMouseDown={e => e.stopPropagation()}
+                >
+                  <input
+                    type="color"
+                    defaultValue="#38bdf8"
+                    onChange={e => {
+                      const hex = e.target.value;
+                      handleUpdateSavedTextColors(addColorToPalette(savedTextColors, hex));
+                      handleFormatText('foreColor', hex);
+                      setContextMenu(prev => ({ ...prev, visible: false }));
+                    }}
+                  />
+                </label>
               </div>
             </div>
 
@@ -6030,7 +6949,7 @@ export default function App() {
               </div>
             )}
 
-            {/* Box 3: Inserimento Rapido Toolbox (2x2 Grid) */}
+            {/* Box 3: Inserimento Rapido Toolbox (3x2 Grid) */}
             <div className="ctx-group-box">
               <div className="ctx-group-box-header">
                 <span>🧰 Toolbox Inserimento Rapido</span>
@@ -6051,6 +6970,22 @@ export default function App() {
                 >
                   <span>∑</span>
                   <span>Box Formula</span>
+                </button>
+                <button
+                  type="button"
+                  className="ctx-box-action-btn"
+                  onClick={() => handleContextMenuAction('tabella')}
+                >
+                  <span>📊</span>
+                  <span>Tabella</span>
+                </button>
+                <button
+                  type="button"
+                  className="ctx-box-action-btn"
+                  onClick={() => handleContextMenuAction('penna')}
+                >
+                  <span>✏️</span>
+                  <span>Penna Disegno</span>
                 </button>
                 <button
                   type="button"
@@ -6653,6 +7588,14 @@ export default function App() {
         onChangeChatSplitRatio={handleChangeChatSplitRatio}
         customWidgets={customWidgets}
         onUpdateCustomWidgets={handleUpdateCustomWidgets}
+        customShortcuts={customShortcuts}
+        onUpdateCustomShortcuts={handleUpdateCustomShortcuts}
+        savedTextColors={savedTextColors}
+        onUpdateSavedTextColors={handleUpdateSavedTextColors}
+        savedHighlightColors={savedHighlightColors}
+        onUpdateSavedHighlightColors={handleUpdateSavedHighlightColors}
+        savedPenColors={savedPenColors}
+        onUpdateSavedPenColors={handleUpdateSavedPenColors}
         materials={activeDisplayMaterials}
         initialTab={settingsInitialTab}
         selectedWeatherCity={selectedWeatherCity}
@@ -6688,6 +7631,15 @@ export default function App() {
             <span>{t.message}</span>
           </div>
         ))}
+      </div>
+
+      {/* VERSION BADGE IN BOTTOM-LEFT CORNER */}
+      <div
+        className="app-version-badge"
+        title="Versione attiva di Workspace ITS — verifica di avere la stessa versione su tutti i dispositivi"
+      >
+        <span className="app-version-dot"></span>
+        <span>Workspace ITS {APP_VERSION}</span>
       </div>
     </div>
   );

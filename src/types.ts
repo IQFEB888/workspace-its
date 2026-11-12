@@ -69,6 +69,23 @@ export type ColumnLayoutPreset =
   | 'notes-chat-tools'
   | 'tools-chat-notes';
 
+export type ShortcutActionId =
+  | 'insert_code'
+  | 'insert_formula'
+  | 'insert_table'
+  | 'toggle_pen'
+  | 'insert_quote'
+  | 'open_find'
+  | 'highlight_text'
+  | 'new_page'
+  | 'toggle_chat'
+  | 'toggle_sidebar'
+  | 'toggle_compact';
+
+export type ImageLayoutMode = 'inline' | 'wrap-left' | 'wrap-right' | 'behind' | 'front';
+
+export type DrawingToolType = 'pen' | 'highlighter' | 'arrow' | 'line' | 'rect' | 'eraser';
+
 export interface UserPreferences {
   bgIndex: number;
   isImmersion: boolean;
@@ -91,6 +108,10 @@ export interface UserPreferences {
   widgetColumnWidth?: number;
   chatSplitRatio?: number;
   customWidgets?: CustomWidget[];
+  customShortcuts?: Record<string, string>;
+  savedTextColors?: string[];
+  savedHighlightColors?: string[];
+  savedPenColors?: string[];
 }
 
 export interface AttachedFile {

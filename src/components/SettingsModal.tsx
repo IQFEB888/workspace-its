@@ -8,6 +8,16 @@ import {
   WidgetSlot,
   WidgetType
 } from '../types';
+import {
+  SHORTCUT_DEFINITIONS,
+  DEFAULT_SHORTCUTS,
+  formatKeyboardEventToCombo,
+  DEFAULT_TEXT_COLORS,
+  DEFAULT_HIGHLIGHT_COLORS,
+  DEFAULT_PEN_COLORS,
+  addColorToPalette,
+  removeColorFromPalette
+} from '../utils/editorTools';
 
 export interface BackgroundTheme {
   id: number;
@@ -289,7 +299,7 @@ export const WIDGET_CATALOG: Array<{
 
 interface SettingsModalProps {
   isOpen: boolean;
-  initialTab?: 'appearance' | 'theme_bars' | 'widgets' | 'keys' | 'account';
+  initialTab?: 'appearance' | 'theme_bars' | 'widgets' | 'shortcuts' | 'keys' | 'account';
   onClose: () => void;
   bgIndex: number;
   onSelectBackground: (index: number) => void;
@@ -315,6 +325,14 @@ interface SettingsModalProps {
   onChangeChatSplitRatio: (ratio: number) => void;
   customWidgets: CustomWidget[];
   onUpdateCustomWidgets: (widgets: CustomWidget[]) => void;
+  customShortcuts: Record<string, string>;
+  onUpdateCustomShortcuts: (shortcuts: Record<string, string>) => void;
+  savedTextColors: string[];
+  onUpdateSavedTextColors: (colors: string[]) => void;
+  savedHighlightColors: string[];
+  onUpdateSavedHighlightColors: (colors: string[]) => void;
+  savedPenColors: string[];
+  onUpdateSavedPenColors: (colors: string[]) => void;
   materials: MaterialItem[];
   fontFamily: string;
   onSelectFontFamily: (font: string) => void;
@@ -369,6 +387,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onChangeChatSplitRatio,
   customWidgets,
   onUpdateCustomWidgets,
+  customShortcuts,
+  onUpdateCustomShortcuts,
+  savedTextColors,
+  onUpdateSavedTextColors,
+  savedHighlightColors,
+  onUpdateSavedHighlightColors,
+  savedPenColors,
+  onUpdateSavedPenColors,
   materials,
   fontFamily,
   onSelectFontFamily,
@@ -394,13 +420,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenRestoreBackup,
   showToast
 }) => {
-  const [activeTab, setActiveTab] = useState<'appearance' | 'theme_bars' | 'widgets' | 'keys' | 'account'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'appearance' | 'theme_bars' | 'widgets' | 'shortcuts' | 'keys' | 'account'>(initialTab);
+  const [recordingShortcutId, setRecordingShortcutId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen && initialTab) {
       setActiveTab(initialTab);
     }
   }, [isOpen, initialTab]);
+
+  // Listen for key combination when recording a shortcut
+  useEffect(() => {
+    if (!recordingShortcutId || !isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        setRecordingShortcutId(null);
+        return;
+      }
+      const combo = formatKeyboardEventToCombo(e);
+      if (combo) {
+        onUpdateCustomShortcuts({
+          ...customShortcuts,
+          [recordingShortcutId]: combo
+        });
+        setRecordingShortcutId(null);
+        showToast(`⌨️ Scorciatoia salvata: ${combo}`);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [recordingShortcutId, isOpen, customShortcuts, onUpdateCustomShortcuts, showToast]);
 
   // Keys draft state
   const [keysDraft, setKeysDraft] = useState<string[]>(apiKeys || []);
@@ -530,8 +581,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         >
           {[
             { id: 'widgets', label: '🧩 Layout & Widget' },
+            { id: 'shortcuts', label: '⌨️ Scorciatoie Tasti' },
             { id: 'appearance', label: '🎨 Sfondi & Font' },
-            { id: 'theme_bars', label: '🖌️ Tema & Barre' },
+            { id: 'theme_bars', label: '🖌️ Tema & Colori' },
             { id: 'keys', label: '🔑 Gemini AI' },
             { id: 'account', label: '👤 Account & Backup' }
           ].map(tab => (
@@ -1475,7 +1527,228 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                   );
                 })}
+
+                {/* Custom Color Wheel Accent Picker */}
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                    background: accentColor.startsWith('#') ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.03)',
+                    border: accentColor.startsWith('#') ? `1.5px solid ${accentColor}` : '1px dashed rgba(255, 255, 255, 0.25)'
+                  }}
+                  title="Scegli un colore accento personalizzato dalla ruota dei colori"
+                >
+                  <input
+                    type="color"
+                    value={accentColor.startsWith('#') ? accentColor : '#6366f1'}
+                    onChange={e => onSelectAccentColor(e.target.value)}
+                    style={{ width: '24px', height: '24px', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}
+                  />
+                  <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#fff', flex: 1 }}>
+                    🎨 Ruota Colori
+                  </span>
+                  {accentColor.startsWith('#') && <span style={{ color: accentColor, fontWeight: 700 }}>✓</span>}
+                </label>
               </div>
+            </div>
+
+            {/* Gestione Colori Rapidi (Testo, Evidenziatore, Penna Disegno) con Ruota Colori ed Eliminazione */}
+            <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '16px', marginTop: '18px' }}>
+              <label style={{ fontSize: '0.88rem', fontWeight: 700, color: '#f8fafc', display: 'block', marginBottom: '4px' }}>
+                🌈 Palette Colori Rapidi Personalizzabili (Testo, Evidenziatori &amp; Penna)
+              </label>
+              <p style={{ fontSize: '0.74rem', color: '#94a3b8', margin: '0 0 12px 0' }}>
+                Aggiungi qualsiasi colore dalla ruota dei colori (rimarrà salvato nei colori rapidi) oppure elimina i colori che non usi cliccando sulla <b>×</b>:
+              </p>
+
+              {[
+                {
+                  title: 'A • Colori Rapidi Testo',
+                  colors: savedTextColors,
+                  onUpdate: onUpdateSavedTextColors,
+                  defaults: DEFAULT_TEXT_COLORS
+                },
+                {
+                  title: '🖍️ • Colori Rapidi Evidenziatore',
+                  colors: savedHighlightColors,
+                  onUpdate: onUpdateSavedHighlightColors,
+                  defaults: DEFAULT_HIGHLIGHT_COLORS
+                },
+                {
+                  title: '✏️ • Colori Rapidi Penna Disegno',
+                  colors: savedPenColors,
+                  onUpdate: onUpdateSavedPenColors,
+                  defaults: DEFAULT_PEN_COLORS
+                }
+              ].map(group => (
+                <div
+                  key={group.title}
+                  style={{
+                    padding: '10px 12px',
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: '10px',
+                    marginBottom: '10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '10px'
+                  }}
+                >
+                  <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#e2e8f0', minWidth: '190px' }}>
+                    {group.title}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flex: 1 }}>
+                    {group.colors.map(col => (
+                      <div key={col} className="swatch-dot-wrap" title={`Colore ${col}`}>
+                        <span
+                          className="swatch-dot-btn"
+                          style={{ backgroundColor: col, display: 'inline-block', cursor: 'default' }}
+                        />
+                        <button
+                          type="button"
+                          className="swatch-del-badge"
+                          onClick={() => group.onUpdate(removeColorFromPalette(group.colors, col))}
+                          title="Elimina questo colore rapido"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    <label
+                      className="color-wheel-label-btn"
+                      title="Aggiungi colore personalizzato dalla ruota dei colori"
+                    >
+                      <span>🎨 +</span>
+                      <input
+                        type="color"
+                        defaultValue="#38bdf8"
+                        onChange={e => group.onUpdate(addColorToPalette(group.colors, e.target.value))}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="widget-mini-btn"
+                      onClick={() => group.onUpdate(group.defaults)}
+                      title="Ripristina colori predefiniti"
+                    >
+                      ↺ Reset
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAB: SCORCIATOIE DA TASTIERA PROGRAMMABILI */}
+        {activeTab === 'shortcuts' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div
+              style={{
+                padding: '12px 14px',
+                background: 'rgba(99, 102, 241, 0.1)',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                borderRadius: '11px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '10px'
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.86rem', color: '#fff' }}>
+                  ⌨️ Tasti Rapidi &amp; Combinazioni Programmabili
+                </div>
+                <div style={{ fontSize: '0.74rem', color: '#cbd5e1', marginTop: '2px' }}>
+                  Clicca su <b>"Registra Tasti"</b> accanto a un'azione e premi la combinazione che preferisci (es. <code>Alt+C</code>, <code>Ctrl+Shift+X</code>, <code>F2</code>).
+                </div>
+              </div>
+              <button
+                type="button"
+                className="widget-mini-btn"
+                onClick={() => {
+                  onUpdateCustomShortcuts(DEFAULT_SHORTCUTS);
+                  showToast('↺ Scorciatoie ripristinate ai valori predefiniti!');
+                }}
+              >
+                ↺ Ripristina Predefinite
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {SHORTCUT_DEFINITIONS.map(def => {
+                const currentCombo = customShortcuts[def.id] ?? def.defaultCombo;
+                const isRecording = recordingShortcutId === def.id;
+                return (
+                  <div
+                    key={def.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '10px',
+                      padding: '10px 14px',
+                      borderRadius: '10px',
+                      background: isRecording ? 'rgba(56, 189, 248, 0.14)' : 'rgba(255, 255, 255, 0.03)',
+                      border: isRecording ? '1.5px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.08)',
+                      flexWrap: 'wrap'
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: '210px' }}>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#f8fafc' }}>{def.label}</div>
+                      <div style={{ fontSize: '0.71rem', color: '#94a3b8' }}>{def.desc}</div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '7px',
+                          background: 'rgba(0, 0, 0, 0.45)',
+                          border: '1px solid rgba(255, 255, 255, 0.18)',
+                          fontFamily: "'JetBrains Mono', monospace",
+                          fontSize: '0.76rem',
+                          fontWeight: 700,
+                          color: isRecording ? '#fde047' : '#38bdf8',
+                          minWidth: '90px',
+                          textAlign: 'center'
+                        }}
+                      >
+                        {isRecording ? 'Premi tasti...' : currentCombo || 'Nessuna'}
+                      </span>
+
+                      <button
+                        type="button"
+                        className={`widget-mini-btn ${isRecording ? 'accent' : ''}`}
+                        onClick={() => setRecordingShortcutId(isRecording ? null : def.id)}
+                      >
+                        {isRecording ? 'Annulla (Esc)' : '⏺ Registra Tasti'}
+                      </button>
+
+                      {currentCombo && (
+                        <button
+                          type="button"
+                          className="widget-ctrl-btn danger"
+                          onClick={() => {
+                            onUpdateCustomShortcuts({ ...customShortcuts, [def.id]: '' });
+                            showToast(`Scorciatoia per "${def.label}" disattivata.`);
+                          }}
+                          title="Rimuovi scorciatoia"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

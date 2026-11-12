@@ -246,6 +246,37 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
       ? String((materials.find(m => m.fileType === 'pdf' || m.url.includes('drive.google.com')) || materials[0]).id)
       : '');
 
+  const handleStartResizeColumn = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (slot !== 'full_column' || !onChangeColumnWidth) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const startX = e.clientX;
+    const startWidth = columnWidth || 420;
+    const dockEl = e.currentTarget.parentElement;
+    const rect = dockEl?.getBoundingClientRect();
+    const isRightSide = !rect || rect.left >= window.innerWidth * 0.35;
+
+    document.body.classList.add('is-resizing-column');
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const rawNext = isRightSide ? startWidth - deltaX : startWidth + deltaX;
+      const clamped = Math.max(260, Math.min(760, Math.round(rawNext)));
+      document.documentElement.style.setProperty('--user-widget-col-w', `${clamped}px`);
+      onChangeColumnWidth(clamped);
+    };
+
+    const handleMouseUp = () => {
+      document.body.classList.remove('is-resizing-column');
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
   return (
     <div
       className={`workspace-widget-dock ${slot === 'full_column' ? 'is-full-column-dock' : ''}`}
@@ -254,6 +285,17 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
         minHeight: isFullHeightSlot ? '180px' : `${widgetHeight}px`
       }}
     >
+      {/* Draggable Side Edge Resizer when in Full Column mode (replaces arrow buttons) */}
+      {slot === 'full_column' && onChangeColumnWidth && (
+        <div
+          className="widget-column-resizer"
+          onMouseDown={handleStartResizeColumn}
+          title="Trascina il bordo laterale per espandere o ridurre la colonna widget"
+        >
+          <div className="widget-column-resizer-grip" />
+        </div>
+      )}
+
       {/* Compact Header Bar: Tabs + Inline PDF File Dropdown (if pdf_viewer) + Slot/Size Controls */}
       <div className="widget-dock-header">
         <div className="widget-dock-tabs">
@@ -345,28 +387,6 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
         </div>
 
         <div className="widget-dock-controls">
-          {/* Width controls when in Full Column mode */}
-          {slot === 'full_column' && onChangeColumnWidth && (
-            <>
-              <button
-                type="button"
-                className="widget-ctrl-btn"
-                onClick={() => onChangeColumnWidth(Math.max(280, columnWidth - 40))}
-                title="Stringi colonna widget"
-              >
-                ◀−
-              </button>
-              <button
-                type="button"
-                className="widget-ctrl-btn"
-                onClick={() => onChangeColumnWidth(Math.min(720, columnWidth + 40))}
-                title="Allarga colonna widget"
-              >
-                +▶
-              </button>
-            </>
-          )}
-
           {/* Height controls when in bottom docks (left_bottom / center_bottom) */}
           {!isFullHeightSlot && (
             <>
