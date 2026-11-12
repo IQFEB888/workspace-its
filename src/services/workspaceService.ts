@@ -562,6 +562,7 @@ export class WorkspaceService {
     const dn = (displayName || '').toLowerCase();
     return (
       em === 'beccalli.fabio4@gmail.com' ||
+      em === 'fabio.beccalli@itsrizzoli.it' ||
       em.includes('beccalli') ||
       dn.includes('fabio beccalli') ||
       dn.includes('beccalli fabio')

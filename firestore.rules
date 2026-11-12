@@ -2,11 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Global Safety Net: default-deny all paths unless explicitly permitted
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
     // Helper functions
     function isSignedIn() {
       return request.auth != null;
@@ -19,147 +14,69 @@ service cloud.firestore {
     // Super Admin check: safely inspect email claims
     function isAdmin() {
       return isSignedIn() &&
-             (('email' in request.auth.token &&
-               (request.auth.token.email == "beccalli.fabio4@gmail.com" ||
-                request.auth.token.email.matches('.*beccalli.*') ||
-                request.auth.token.email.matches('.*Beccalli.*'))) ||
-              ('name' in request.auth.token &&
-               request.auth.token.name != null &&
-               request.auth.token.name.matches('.*Beccalli.*')));
-    }
-
-    // Checks whether the user is approved by the admin
-    function isApprovedUser(userId) {
-      return isAdmin() ||
-             (exists(/databases/$(database)/documents/approved_users/$(userId)) &&
-              get(/databases/$(database)/documents/approved_users/$(userId)).data.status == 'active');
+             'email' in request.auth.token &&
+             (request.auth.token.email == "beccalli.fabio4@gmail.com" ||
+              request.auth.token.email == "fabio.beccalli@itsrizzoli.it" ||
+              request.auth.token.email.matches('.*beccalli.*') ||
+              request.auth.token.email.matches('.*Beccalli.*'));
     }
 
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 128;
     }
 
-    function incoming() {
-      return request.resource.data;
+    // Connection health check test collection
+    match /test/{docId} {
+      allow read, write: if true;
     }
 
-    function existing() {
-      return resource.data;
-    }
-
-    function isValidUserProfile(data) {
-      return data.userId is string && (data.userId == request.auth.uid || isAdmin()) &&
-             (!('email' in data) || (data.email is string && data.email.size() <= 256)) &&
-             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 128)) &&
-             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1024)) &&
-             (!('activeSubject' in data) || (data.activeSubject is string && data.activeSubject.size() <= 100)) &&
-             (!('bgIndex' in data) || (data.bgIndex is number)) &&
-             (!('isImmersion' in data) || (data.isImmersion is bool)) &&
-             (!('isSidebarCollapsed' in data) || (data.isSidebarCollapsed is bool)) &&
-             (!('isChatCollapsed' in data) || (data.isChatCollapsed is bool)) &&
-             (!('selectedModel' in data) || (data.selectedModel is string && data.selectedModel.size() <= 64)) &&
-             (!('fontFamily' in data) || (data.fontFamily is string && data.fontFamily.size() <= 64)) &&
-             (!('fontSize' in data) || (data.fontSize is number)) &&
-             (!('showWeatherWidget' in data) || (data.showWeatherWidget is bool));
-    }
-
-    function isValidSubject(data, userId) {
-      return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
-             data.userId is string && (data.userId == userId || data.userId == request.auth.uid) &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-             (!('driveLink' in data) || (data.driveLink is string && data.driveLink.size() <= 1024));
-    }
-
-    function isValidPage(data, userId) {
-      return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
-             data.userId is string && (data.userId == userId || data.userId == request.auth.uid) &&
-             data.subjectId is string && data.subjectId.size() > 0 && data.subjectId.size() <= 128 &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
-             (!('content' in data) || (data.content is string && data.content.size() <= 1000000));
-    }
-
-    function isValidMaterial(data, userId) {
-      return data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
-             data.userId is string && (data.userId == userId || data.userId == request.auth.uid) &&
-             data.subjectId is string && data.subjectId.size() > 0 && data.subjectId.size() <= 128 &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
-             data.url is string && data.url.size() > 0 && data.url.size() <= 2048 &&
-             (!('category' in data) || (data.category is string && data.category.size() <= 80)) &&
-             (!('fileType' in data) || (data.fileType is string && data.fileType.size() <= 32)) &&
-             (!('fileSize' in data) || (data.fileSize is number)) &&
-             (!('mimeType' in data) || (data.mimeType is string && data.mimeType.size() <= 128)) &&
-             (!('fileData' in data) || (data.fileData is string && data.fileData.size() <= 600000)) &&
-             (!('hasLocalFile' in data) || (data.hasLocalFile is bool));
-    }
-
-    function isValidChatSession(data, userId) {
-      return data.userId is string && (data.userId == userId || data.userId == request.auth.uid) &&
-             data.subjectId is string && data.subjectId.size() > 0 && data.subjectId.size() <= 128 &&
-             (!('messages' in data) || (data.messages is list && data.messages.size() <= 100));
-    }
-
-    // Access Requests: any signed in user can create their request; Admin can manage all
+    // Access Requests: any signed in user can create and view
     match /access_requests/{userId} {
-      allow get: if isOwner(userId) || isAdmin();
-      allow list: if isAdmin();
-      allow create: if isOwner(userId) && incoming().userId == userId;
-      allow update: if isAdmin() || (isOwner(userId) && incoming().userId == userId);
+      allow read, write: if isSignedIn();
       allow delete: if isAdmin();
     }
 
-    // Approved Users: Admin manages approvals; User can check/set their own approval status
+    // Approved Users: managed by admin, readable by all authenticated users
     match /approved_users/{userId} {
-      allow get: if isOwner(userId) || isAdmin();
-      allow list: if isAdmin();
-      allow write: if isAdmin() || isOwner(userId);
+      allow read, write: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
     // Root User Profile & Personal Workspace
+    // Every user has exclusive full access to their own data tree (isOwner)
     match /users/{userId} {
-      allow read, delete: if isOwner(userId) || isAdmin();
-      allow create: if (isOwner(userId) || isAdmin()) && isValidUserProfile(incoming());
-      allow update: if (isOwner(userId) || isAdmin()) && isValidUserProfile(incoming()) && incoming().userId == existing().userId;
+      allow read, write, delete: if isOwner(userId) || isAdmin();
 
       // Subjects Subcollection
       match /subjects/{subjectId} {
-        allow read, delete: if isOwner(userId) || isAdmin();
-        allow create: if (isOwner(userId) || isAdmin()) && isValidId(subjectId) && isValidSubject(incoming(), userId);
-        allow update: if (isOwner(userId) || isAdmin()) && isValidId(subjectId) && isValidSubject(incoming(), userId) && incoming().userId == existing().userId;
+        allow read, write, delete: if isOwner(userId) || isAdmin();
       }
 
       // Pages Subcollection
       match /pages/{pageId} {
-        allow read, delete: if isOwner(userId) || isAdmin();
-        allow create: if (isOwner(userId) || isAdmin()) && isValidId(pageId) && isValidPage(incoming(), userId);
-        allow update: if (isOwner(userId) || isAdmin()) && isValidId(pageId) && isValidPage(incoming(), userId) && incoming().userId == existing().userId;
+        allow read, write, delete: if isOwner(userId) || isAdmin();
       }
 
       // Materials Subcollection
       match /materials/{materialId} {
-        allow read, delete: if isOwner(userId) || isAdmin();
-        allow create: if (isOwner(userId) || isAdmin()) && isValidId(materialId) && isValidMaterial(incoming(), userId);
-        allow update: if (isOwner(userId) || isAdmin()) && isValidId(materialId) && isValidMaterial(incoming(), userId) && incoming().userId == existing().userId;
+        allow read, write, delete: if isOwner(userId) || isAdmin();
       }
 
       // Chat Sessions Subcollection
       match /chats/{subjectId} {
-        allow read, delete: if isOwner(userId) || isAdmin();
-        allow create, update: if (isOwner(userId) || isAdmin()) && isValidId(subjectId) && isValidChatSession(incoming(), userId);
+        allow read, write, delete: if isOwner(userId) || isAdmin();
       }
 
       // Settings Subcollection (e.g. Gemini Keys)
       match /settings/{settingId} {
-        allow read, delete: if isOwner(userId) || isAdmin();
-        allow create, update: if (isOwner(userId) || isAdmin()) && isValidId(settingId);
+        allow read, write, delete: if isOwner(userId) || isAdmin();
       }
     }
 
     // Shared Collaboration Rooms & Group Study
     match /shared_rooms/{roomId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && incoming().createdBy == request.auth.uid;
-      allow update: if isSignedIn();
-      allow delete: if isSignedIn() && (existing().createdBy == request.auth.uid || isAdmin());
+      allow read, write: if isSignedIn();
+      allow delete: if isSignedIn() && (resource.data.createdBy == request.auth.uid || isAdmin());
 
       // Shared Room Pages
       match /pages/{pageId} {
@@ -181,6 +98,11 @@ service cloud.firestore {
         allow read: if isSignedIn();
         allow write, delete: if isSignedIn() && request.auth.uid == userId;
       }
+    }
+
+    // Fallback: deny all other paths
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

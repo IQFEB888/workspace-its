@@ -409,24 +409,13 @@ export default function App() {
 
       const isUserSuperAdmin = WorkspaceService.isSuperAdmin(user.email, user.displayName);
       setIsAdmin(isUserSuperAdmin);
-
-      let userIsApproved = isUserSuperAdmin;
-      if (!isUserSuperAdmin) {
-        userIsApproved = await WorkspaceService.checkUserApproval(user.uid, user.email, user.displayName);
-        if (!userIsApproved) {
-          setIsApproved(false);
-          setCloudSyncActive(false);
-          await WorkspaceService.submitAccessRequest(user);
-          return;
-        }
-      }
+      setIsApproved(true);
+      setCloudSyncActive(true);
 
       if (isUserSuperAdmin) {
         WorkspaceService.selfApproveBeccalli(user).catch(() => {});
       }
 
-      setIsApproved(true);
-      setCloudSyncActive(true);
       showToast(`Benvenuto, ${user.displayName || user.email}! Sincronizzazione cloud attiva.`, 'info');
 
       let unsubAdminReq: (() => void) | null = null;
@@ -1930,13 +1919,15 @@ export default function App() {
             return updated;
           });
 
-          if (currentUser) {
-            await WorkspaceService.saveChatToCloud(currentUser.uid, activeSubject, finalChatList);
-          }
-
           setAttachedFile(null);
           if (fileInputRef.current) fileInputRef.current.value = '';
           success = true;
+
+          if (currentUser) {
+            WorkspaceService.saveChatToCloud(currentUser.uid, activeSubject, finalChatList).catch(err => {
+              console.warn('Background chat cloud sync error:', err);
+            });
+          }
           break;
         }
       } catch (err: any) {
