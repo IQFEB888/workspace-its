@@ -309,7 +309,7 @@ export function buildHighlightedCodeBlockHtml(
       `<option value="${l.id}"${l.id === langObj.id ? ' selected="selected"' : ''}>${l.label}</option>`
   ).join('');
 
-  return `<div class="note-code-block" id="${uniqueId}" data-lang="${langObj.id}" data-raw="${encodedRaw}" contenteditable="false"><div class="note-code-header"><div class="note-code-lang-wrap"><span class="note-code-dot">●</span><select class="note-code-lang-select" aria-label="Linguaggio blocco codice" title="Cambia linguaggio di programmazione">${optionsHtml}</select><span class="note-code-hint">Tab = Indenta • Auto-indent attivo</span></div><div class="note-code-actions"><button type="button" class="note-code-copy-btn" data-copy-code="true">📋 Copia</button><button type="button" class="note-code-del-btn" data-delete-code="true" title="Elimina blocco codice">✕</button></div></div><pre class="note-code-pre" contenteditable="true" spellcheck="false" data-placeholder="Scrivi o incolla il codice qui... (Premi Tab per indentare)"><code class="note-code-content">${highlighted || ''}</code></pre></div><p><br></p>`;
+  return `<div class="note-code-block" id="${uniqueId}" data-lang="${langObj.id}" data-raw="${encodedRaw}" contenteditable="false"><div class="note-code-header"><div class="note-code-lang-wrap"><span class="note-code-dot">●</span><select class="note-code-lang-select" aria-label="Linguaggio blocco codice" title="Cambia linguaggio di programmazione">${optionsHtml}</select><span class="note-code-hint">Tab = Indenta • Auto-indent attivo</span></div><div class="note-code-actions"><button type="button" class="note-code-run-btn" data-run-code="true" title="Esegui codice e mostra output">▶ Esegui</button><button type="button" class="note-code-copy-btn" data-copy-code="true">📋 Copia</button><button type="button" class="note-code-del-btn" data-delete-code="true" title="Elimina blocco codice">✕</button></div></div><pre class="note-code-pre" contenteditable="true" spellcheck="false" data-placeholder="Scrivi o incolla il codice qui... (Premi Tab per indentare)"><code class="note-code-content">${highlighted || ''}</code></pre><div class="note-code-output" contenteditable="false" style="display:none;"></div></div><p><br></p>`;
 }
 
 /**
@@ -591,7 +591,7 @@ export function compressImageFromBlob(
 // APP VERSION & PROGRAMMABLE KEYBOARD SHORTCUTS
 // ============================================================================
 
-export const APP_VERSION = 'v2.6.0';
+export const APP_VERSION = 'v2.7.0';
 
 export interface ShortcutDefinition {
   id:
@@ -867,7 +867,77 @@ export function sanitizeAndUpgradeNoteHtml(rawHtml: string): { cleanedHtml: stri
     }
   }
 
+  // 3. Upgrade v2.6 code blocks that have `note-code-copy-btn` but not `note-code-run-btn`
+  if (html.includes('note-code-copy-btn') && !html.includes('note-code-run-btn')) {
+    const upgraded = html.replace(
+      /<button[^>]*class="note-code-copy-btn"/g,
+      '<button type="button" class="note-code-run-btn" data-run-code="true" title="Esegui codice e mostra output">▶ Esegui</button><button type="button" class="note-code-copy-btn"'
+    );
+    if (upgraded !== html) {
+      html = upgraded;
+      changed = true;
+    }
+  }
+
   return { cleanedHtml: html, changed };
+}
+
+/**
+ * Detects whether a chat prompt is asking the AI to highlight key concepts or directly
+ * modify/edit the user's current notes in `#notes-area`, and extracts any specific
+ * topic/section mentioned (e.g. "evidenzia le parti importanti della parte dove parlo delle select").
+ */
+export function parseAiNoteEditIntent(userMessage: string): {
+  isDirectNoteEdit: boolean;
+  mode: 'highlight' | 'edit' | 'none';
+  targetTopic: string | null;
+} {
+  if (!userMessage || typeof userMessage !== 'string') {
+    return { isDirectNoteEdit: false, mode: 'none', targetTopic: null };
+  }
+  const text = userMessage.trim();
+  const lower = text.toLowerCase();
+
+  // Check for highlight keywords
+  const hasHighlightVerb =
+    /\b(evidenzia\w*|sottolinea\w*|colora\w*|metti in evidenza|marca\w*)\b/i.test(lower);
+
+  // Check for direct note edit keywords
+  const hasNoteEditPhrase =
+    /\b(modifica\s+gli\s+appunti|aggiorna\s+gli\s+appunti|riscrivi\s+gli\s+appunti|formatta\s+gli\s+appunti|negli\s+appunti\s+evidenzia|negli\s+appunti\s+modifica| correggi\s+gli\s+appunti|aggiungi\s+negli\s+appunti|inserisci\s+negli\s+appunti)\b/i.test(
+      lower
+    );
+
+  if (!hasHighlightVerb && !hasNoteEditPhrase) {
+    return { isDirectNoteEdit: false, mode: 'none', targetTopic: null };
+  }
+
+  // Extract optional target topic, e.g. "dove parlo delle select", "sulla parte di join", "riguardo a ..."
+  let targetTopic: string | null = null;
+  const topicPatterns = [
+    /(?:dove\s+parl[oa]\s+(?:di|del|della|dei|degli|delle|dello)|parte\s+(?:su|sul|sulla|sui|sugli|sulle|di|del|della|dei|degli|delle)|riguardo\s+(?:a|al|alla|ai|agli|alle)|sezione\s+(?:su|di|del|della|delle))\s+([^.,;!?]+)/i,
+    /evidenzia(?:re)?\s+(?:le\s+parti\s+importanti\s+|i\s+concetti\s+chiave\s+|le\s+cose\s+importanti\s+|le\s+robe\s+chiave\s+)?(?:su|sul|sulla|sui|sulle|di|del|della|delle)\s+([^.,;!?]+)/i
+  ];
+
+  for (const pat of topicPatterns) {
+    const m = text.match(pat);
+    if (m && m[1]) {
+      const candidate = m[1].trim();
+      if (
+        candidate &&
+        !/^(appunti|testo|pagina|tutto|nota|note)$/i.test(candidate)
+      ) {
+        targetTopic = candidate;
+        break;
+      }
+    }
+  }
+
+  return {
+    isDirectNoteEdit: true,
+    mode: hasHighlightVerb ? 'highlight' : 'edit',
+    targetTopic
+  };
 }
 
 // ============================================================================

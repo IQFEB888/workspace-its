@@ -47,7 +47,25 @@ export type WidgetType =
   | 'web_embed'
   | 'calculator'
   | 'pomodoro'
-  | 'quick_scratch';
+  | 'quick_scratch'
+  | 'calendar';
+
+export type CalendarEventCategory = 'lecture' | 'homework' | 'study' | 'exam';
+
+export interface CalendarEventItem {
+  id: string;
+  title: string;
+  date: string; // YYYY-MM-DD
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+  category: CalendarEventCategory;
+  subject: string;
+  description?: string;
+  completed?: boolean;
+  googleEventId?: string;
+  color?: string;
+  createdAt?: string;
+}
 
 export interface CustomWidget {
   id: string;

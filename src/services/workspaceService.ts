@@ -26,7 +26,8 @@ import {
   UserPreferences,
   SharedRoom,
   SharedRoomMember,
-  SharedChatMessage
+  SharedChatMessage,
+  CalendarEventItem
 } from '../types';
 import {
   sanitizeAndUpgradeNoteHtml,
@@ -168,6 +169,10 @@ export class WorkspaceService {
     };
   }
 
+  static getLocalCalendarEvents(): CalendarEventItem[] {
+    return this.localGet<CalendarEventItem[]>('workspace_calendar_events', []);
+  }
+
   // Save to LocalStorage
   static saveLocalPreferences(pref: Partial<UserPreferences>): void {
     if (pref.bgIndex !== undefined) localStorage.setItem('workspace_bg_index', String(pref.bgIndex));
@@ -218,6 +223,10 @@ export class WorkspaceService {
     localStorage.setItem('workspace_gemini_selected_key_idx', String(selectedIndex));
   }
 
+  static saveLocalCalendarEvents(events: CalendarEventItem[]): void {
+    this.localSet('workspace_calendar_events', events);
+  }
+
   // ==========================================
   // FIRESTORE CLOUD OPERATIONS (WHEN LOGGED IN)
   // ==========================================
@@ -231,6 +240,7 @@ export class WorkspaceService {
       onMaterials?: (materialsBySubject: Record<string, MaterialItem[]>) => void;
       onChats?: (chatsBySubject: Record<string, ChatMessage[]>) => void;
       onKeys?: (keys: string[], selectedIndex: number) => void;
+      onCalendarEvents?: (events: CalendarEventItem[]) => void;
     }
   ): () => void {
     const unsubs: Unsubscribe[] = [];
@@ -415,6 +425,39 @@ export class WorkspaceService {
       )
     );
 
+    // 7. Calendar Events Collection
+    const calColRef = collection(db, 'users', userId, 'calendar_events');
+    unsubs.push(
+      onSnapshot(
+        calColRef,
+        snapshot => {
+          const items: CalendarEventItem[] = [];
+          snapshot.forEach(docSnap => {
+            const d = docSnap.data();
+            items.push({
+              id: d.id || docSnap.id,
+              title: d.title || 'Evento',
+              date: d.date || new Date().toISOString().slice(0, 10),
+              startTime: d.startTime || '09:00',
+              endTime: d.endTime || '10:00',
+              category: d.category || 'lecture',
+              subject: d.subject || 'Database',
+              description: d.description || '',
+              completed: !!d.completed,
+              googleEventId: d.googleEventId || '',
+              color: d.color || '#38bdf8'
+            });
+          });
+          items.sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
+          if (callbacks.onCalendarEvents) callbacks.onCalendarEvents(items);
+        },
+        error => {
+          if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+          handleFirestoreError(error, OperationType.LIST, `users/${userId}/calendar_events`);
+        }
+      )
+    );
+
     return () => {
       unsubs.forEach(unsub => unsub());
     };
@@ -593,6 +636,34 @@ export class WorkspaceService {
       });
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `users/${userId}/settings/keys`);
+    }
+  }
+
+  static async saveCalendarEventToCloud(userId: string, event: CalendarEventItem): Promise<void> {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    try {
+      const ref = doc(db, 'users', userId, 'calendar_events', event.id);
+      await setDoc(
+        ref,
+        {
+          ...event,
+          userId,
+          updatedAt: new Date().toISOString()
+        },
+        { merge: true }
+      );
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `users/${userId}/calendar_events/${event.id}`);
+    }
+  }
+
+  static async deleteCalendarEventFromCloud(userId: string, eventId: string): Promise<void> {
+    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    try {
+      const ref = doc(db, 'users', userId, 'calendar_events', eventId);
+      await deleteDoc(ref);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.DELETE, `users/${userId}/calendar_events/${eventId}`);
     }
   }
 

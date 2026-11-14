@@ -256,43 +256,50 @@ export const WIDGET_CATALOG: Array<{
   {
     type: 'pdf_viewer',
     icon: '📄',
-    name: 'Visualizzatore PDF / Dispensa',
-    desc: 'Leggi un PDF o slide del corso direttamente sotto la Chat AI mentre prendi appunti',
+    name: 'Visualizzatore PDF / Slide',
+    desc: 'Leggi PDF o dispense del corso affiancati agli appunti senza mai uscire dalla pagina',
+    defaultSlot: 'full_column'
+  },
+  {
+    type: 'calendar',
+    icon: '📅',
+    name: 'Calendario Lezioni & Studio',
+    desc: 'Agenda lezioni, compiti ed esami sincronizzata con Google Calendar',
     defaultSlot: 'right_bottom'
   },
   {
     type: 'image_viewer',
     icon: '🖼️',
-    name: 'Foto / Schema / Screenshot',
-    desc: 'Tieni visibile un diagramma, schema ER o screenshot (anche incollato con Ctrl+V) con zoom',
+    name: 'Schema / Screenshot',
+    desc: 'Tieni visibile un diagramma ER o screenshot (incolla con Ctrl+V) con zoom',
     defaultSlot: 'right_bottom'
   },
   {
     type: 'web_embed',
     icon: '🌐',
-    name: 'Sito Web in Home (Mini-Browser)',
-    desc: 'Apri Wikipedia, Desmos, DevDocs o qualsiasi sito direttamente in un riquadro',
+    name: 'Mini-Browser Web',
+    desc: 'Apri Wikipedia, Desmos o documentazione tecnica in un riquadro',
     defaultSlot: 'right_bottom'
   },
   {
     type: 'calculator',
     icon: '🧮',
-    name: 'Calcolatrice Scientifica Live',
-    desc: 'Esegui calcoli ed espressioni al volo e inseriscili con 1 clic negli appunti',
+    name: 'Calcolatrice Scientifica',
+    desc: 'Calcoli rapidi con inserimento diretto del risultato negli appunti',
     defaultSlot: 'left_bottom'
   },
   {
     type: 'pomodoro',
     icon: '⏱️',
     name: 'Timer Studio Pomodoro',
-    desc: 'Cronometro 25m Studio / 50m Focus / 5m Pausa per gestire le sessioni',
+    desc: 'Sessioni 25m Studio / 50m Focus / 5m Pausa per mantenere il ritmo',
     defaultSlot: 'left_bottom'
   },
   {
     type: 'quick_scratch',
     icon: '📌',
-    name: 'Post-it / Appunto Veloce',
-    desc: 'Blocco note adesivo sempre visibile per formule, codici o scadenze',
+    name: 'Post-it Rapido',
+    desc: 'Blocco note adesivo sempre visibile per formule o promemoria veloci',
     defaultSlot: 'left_bottom'
   }
 ];
@@ -422,6 +429,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'appearance' | 'theme_bars' | 'widgets' | 'shortcuts' | 'keys' | 'account'>(initialTab);
   const [recordingShortcutId, setRecordingShortcutId] = useState<string | null>(null);
+  const [preferredAddSlot, setPreferredAddSlot] = useState<WidgetSlot>('full_column');
 
   useEffect(() => {
     if (isOpen && initialTab) {
@@ -614,23 +622,357 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           ))}
         </div>
 
-        {/* TAB: LAYOUT MODULARE & WIDGET PERSONALIZZABILI */}
+        {/* TAB: LAYOUT MODULARE & WIDGET PERSONALIZZABILI (REDESIGNED & CLEAN) */}
         {activeTab === 'widgets' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {/* 1. ORDINE E INVERSIONE COLONNE */}
+            {/* SEZIONE 1: CATALOGO WIDGET CON SCELTA POSIZIONE CHIARA */}
             <div
               style={{
-                padding: '14px',
+                padding: '16px',
                 background: 'rgba(255, 255, 255, 0.03)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '12px'
+                border: '1px solid rgba(255, 255, 255, 0.09)',
+                borderRadius: '14px'
               }}
             >
-              <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#fff', marginBottom: '4px' }}>
-                🔀 Ordine e Disposizione delle Colonne (Inverti o Sposta Barre)
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#fff' }}>
+                    🧩 1. Scegli dove far apparire il Widget e clicca &quot;+ Aggiungi&quot;
+                  </div>
+                  <div style={{ fontSize: '0.74rem', color: '#94a3b8', marginTop: '2px' }}>
+                    Puoi aprire un PDF, il Calendario o una Calcolatrice in una colonna grande affiancata o sotto la Chat:
+                  </div>
+                </div>
               </div>
-              <p style={{ fontSize: '0.74rem', color: '#94a3b8', margin: '0 0 10px 0' }}>
-                Scegli dove posizionare la Barra Strumenti, gli Appunti e la Chat AI / Widget:
+
+              {/* Selettore Visivo Posizione (4 pillole chiare) */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))',
+                  gap: '7px',
+                  padding: '8px',
+                  background: 'rgba(0, 0, 0, 0.35)',
+                  borderRadius: '11px',
+                  border: '1px solid rgba(255, 255, 255, 0.07)',
+                  marginBottom: '14px'
+                }}
+              >
+                {(
+                  [
+                    {
+                      slot: 'full_column' as WidgetSlot,
+                      icon: '📐',
+                      label: 'Colonna Grande',
+                      sub: 'Affiancata agli appunti'
+                    },
+                    {
+                      slot: 'right_bottom' as WidgetSlot,
+                      icon: '📍',
+                      label: 'Sotto la Chat AI',
+                      sub: 'Divide la colonna destra'
+                    },
+                    {
+                      slot: 'center_bottom' as WidgetSlot,
+                      icon: '📝',
+                      label: 'Sotto gli Appunti',
+                      sub: 'In basso al centro'
+                    },
+                    {
+                      slot: 'left_bottom' as WidgetSlot,
+                      icon: '🛠️',
+                      label: 'Sotto gli Strumenti',
+                      sub: 'Colonna sinistra in basso'
+                    }
+                  ]
+                ).map(pos => {
+                  const active = preferredAddSlot === pos.slot;
+                  return (
+                    <button
+                      key={pos.slot}
+                      type="button"
+                      onClick={() => setPreferredAddSlot(pos.slot)}
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '8px',
+                        border: active
+                          ? '1.5px solid var(--accent-primary, #6366f1)'
+                          : '1px solid rgba(255, 255, 255, 0.08)',
+                        background: active ? 'rgba(99, 102, 241, 0.22)' : 'rgba(255, 255, 255, 0.02)',
+                        color: '#fff',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s'
+                      }}
+                    >
+                      <div style={{ fontSize: '0.77rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span>
+                          {pos.icon} {pos.label}
+                        </span>
+                        {active && <span style={{ color: '#38bdf8' }}>●</span>}
+                      </div>
+                      <div style={{ fontSize: '0.67rem', color: '#94a3b8', marginTop: '2px' }}>{pos.sub}</div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Griglia pulita dei Widget */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '10px' }}>
+                {WIDGET_CATALOG.map(cat => {
+                  const activeCount = customWidgets.filter(w => w.type === cat.type && w.enabled).length;
+                  return (
+                    <div
+                      key={cat.type}
+                      style={{
+                        padding: '12px',
+                        borderRadius: '11px',
+                        background: activeCount > 0 ? 'rgba(99, 102, 241, 0.09)' : 'rgba(255, 255, 255, 0.025)',
+                        border:
+                          activeCount > 0
+                            ? '1px solid rgba(99, 102, 241, 0.35)'
+                            : '1px solid rgba(255, 255, 255, 0.08)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: '10px'
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                          <div style={{ fontSize: '0.83rem', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontSize: '1.05rem' }}>{cat.icon}</span>
+                            <span>{cat.name}</span>
+                          </div>
+                          {activeCount > 0 && (
+                            <span
+                              style={{
+                                fontSize: '0.64rem',
+                                fontWeight: 700,
+                                padding: '2px 6px',
+                                borderRadius: '999px',
+                                background: 'rgba(16, 185, 129, 0.2)',
+                                color: '#34d399',
+                                border: '1px solid rgba(16, 185, 129, 0.35)'
+                              }}
+                            >
+                              ✓ Attivo ({activeCount})
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '0.71rem', color: '#94a3b8', marginTop: '4px', lineHeight: 1.35 }}>
+                          {cat.desc}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleAddWidget(cat.type, cat.name, preferredAddSlot)}
+                        style={{
+                          width: '100%',
+                          padding: '7px 10px',
+                          borderRadius: '8px',
+                          background: 'var(--accent-primary, #6366f1)',
+                          border: 'none',
+                          color: '#fff',
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '5px'
+                        }}
+                      >
+                        + Aggiungi in{' '}
+                        {preferredAddSlot === 'full_column'
+                          ? 'Colonna Grande'
+                          : preferredAddSlot === 'right_bottom'
+                          ? 'Sotto Chat'
+                          : preferredAddSlot === 'center_bottom'
+                          ? 'Sotto Appunti'
+                          : 'Sotto Strumenti'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* SEZIONE 2: WIDGET ATTIVI (GESTIONE RAPIDA) */}
+            <div
+              style={{
+                padding: '15px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '14px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#fff' }}>
+                  🎛️ 2. Widget Attualmente Aperti ({customWidgets.length})
+                </div>
+                {customWidgets.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUpdateCustomWidgets([]);
+                      showToast('Tutti i widget sono stati rimossi.');
+                    }}
+                    style={{
+                      background: 'rgba(244, 63, 94, 0.12)',
+                      border: '1px solid rgba(244, 63, 94, 0.3)',
+                      color: '#fb7185',
+                      borderRadius: '7px',
+                      padding: '4px 10px',
+                      fontSize: '0.71rem',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🗑️ Chiudi Tutti
+                  </button>
+                )}
+              </div>
+
+              {customWidgets.length === 0 ? (
+                <div
+                  style={{
+                    fontSize: '0.77rem',
+                    color: '#94a3b8',
+                    padding: '14px',
+                    textAlign: 'center',
+                    background: 'rgba(0,0,0,0.22)',
+                    borderRadius: '10px'
+                  }}
+                >
+                  Nessun widget attivo al momento. Scegli una posizione qui sopra e clicca <b>+ Aggiungi</b> su qualsiasi widget!
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {customWidgets.map(w => {
+                    const catMeta = WIDGET_CATALOG.find(c => c.type === w.type);
+                    return (
+                      <div
+                        key={w.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '8px',
+                          flexWrap: 'wrap',
+                          padding: '9px 12px',
+                          borderRadius: '10px',
+                          background: w.enabled ? 'rgba(99, 102, 241, 0.1)' : 'rgba(255,255,255,0.02)',
+                          border: w.enabled
+                            ? '1px solid rgba(99, 102, 241, 0.35)'
+                            : '1px solid rgba(255,255,255,0.07)'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: '170px' }}>
+                          <input
+                            type="checkbox"
+                            checked={w.enabled}
+                            onChange={e => handlePatchWidget(w.id, { enabled: e.target.checked })}
+                            style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                            title="Mostra / Nascondi widget"
+                          />
+                          <span style={{ fontSize: '1rem' }}>{catMeta?.icon || '🧩'}</span>
+                          <input
+                            type="text"
+                            value={w.title}
+                            onChange={e => handlePatchWidget(w.id, { title: e.target.value })}
+                            style={{
+                              background: 'rgba(0,0,0,0.35)',
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              borderRadius: '6px',
+                              color: '#fff',
+                              fontSize: '0.78rem',
+                              fontWeight: 600,
+                              padding: '4px 8px',
+                              width: '160px'
+                            }}
+                          />
+                        </div>
+
+                        <select
+                          value={w.slot}
+                          onChange={e => handlePatchWidget(w.id, { slot: e.target.value as WidgetSlot })}
+                          style={{
+                            background: 'rgba(0,0,0,0.45)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '6px',
+                            color: '#e2e8f0',
+                            fontSize: '0.74rem',
+                            padding: '5px 8px'
+                          }}
+                        >
+                          <option value="full_column">📐 Colonna Grande Dedicata</option>
+                          <option value="right_bottom">📍 Sotto la Chat AI</option>
+                          <option value="center_bottom">📝 Sotto gli Appunti</option>
+                          <option value="left_bottom">🛠️ Sotto gli Strumenti</option>
+                        </select>
+
+                        {w.type === 'pdf_viewer' && (
+                          <select
+                            value={w.materialId || ''}
+                            onChange={e => handlePatchWidget(w.id, { materialId: e.target.value, customUrl: '' })}
+                            style={{
+                              background: 'rgba(0,0,0,0.45)',
+                              border: '1px solid rgba(255,255,255,0.15)',
+                              borderRadius: '6px',
+                              color: '#e2e8f0',
+                              fontSize: '0.74rem',
+                              padding: '5px 8px',
+                              maxWidth: '175px'
+                            }}
+                          >
+                            <option value="">📂 Scegli PDF corso...</option>
+                            {materials.map(m => (
+                              <option key={String(m.id)} value={String(m.id)}>
+                                {m.name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteWidget(w.id)}
+                          style={{
+                            background: 'rgba(244, 63, 94, 0.14)',
+                            border: '1px solid rgba(244, 63, 94, 0.35)',
+                            color: '#fb7185',
+                            borderRadius: '6px',
+                            padding: '5px 10px',
+                            fontSize: '0.73rem',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          ✕ Rimuovi
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* SEZIONE 3: ORDINE COLONNE & PROPORZIONI */}
+            <div
+              style={{
+                padding: '15px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '14px'
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#fff', marginBottom: '4px' }}>
+                🔀 3. Ordine delle Colonne & Proporzioni Schermo
+              </div>
+              <p style={{ fontSize: '0.73rem', color: '#94a3b8', margin: '0 0 10px 0' }}>
+                Inverti la posizione di Strumenti, Appunti e Chat AI, oppure regola le larghezze:
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(175px, 1fr))', gap: '8px' }}>
                 {[
@@ -648,7 +990,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       style={{
                         padding: '9px 11px',
                         borderRadius: '9px',
-                        border: isSel ? '1.5px solid var(--accent-primary, #6366f1)' : '1px solid rgba(255,255,255,0.09)',
+                        border: isSel
+                          ? '1.5px solid var(--accent-primary, #6366f1)'
+                          : '1px solid rgba(255,255,255,0.09)',
                         background: isSel ? 'rgba(99, 102, 241, 0.16)' : 'rgba(255,255,255,0.02)',
                         color: '#fff',
                         textAlign: 'left',
@@ -665,11 +1009,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 })}
               </div>
 
-              {/* Sliders per Larghezze Colonne & Split Chat/PDF */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginTop: '14px', borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '12px' }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+                  gap: '12px',
+                  marginTop: '14px',
+                  borderTop: '1px solid rgba(255,255,255,0.07)',
+                  paddingTop: '12px'
+                }}
+              >
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '4px' }}>
-                    <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Larghezza Barra Strumenti</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', marginBottom: '4px' }}>
+                    <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Barra Strumenti</span>
                     <b style={{ color: '#38bdf8' }}>{leftColumnWidth}px</b>
                   </div>
                   <input
@@ -684,8 +1036,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
 
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '4px' }}>
-                    <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Larghezza Colonna Chat / PDF</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', marginBottom: '4px' }}>
+                    <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Colonna Chat AI</span>
                     <b style={{ color: '#38bdf8' }}>{rightColumnWidth}px</b>
                   </div>
                   <input
@@ -700,8 +1052,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
 
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '4px' }}>
-                    <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Larghezza Colonna Widget Grande</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', marginBottom: '4px' }}>
+                    <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Colonna Widget Grande</span>
                     <b style={{ color: '#38bdf8' }}>{widgetColumnWidth}px</b>
                   </div>
                   <input
@@ -716,9 +1068,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
 
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '4px' }}>
-                    <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Altezza Chat vs Widget Sotto</span>
-                    <b style={{ color: '#38bdf8' }}>Chat {chatSplitRatio}% / Widget {100 - chatSplitRatio}%</b>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', marginBottom: '4px' }}>
+                    <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Divisione Chat / Widget</span>
+                    <b style={{ color: '#38bdf8' }}>
+                      {chatSplitRatio}% / {100 - chatSplitRatio}%
+                    </b>
                   </div>
                   <input
                     type="range"
@@ -731,267 +1085,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   />
                 </div>
               </div>
-            </div>
-
-            {/* 2. AGGIUNGI NUOVO WIDGET NELLA SCHERMATA PRINCIPALE */}
-            <div
-              style={{
-                padding: '14px',
-                background: 'rgba(255, 255, 255, 0.03)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '12px'
-              }}
-            >
-              <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#fff', marginBottom: '4px' }}>
-                ➕ Aggiungi Widget nella Schermata Principale
-              </div>
-              <p style={{ fontSize: '0.74rem', color: '#94a3b8', margin: '0 0 10px 0' }}>
-                Clicca su un widget per aggiungerlo subito alla tua Home (es. sotto la Chat AI così diventa più corta e sotto vedi il PDF o un sito mentre scrivi!):
-              </p>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '8px' }}>
-                {WIDGET_CATALOG.map(cat => (
-                  <div
-                    key={cat.type}
-                    style={{
-                      padding: '10px 12px',
-                      borderRadius: '10px',
-                      background: 'rgba(255,255,255,0.025)',
-                      border: '1px solid rgba(255,255,255,0.08)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between',
-                      gap: '8px'
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span>{cat.icon}</span>
-                        <span>{cat.name}</span>
-                      </div>
-                      <div style={{ fontSize: '0.71rem', color: '#94a3b8', marginTop: '3px', lineHeight: 1.35 }}>
-                        {cat.desc}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                      <button
-                        type="button"
-                        onClick={() => handleAddWidget(cat.type, cat.name, 'full_column')}
-                        style={{
-                          width: '100%',
-                          padding: '6px 10px',
-                          borderRadius: '7px',
-                          background: 'linear-gradient(135deg, var(--accent-primary, #6366f1), #0284c7)',
-                          border: '1px solid rgba(56, 189, 248, 0.45)',
-                          color: '#fff',
-                          fontSize: '0.73rem',
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '5px'
-                        }}
-                        title="Aggiungi questo widget come una nuova colonna grande a tutta altezza affiancata agli appunti!"
-                      >
-                        📐 + Nuova Colonna Grande (Dedicata)
-                      </button>
-                      <div style={{ display: 'flex', gap: '5px' }}>
-                        <button
-                          type="button"
-                          onClick={() => handleAddWidget(cat.type, cat.name, 'right_bottom')}
-                          style={{
-                            flex: 1,
-                            padding: '5px 8px',
-                            borderRadius: '6px',
-                            background: 'rgba(99, 102, 241, 0.2)',
-                            border: '1px solid rgba(99, 102, 241, 0.45)',
-                            color: '#e0e7ff',
-                            fontSize: '0.7rem',
-                            fontWeight: 600,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          + Sotto Chat
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleAddWidget(cat.type, cat.name, 'center_bottom')}
-                          style={{
-                            padding: '5px 8px',
-                            borderRadius: '6px',
-                            background: 'rgba(255,255,255,0.08)',
-                            border: '1px solid rgba(255,255,255,0.14)',
-                            color: '#e2e8f0',
-                            fontSize: '0.7rem',
-                            fontWeight: 600,
-                            cursor: 'pointer'
-                          }}
-                          title="Aggiungi sotto l'area degli Appunti"
-                        >
-                          + Sotto Appunti
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleAddWidget(cat.type, cat.name, 'left_bottom')}
-                          style={{
-                            padding: '5px 8px',
-                            borderRadius: '6px',
-                            background: 'rgba(255,255,255,0.08)',
-                            border: '1px solid rgba(255,255,255,0.14)',
-                            color: '#e2e8f0',
-                            fontSize: '0.7rem',
-                            fontWeight: 600,
-                            cursor: 'pointer'
-                          }}
-                          title="Aggiungi nella colonna Strumenti"
-                        >
-                          + Sx
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 3. ELENCO WIDGET ATTIVI / CONFIGURATI */}
-            <div
-              style={{
-                padding: '14px',
-                background: 'rgba(255, 255, 255, 0.03)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '12px'
-              }}
-            >
-              <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#fff', marginBottom: '8px' }}>
-                🎛️ I Tuoi Widget Configurati ({customWidgets.length})
-              </div>
-              {customWidgets.length === 0 ? (
-                <div style={{ fontSize: '0.78rem', color: '#94a3b8', padding: '12px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
-                  Nessun widget aggiunto. Clicca su uno dei pulsanti qui sopra (es. <b>Visualizzatore PDF</b> o <b>Sito Web in Home</b>) per inserirlo nella schermata principale!
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {customWidgets.map(w => (
-                    <div
-                      key={w.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: '8px',
-                        flexWrap: 'wrap',
-                        padding: '9px 12px',
-                        borderRadius: '9px',
-                        background: w.enabled ? 'rgba(99, 102, 241, 0.1)' : 'rgba(255,255,255,0.02)',
-                        border: w.enabled ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid rgba(255,255,255,0.07)'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: '170px' }}>
-                        <input
-                          type="checkbox"
-                          checked={w.enabled}
-                          onChange={e => handlePatchWidget(w.id, { enabled: e.target.checked })}
-                          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                        />
-                        <input
-                          type="text"
-                          value={w.title}
-                          onChange={e => handlePatchWidget(w.id, { title: e.target.value })}
-                          style={{
-                            background: 'rgba(0,0,0,0.35)',
-                            border: '1px solid rgba(255,255,255,0.12)',
-                            borderRadius: '6px',
-                            color: '#fff',
-                            fontSize: '0.78rem',
-                            fontWeight: 600,
-                            padding: '4px 8px',
-                            width: '165px'
-                          }}
-                        />
-                      </div>
-
-                      {/* Posizione */}
-                      <select
-                        value={w.slot}
-                        onChange={e => handlePatchWidget(w.id, { slot: e.target.value as WidgetSlot })}
-                        style={{
-                          background: 'rgba(0,0,0,0.45)',
-                          border: '1px solid rgba(255,255,255,0.15)',
-                          borderRadius: '6px',
-                          color: '#e2e8f0',
-                          fontSize: '0.74rem',
-                          padding: '4px 8px'
-                        }}
-                      >
-                        <option value="full_column">📐 Nuova Colonna Grande (Dedicata)</option>
-                        <option value="right_bottom">📍 Sotto la Chat AI</option>
-                        <option value="center_bottom">📍 Sotto gli Appunti</option>
-                        <option value="left_bottom">📍 Sotto Barra Strumenti</option>
-                      </select>
-
-                      {/* Configurazione rapida URL o Materiale */}
-                      {w.type === 'pdf_viewer' && (
-                        <select
-                          value={w.materialId || ''}
-                          onChange={e => handlePatchWidget(w.id, { materialId: e.target.value })}
-                          style={{
-                            background: 'rgba(0,0,0,0.45)',
-                            border: '1px solid rgba(255,255,255,0.15)',
-                            borderRadius: '6px',
-                            color: '#e2e8f0',
-                            fontSize: '0.74rem',
-                            padding: '4px 8px',
-                            maxWidth: '170px'
-                          }}
-                        >
-                          <option value="">Scegli PDF corso...</option>
-                          {materials.map(m => (
-                            <option key={String(m.id)} value={String(m.id)}>
-                              {m.name}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-
-                      {w.type === 'web_embed' && (
-                        <input
-                          type="text"
-                          placeholder="https://..."
-                          value={w.customUrl || ''}
-                          onChange={e => handlePatchWidget(w.id, { customUrl: e.target.value })}
-                          style={{
-                            background: 'rgba(0,0,0,0.45)',
-                            border: '1px solid rgba(255,255,255,0.15)',
-                            borderRadius: '6px',
-                            color: '#e2e8f0',
-                            fontSize: '0.74rem',
-                            padding: '4px 8px',
-                            width: '150px'
-                          }}
-                        />
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteWidget(w.id)}
-                        style={{
-                          background: 'rgba(244, 63, 94, 0.14)',
-                          border: '1px solid rgba(244, 63, 94, 0.35)',
-                          color: '#fb7185',
-                          borderRadius: '6px',
-                          padding: '4px 9px',
-                          fontSize: '0.73rem',
-                          fontWeight: 600,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        🗑️ Rimuovi
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
 
             {/* 4. ALTRE OPZIONI BARRE & METEO */}

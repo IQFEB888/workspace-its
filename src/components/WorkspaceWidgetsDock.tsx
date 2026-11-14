@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { CustomWidget, MaterialItem, WidgetSlot } from '../types';
+import { CalendarEventItem, CustomWidget, MaterialItem, SubjectItem, WidgetSlot } from '../types';
 import { getFileFromIndexedDB, saveFileToIndexedDB } from '../services/fileStorage';
 import { evaluateMathExpression, compressImageFromBlob } from '../utils/editorTools';
+import { StudyCalendarPanel } from './StudyCalendarPanel';
 
 interface WorkspaceWidgetsDockProps {
   slot: WidgetSlot;
@@ -15,29 +16,66 @@ interface WorkspaceWidgetsDockProps {
   columnWidth?: number;
   onChangeColumnWidth?: (w: number) => void;
   showToast: (msg: string, type?: 'info' | 'error') => void;
+  calendarEvents?: CalendarEventItem[];
+  subjects?: SubjectItem[];
+  activeSubject?: string;
+  isSyncingGoogleCalendar?: boolean;
+  isGoogleCalendarConnected?: boolean;
+  onAddCalendarEvent?: (event: Omit<CalendarEventItem, 'id'>, alsoPushToGoogle: boolean) => Promise<void> | void;
+  onToggleCalendarComplete?: (eventId: string) => void;
+  onDeleteCalendarEvent?: (event: CalendarEventItem) => void;
+  onSyncGoogleCalendar?: () => Promise<void> | void;
 }
 
-function extractDriveId(url: string): string | null {
-  if (!url) return null;
-  const m1 = url.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/);
-  if (m1 && m1[1]) return m1[1];
-  const m2 = url.match(/\/d\/([a-zA-Z0-9_-]{20,})/);
-  if (m2 && m2[1]) return m2[1];
-  const m3 = url.match(/[?&]id=([a-zA-Z0-9_-]{20,})/);
-  if (m3 && m3[1]) return m3[1];
+function extractDriveId(url: string, materialId?: string | number): string | null {
+  if (url) {
+    const m1 = url.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/);
+    if (m1 && m1[1]) return m1[1];
+    const m2 = url.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
+    if (m2 && m2[1]) return m2[1];
+    const m3 = url.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+    if (m3 && m3[1]) return m3[1];
+  }
+  if (materialId && String(materialId).startsWith('gdrive_')) {
+    return String(materialId).replace(/^gdrive_/, '');
+  }
   return null;
 }
 
-function base64ToBlobUrl(base64Data: string, mimeType = 'application/pdf'): string {
+function toSafeEmbedPdfUrl(rawUrl: string, materialId?: string | number): string {
+  if (!rawUrl || rawUrl === 'local_storage') return '';
+  const dId = extractDriveId(rawUrl, materialId);
+  if (dId) {
+    return `https://drive.google.com/file/d/${dId}/preview`;
+  }
+  // If it's a Google Docs/Drive URL with /export or /view, force /preview so it never downloads
+  if (rawUrl.includes('drive.google.com') || rawUrl.includes('docs.google.com')) {
+    return rawUrl
+      .replace(/\/export(\?.*)?$/, '/preview')
+      .replace(/\/view(\?.*)?$/, '/preview')
+      .replace(/\/edit(\?.*)?$/, '/preview');
+  }
+  // If it's an external URL with download parameters (e.g. export=download), use embedded viewer so it renders inline instead of downloading
+  if (rawUrl.startsWith('http') && (rawUrl.includes('export=download') || rawUrl.includes('download=1') || rawUrl.includes('disposition=attachment'))) {
+    return `https://docs.google.com/viewer?url=${encodeURIComponent(rawUrl)}&embedded=true`;
+  }
+  return rawUrl;
+}
+
+function base64ToBlobUrl(base64Data: string, forcePdf = true): string {
   try {
     const parts = base64Data.split(';base64,');
-    const contentType = parts.length > 1 ? parts[0].replace('data:', '') : mimeType;
+    const rawMime = parts.length > 1 ? parts[0].replace('data:', '').trim() : '';
+    const contentType =
+      forcePdf || !rawMime || rawMime === 'application/octet-stream' || rawMime === 'binary/octet-stream'
+        ? 'application/pdf'
+        : rawMime;
     const raw = window.atob(parts.length > 1 ? parts[1] : parts[0]);
     const uInt8Array = new Uint8Array(raw.length);
     for (let i = 0; i < raw.length; ++i) {
       uInt8Array[i] = raw.charCodeAt(i);
     }
-    const blob = new Blob([uInt8Array], { type: contentType || 'application/pdf' });
+    const blob = new Blob([uInt8Array], { type: contentType });
     return URL.createObjectURL(blob);
   } catch {
     return base64Data;
@@ -62,7 +100,16 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
   onInsertTextIntoNotes,
   columnWidth = 420,
   onChangeColumnWidth,
-  showToast
+  showToast,
+  calendarEvents = [],
+  subjects = [],
+  activeSubject = 'Database',
+  isSyncingGoogleCalendar = false,
+  isGoogleCalendarConnected = false,
+  onAddCalendarEvent,
+  onToggleCalendarComplete,
+  onDeleteCalendarEvent,
+  onSyncGoogleCalendar
 }) => {
   const slotWidgets = widgets.filter(w => w.enabled && w.slot === slot);
   const [activeWidgetId, setActiveWidgetId] = useState<string>('');
@@ -104,53 +151,69 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
   // Resolve PDF or Material URL when activeWidget is pdf_viewer
   useEffect(() => {
     let isMounted = true;
+    let createdBlobUrl: string | null = null;
+
     const resolvePdf = async () => {
       if (!activeWidget || activeWidget.type !== 'pdf_viewer') return;
       setLoadingPdf(true);
       try {
-        // Check if customUrl points to a direct local PDF uploaded inside the widget
-        if (activeWidget.customUrl && activeWidget.customUrl.startsWith('local_widget_pdf:')) {
-          const idbKey = activeWidget.customUrl.replace('local_widget_pdf:', '');
-          const localData = await getFileFromIndexedDB(idbKey);
-          if (localData && typeof localData === 'string' && localData.startsWith('data:')) {
-            const url = base64ToBlobUrl(localData, 'application/pdf');
-            if (isMounted) setResolvedPdfUrl(url);
-            return;
-          }
-        }
-
-        // Check if linked to a course material (or default to first PDF material if none chosen yet)
+        // 1. Check if a material from the dropdown is selected (or default to first PDF material if no customUrl is set)
         const targetMat = activeWidget.materialId
           ? materials.find(m => String(m.id) === String(activeWidget.materialId))
           : !activeWidget.customUrl
           ? materials.find(m => m.fileType === 'pdf' || m.url.includes('drive.google.com')) || materials[0]
           : undefined;
 
-        if (targetMat && (!activeWidget.customUrl || activeWidget.materialId)) {
-          const dId = extractDriveId(targetMat.url);
+        if (targetMat) {
+          const dId = extractDriveId(targetMat.url, targetMat.id);
           if (dId) {
             if (isMounted) setResolvedPdfUrl(`https://drive.google.com/file/d/${dId}/preview`);
-          } else if (targetMat.fileData && targetMat.fileData.startsWith('data:')) {
-            const url = base64ToBlobUrl(targetMat.fileData, targetMat.mimeType || 'application/pdf');
+            return;
+          }
+          if (targetMat.fileData && targetMat.fileData.startsWith('data:')) {
+            const url = base64ToBlobUrl(targetMat.fileData, true);
+            createdBlobUrl = url;
             if (isMounted) setResolvedPdfUrl(url);
-          } else {
-            const localData = await getFileFromIndexedDB(String(targetMat.id));
-            if (localData && typeof localData === 'string' && localData.startsWith('data:')) {
-              const url = base64ToBlobUrl(localData, targetMat.mimeType || 'application/pdf');
+            return;
+          }
+          const localData = await getFileFromIndexedDB(String(targetMat.id));
+          if (localData) {
+            if (typeof localData === 'string' && localData.startsWith('data:')) {
+              const url = base64ToBlobUrl(localData, true);
+              createdBlobUrl = url;
               if (isMounted) setResolvedPdfUrl(url);
-            } else if (targetMat.url && targetMat.url !== 'local_storage') {
-              if (isMounted) setResolvedPdfUrl(targetMat.url);
-            } else {
-              if (isMounted) setResolvedPdfUrl('');
+              return;
+            } else if (localData instanceof Blob) {
+              const pdfBlob = new Blob([localData], { type: 'application/pdf' });
+              const url = URL.createObjectURL(pdfBlob);
+              createdBlobUrl = url;
+              if (isMounted) setResolvedPdfUrl(url);
+              return;
             }
           }
-        } else if (activeWidget.customUrl) {
-          const dId = extractDriveId(activeWidget.customUrl);
-          if (dId) {
-            if (isMounted) setResolvedPdfUrl(`https://drive.google.com/file/d/${dId}/preview`);
-          } else {
-            if (isMounted) setResolvedPdfUrl(activeWidget.customUrl);
+          if (targetMat.url && targetMat.url !== 'local_storage') {
+            if (isMounted) setResolvedPdfUrl(toSafeEmbedPdfUrl(targetMat.url, targetMat.id));
+            return;
           }
+          if (isMounted) setResolvedPdfUrl('');
+          return;
+        }
+
+        // 2. Check if customUrl points to a direct local PDF uploaded inside the widget
+        if (activeWidget.customUrl && activeWidget.customUrl.startsWith('local_widget_pdf:')) {
+          const idbKey = activeWidget.customUrl.replace('local_widget_pdf:', '');
+          const localData = await getFileFromIndexedDB(idbKey);
+          if (localData && typeof localData === 'string' && localData.startsWith('data:')) {
+            const url = base64ToBlobUrl(localData, true);
+            createdBlobUrl = url;
+            if (isMounted) setResolvedPdfUrl(url);
+            return;
+          }
+        }
+
+        // 3. Direct custom URL
+        if (activeWidget.customUrl) {
+          if (isMounted) setResolvedPdfUrl(toSafeEmbedPdfUrl(activeWidget.customUrl));
         } else {
           if (isMounted) setResolvedPdfUrl('');
         }
@@ -161,8 +224,11 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
     resolvePdf();
     return () => {
       isMounted = false;
+      if (createdBlobUrl && createdBlobUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(createdBlobUrl);
+      }
     };
-  }, [activeWidget, materials]);
+  }, [activeWidget?.id, activeWidget?.type, activeWidget?.materialId, activeWidget?.customUrl, materials]);
 
   // Pomodoro timer interval
   useEffect(() => {
@@ -311,6 +377,8 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
                 ? '🧮'
                 : w.type === 'pomodoro'
                 ? '⏱️'
+                : w.type === 'calendar'
+                ? '📅'
                 : '📌';
             return (
               <button
@@ -451,6 +519,7 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
               <div className="widget-empty-state">Caricamento documento PDF...</div>
             ) : resolvedPdfUrl ? (
               <iframe
+                key={resolvedPdfUrl}
                 src={resolvedPdfUrl}
                 title={activeWidget.title}
                 className="widget-iframe"
@@ -762,6 +831,32 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
             value={activeWidget.scratchText || ''}
             onChange={e => onUpdateWidget({ ...activeWidget, scratchText: e.target.value })}
           />
+        )}
+
+        {/* 7. STUDY & LESSONS CALENDAR WIDGET */}
+        {activeWidget.type === 'calendar' && (
+          <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+            <StudyCalendarPanel
+              events={calendarEvents}
+              subjects={subjects}
+              activeSubject={activeSubject}
+              isSyncingGoogle={isSyncingGoogleCalendar}
+              isGoogleCalendarConnected={isGoogleCalendarConnected}
+              onAddEvent={async (ev, push) => {
+                if (onAddCalendarEvent) await onAddCalendarEvent(ev, push);
+              }}
+              onToggleComplete={id => {
+                if (onToggleCalendarComplete) onToggleCalendarComplete(id);
+              }}
+              onDeleteEvent={ev => {
+                if (onDeleteCalendarEvent) onDeleteCalendarEvent(ev);
+              }}
+              onSyncGoogleCalendar={async () => {
+                if (onSyncGoogleCalendar) await onSyncGoogleCalendar();
+              }}
+              compact={true}
+            />
+          </div>
         )}
       </div>
     </div>

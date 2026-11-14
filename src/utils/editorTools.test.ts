@@ -12,7 +12,8 @@ import {
   removeColorFromPalette,
   buildInteractiveTableHtml,
   sanitizeAndUpgradeNoteHtml,
-  buildSvgElementString
+  buildSvgElementString,
+  parseAiNoteEditIntent
 } from './editorTools';
 
 test('evaluateMathExpression evaluates direct arithmetic, functions, and named formulas', () => {
@@ -75,6 +76,8 @@ test('computeContextMenuPosition flips upwards and leftwards when near viewport 
 test('buildHighlightedCodeBlockHtml and buildInteractiveFormulaBoxHtml generate interactive inline boxes', () => {
   const codeHtml = buildHighlightedCodeBlockHtml('const x = 10;', 'javascript', 'test_code_1');
   assert.ok(codeHtml.includes('note-code-lang-select'));
+  assert.ok(codeHtml.includes('note-code-run-btn'));
+  assert.ok(codeHtml.includes('note-code-output'));
   assert.ok(codeHtml.includes('value="python"'));
   assert.ok(codeHtml.includes('tok-kw'));
 
@@ -99,12 +102,18 @@ test('addColorToPalette and removeColorFromPalette manage custom and default col
   assert.deepEqual(afterRemove, ['#facc15', '#ff0055']);
 });
 
-test('sanitizeAndUpgradeNoteHtml removes stuck legacy top code block', () => {
+test('sanitizeAndUpgradeNoteHtml removes stuck legacy top code block and upgrades v2.6 code blocks', () => {
   const legacyTop =
     '<div class="note-code-block" data-lang="javascript"><div class="note-code-header">JS</div><pre class="note-code-pre"><code>old();</code></pre></div><h1>Benvenuto</h1>';
   const res = sanitizeAndUpgradeNoteHtml(legacyTop);
   assert.equal(res.changed, true);
   assert.equal(res.cleanedHtml, '<h1>Benvenuto</h1>');
+
+  const midBlock =
+    '<h1>Titolo</h1><div class="note-code-block"><div class="note-code-actions"><button class="note-code-copy-btn">Copia</button><button class="note-code-del-btn">X</button></div><pre><code>1</code></pre></div>';
+  const upg = sanitizeAndUpgradeNoteHtml(midBlock);
+  assert.equal(upg.changed, true);
+  assert.ok(upg.cleanedHtml.includes('note-code-run-btn'));
 });
 
 test('buildInteractiveTableHtml and buildSvgElementString generate valid HTML/SVG', () => {
@@ -116,4 +125,20 @@ test('buildInteractiveTableHtml and buildSvgElementString generate valid HTML/SV
   assert.ok(arrowSvg.includes('<path'));
   assert.ok(arrowSvg.includes('stroke="#38bdf8"'));
 });
+
+test('parseAiNoteEditIntent detects general and topic-specific highlight/edit commands', () => {
+  const general = parseAiNoteEditIntent('evidenzia le robe chiave negli appunti');
+  assert.equal(general.isDirectNoteEdit, true);
+  assert.equal(general.mode, 'highlight');
+  assert.equal(general.targetTopic, null);
+
+  const topicSpecific = parseAiNoteEditIntent('evidenzia le parti importanti della parte dove parlo delle select');
+  assert.equal(topicSpecific.isDirectNoteEdit, true);
+  assert.equal(topicSpecific.mode, 'highlight');
+  assert.equal(topicSpecific.targetTopic, 'select');
+
+  const normalQuestion = parseAiNoteEditIntent('spiegami cos e una inner join in sql');
+  assert.equal(normalQuestion.isDirectNoteEdit, false);
+});
+
 

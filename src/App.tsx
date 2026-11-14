@@ -79,14 +79,21 @@ function extractGoogleDriveId(url: string): string | null {
 function base64ToBlobUrl(base64Data: string, mimeType = 'application/pdf'): string {
   try {
     const parts = base64Data.split(';base64,');
-    const contentType = parts.length > 1 ? parts[0].replace('data:', '') : mimeType;
+    const rawMime = parts.length > 1 ? parts[0].replace('data:', '').trim() : mimeType;
+    const contentType =
+      mimeType === 'application/pdf' ||
+      !rawMime ||
+      rawMime === 'application/octet-stream' ||
+      rawMime === 'binary/octet-stream'
+        ? 'application/pdf'
+        : rawMime;
     const raw = window.atob(parts.length > 1 ? parts[1] : parts[0]);
     const rawLength = raw.length;
     const uInt8Array = new Uint8Array(rawLength);
     for (let i = 0; i < rawLength; ++i) {
       uInt8Array[i] = raw.charCodeAt(i);
     }
-    const blob = new Blob([uInt8Array], { type: contentType || 'application/pdf' });
+    const blob = new Blob([uInt8Array], { type: contentType });
     return URL.createObjectURL(blob);
   } catch (e) {
     return base64Data;
