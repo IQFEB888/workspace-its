@@ -15,6 +15,7 @@ interface StudyCalendarPanelProps {
   onToggleComplete: (eventId: string) => void;
   onDeleteEvent: (event: CalendarEventItem) => void;
   onSyncGoogleCalendar: () => Promise<void> | void;
+  onOpenFullCalendar?: () => void;
   compact?: boolean;
 }
 

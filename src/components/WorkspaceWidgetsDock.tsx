@@ -25,6 +25,7 @@ interface WorkspaceWidgetsDockProps {
   onToggleCalendarComplete?: (eventId: string) => void;
   onDeleteCalendarEvent?: (event: CalendarEventItem) => void;
   onSyncGoogleCalendar?: () => Promise<void> | void;
+  onOpenFullCalendar?: () => void;
 }
 
 function extractDriveId(url: string, materialId?: string | number): string | null {
@@ -109,7 +110,8 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
   onAddCalendarEvent,
   onToggleCalendarComplete,
   onDeleteCalendarEvent,
-  onSyncGoogleCalendar
+  onSyncGoogleCalendar,
+  onOpenFullCalendar
 }) => {
   const slotWidgets = widgets.filter(w => w.enabled && w.slot === slot);
   const [activeWidgetId, setActiveWidgetId] = useState<string>('');
@@ -854,6 +856,7 @@ export const WorkspaceWidgetsDock: React.FC<WorkspaceWidgetsDockProps> = ({
               onSyncGoogleCalendar={async () => {
                 if (onSyncGoogleCalendar) await onSyncGoogleCalendar();
               }}
+              onOpenFullCalendar={onOpenFullCalendar}
               compact={true}
             />
           </div>

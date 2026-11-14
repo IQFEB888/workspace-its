@@ -65,6 +65,7 @@ export interface CalendarEventItem {
   googleEventId?: string;
   color?: string;
   createdAt?: string;
+  updatedAt?: number;
 }
 
 export interface CustomWidget {

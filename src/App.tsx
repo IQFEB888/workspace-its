@@ -21,13 +21,15 @@ import {
   ColumnLayoutPreset,
   ShortcutActionId,
   ImageLayoutMode,
-  DrawingToolType
+  DrawingToolType,
+  CalendarEventItem
 } from './types';
 import { WorkspaceService, DEFAULT_SUBJECTS, DEFAULT_PAGES } from './services/workspaceService';
 import { saveFileToIndexedDB, getFileFromIndexedDB, deleteFileFromIndexedDB } from './services/fileStorage';
 import { WeatherModal } from './components/WeatherModal';
 import { SettingsModal, BACKGROUND_THEMES, ACCENT_THEMES, PANEL_THEMES } from './components/SettingsModal';
 import { WorkspaceWidgetsDock } from './components/WorkspaceWidgetsDock';
+import { StudyCalendarPanel } from './components/StudyCalendarPanel';
 import {
   APP_VERSION,
   CODE_LANGUAGES,
@@ -52,9 +54,17 @@ import {
   getSelectionCharOffsetsWithin,
   setCaretCharOffsetWithin,
   computeContextMenuPosition,
-  compressImageFromBlob
+  compressImageFromBlob,
+  parseAiNoteEditIntent
 } from './utils/editorTools';
 import { uploadNoteToDrive } from './services/googleDriveService';
+import { executeCodeBlock } from './services/codeRunnerService';
+import {
+  fetchGoogleCalendarEvents,
+  createGoogleCalendarEvent,
+  deleteGoogleCalendarEvent
+} from './services/googleCalendarService';
+import { callGeminiWithRotation } from './services/geminiService';
 import { usePWAInstall } from './hooks/usePWAInstall';
 import {
   FullWeatherData,
@@ -125,7 +135,12 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [isChatCollapsed, setIsChatCollapsed] = useState<boolean>(false);
   const [isNotesMaximized, setIsNotesMaximized] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'notes' | 'materials'>('notes');
+  const [activeTab, setActiveTab] = useState<'notes' | 'materials' | 'calendar'>('notes');
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEventItem[]>(() =>
+    WorkspaceService.getLocalCalendarEvents()
+  );
+  const [isSyncingGoogleCalendar, setIsSyncingGoogleCalendar] = useState<boolean>(false);
+  const [aiUndoHtmlSnapshot, setAiUndoHtmlSnapshot] = useState<string | null>(null);
   const [fontFamily, setFontFamily] = useState<string>('plus-jakarta');
   const [fontSize, setFontSize] = useState<number>(15);
   const [toolbarPxSize, setToolbarPxSize] = useState<number>(15);
@@ -761,6 +776,10 @@ export default function App() {
           onKeys: (keys, idx) => {
             setApiKeys(keys);
             setSelectedKeyIndex(idx);
+          },
+          onCalendarEvents: evs => {
+            setCalendarEvents(evs);
+            WorkspaceService.saveLocalCalendarEvents(evs);
           }
         });
 
@@ -790,6 +809,160 @@ export default function App() {
       unsubscribe();
     };
   }, [openCustomDialog, showToast]);
+
+  // ==========================================
+  // CUSTOM STUDY CALENDAR & GOOGLE CALENDAR SYNC HANDLERS
+  // ==========================================
+  const handleAuthorizeGoogleCalendar = async (): Promise<string | null> => {
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.addScope('https://www.googleapis.com/auth/drive.file');
+      provider.addScope('https://www.googleapis.com/auth/calendar.events');
+      provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
+      provider.setCustomParameters({ prompt: 'consent' });
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        setGoogleOAuthAccessToken(credential.accessToken);
+        showToast('📅 Google Calendar collegato con successo!');
+        return credential.accessToken;
+      }
+      showToast('Token Google Calendar non ricevuto.', 'error');
+      return null;
+    } catch (err: any) {
+      showToast(`Autorizzazione Google Calendar annullata: ${err.message || ''}`, 'error');
+      return null;
+    }
+  };
+
+  const handleSyncGoogleCalendar = async () => {
+    let token = googleOAuthAccessToken;
+    if (!token) {
+      token = await handleAuthorizeGoogleCalendar();
+      if (!token) return;
+    }
+    setIsSyncingGoogleCalendar(true);
+    try {
+      const now = new Date();
+      const minDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const maxDate = new Date(now.getFullYear(), now.getMonth() + 4, 0);
+      const gEvents = await fetchGoogleCalendarEvents(token, minDate.toISOString(), maxDate.toISOString());
+
+      setCalendarEvents(prev => {
+        const localOnly = prev.filter(e => !e.googleEventId);
+        const byGoogleId = new Map<string, CalendarEventItem>();
+        prev.forEach(e => {
+          if (e.googleEventId) byGoogleId.set(e.googleEventId, e);
+        });
+
+        const mergedGoogle = gEvents.map(ge => {
+          const existing = ge.googleEventId ? byGoogleId.get(ge.googleEventId) : undefined;
+          return existing
+            ? { ...ge, id: existing.id, completed: existing.completed, subject: existing.subject || ge.subject }
+            : ge;
+        });
+
+        const nextList = [...localOnly, ...mergedGoogle].sort((a, b) =>
+          (a.date + (a.startTime || '')).localeCompare(b.date + (b.startTime || ''))
+        );
+        WorkspaceService.saveLocalCalendarEvents(nextList);
+        if (currentUser) {
+          mergedGoogle.forEach(ev => {
+            WorkspaceService.saveCalendarEventToCloud(currentUser.uid, ev).catch(() => {});
+          });
+        }
+        return nextList;
+      });
+      showToast(`📅 Sincronizzati ${gEvents.length} impegni/lezioni da Google Calendar!`);
+    } catch (err: any) {
+      showToast(`Errore sync Google Calendar: ${err.message || 'Riprova riautorizzando Google.'}`, 'error');
+      setGoogleOAuthAccessToken(null);
+    } finally {
+      setIsSyncingGoogleCalendar(false);
+    }
+  };
+
+  const handleAddCalendarEvent = async (
+    newEvData: Omit<CalendarEventItem, 'id' | 'updatedAt'>,
+    pushToGoogle: boolean
+  ) => {
+    const id = 'cal_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+    let googleEventId: string | undefined;
+
+    if (pushToGoogle) {
+      let token = googleOAuthAccessToken;
+      if (!token) {
+        token = await handleAuthorizeGoogleCalendar();
+      }
+      if (token) {
+        try {
+          const createdId = await createGoogleCalendarEvent(token, { ...newEvData, id });
+          if (createdId) {
+            googleEventId = createdId;
+          }
+        } catch (err: any) {
+          showToast(`Salvato nel calendario locale (errore Google Calendar: ${err.message})`, 'error');
+        }
+      }
+    }
+
+    const fullEvent: CalendarEventItem = {
+      ...newEvData,
+      id,
+      googleEventId,
+      updatedAt: Date.now()
+    };
+
+    setCalendarEvents(prev => {
+      const next = [...prev, fullEvent].sort((a, b) =>
+        (a.date + (a.startTime || '')).localeCompare(b.date + (b.startTime || ''))
+      );
+      WorkspaceService.saveLocalCalendarEvents(next);
+      return next;
+    });
+
+    if (currentUser) {
+      await WorkspaceService.saveCalendarEventToCloud(currentUser.uid, fullEvent);
+    }
+    showToast(
+      googleEventId
+        ? `📅 "${fullEvent.title}" aggiunto e sincronizzato su Google Calendar!`
+        : `📅 "${fullEvent.title}" aggiunto al Calendario Studio!`
+    );
+  };
+
+  const handleToggleCalendarComplete = async (eventId: string) => {
+    let updatedItem: CalendarEventItem | null = null;
+    setCalendarEvents(prev => {
+      const next = prev.map(ev => {
+        if (ev.id === eventId) {
+          updatedItem = { ...ev, completed: !ev.completed, updatedAt: Date.now() };
+          return updatedItem;
+        }
+        return ev;
+      });
+      WorkspaceService.saveLocalCalendarEvents(next);
+      return next;
+    });
+    if (currentUser && updatedItem) {
+      await WorkspaceService.saveCalendarEventToCloud(currentUser.uid, updatedItem);
+    }
+  };
+
+  const handleDeleteCalendarEvent = async (ev: CalendarEventItem) => {
+    setCalendarEvents(prev => {
+      const next = prev.filter(item => item.id !== ev.id);
+      WorkspaceService.saveLocalCalendarEvents(next);
+      return next;
+    });
+    if (currentUser) {
+      await WorkspaceService.deleteCalendarEventFromCloud(currentUser.uid, ev.id);
+    }
+    if (ev.googleEventId && googleOAuthAccessToken) {
+      await deleteGoogleCalendarEvent(googleOAuthAccessToken, ev.googleEventId);
+    }
+    showToast('🗑️ Evento rimosso dal calendario.');
+  };
 
   // Subscribe to user's joined rooms
   useEffect(() => {
@@ -2038,13 +2211,112 @@ export default function App() {
     showToast('∑ Formula inserita negli appunti!');
   };
 
-  // Delegate click inside #notes-area (Copy code, delete code block, delete formula box, language dropdown focus)
-  const handleNotesAreaClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  // Delegate click inside #notes-area (Run code, copy code, delete code block, delete formula box, language dropdown focus)
+  const handleNotesAreaClick = async (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
 
     // Allow interacting with the language <select> inside a code block without contenteditable stealing focus
     if (target.closest('.note-code-lang-select')) {
       e.stopPropagation();
+      return;
+    }
+
+    // Close code output console button
+    const closeOutputBtn = target.closest('.note-code-output-close') as HTMLElement | null;
+    if (closeOutputBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const outputBox = closeOutputBtn.closest('.note-code-output') as HTMLElement | null;
+      if (outputBox) {
+        outputBox.style.display = 'none';
+        outputBox.innerHTML = '';
+        handleEditorInput();
+      }
+      return;
+    }
+
+    // Run code block button (▶ Esegui)
+    const runBtn = target.closest('.note-code-run-btn') as HTMLButtonElement | null;
+    if (runBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const codeBlock = runBtn.closest('.note-code-block') as HTMLElement | null;
+      if (!codeBlock) return;
+      const lang = codeBlock.getAttribute('data-lang') || 'javascript';
+      const codeEl = codeBlock.querySelector('code');
+      const rawCode = codeEl?.textContent || '';
+      if (!rawCode.trim()) {
+        showToast('Scrivi prima del codice dentro il blocco per eseguirlo!', 'error');
+        return;
+      }
+
+      let outputBox = codeBlock.querySelector('.note-code-output') as HTMLElement | null;
+      if (!outputBox) {
+        outputBox = document.createElement('div');
+        outputBox.className = 'note-code-output';
+        outputBox.setAttribute('contenteditable', 'false');
+        codeBlock.appendChild(outputBox);
+      }
+
+      const prevBtnText = runBtn.innerText;
+      runBtn.innerText = '⏳ Esecuzione...';
+      runBtn.disabled = true;
+      outputBox.style.display = 'block';
+      outputBox.innerHTML = `<div class="note-code-output-header"><span class="note-code-output-badge">⚙️ Esecuzione ${lang.toUpperCase()} in corso...</span></div>`;
+
+      const orderedKeys: string[] = [];
+      if (apiKeys[selectedKeyIndex]) orderedKeys.push(apiKeys[selectedKeyIndex]);
+      apiKeys.forEach((k, idx) => {
+        if (idx !== selectedKeyIndex && k.trim()) orderedKeys.push(k.trim());
+      });
+
+      try {
+        const res = await executeCodeBlock(rawCode, lang, orderedKeys, selectedModel);
+        const escapeOut = (str: string) =>
+          str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        const isOk = !res.stderr;
+        const badgeClass = isOk ? 'note-code-output-badge' : 'note-code-output-badge is-error';
+        const statusIcon = isOk ? '✓' : '⚠️';
+
+        let bodyHtml = '';
+        const previewHtml = res.htmlContent || res.stdout;
+        if (res.isHtmlPreview && previewHtml) {
+          bodyHtml = `<div style="margin-top:6px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.15);background:#fff;"><iframe sandbox="allow-scripts" style="width:100%;height:180px;border:none;display:block;" srcdoc="${previewHtml
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')}"></iframe></div>`;
+        } else {
+          if (res.stdout) {
+            bodyHtml += `<pre class="note-code-output-stdout">${escapeOut(res.stdout)}</pre>`;
+          }
+          if (res.stderr) {
+            bodyHtml += `<pre class="note-code-output-stderr">${escapeOut(res.stderr)}</pre>`;
+          }
+          if (!res.stdout && !res.stderr) {
+            bodyHtml += `<pre class="note-code-output-stdout" style="color:#94a3b8;">(Nessun output stampato)</pre>`;
+          }
+        }
+
+        outputBox.innerHTML = `
+          <div class="note-code-output-header">
+            <span class="${badgeClass}">${statusIcon} ${escapeOut(res.engineLabel)} • ${res.durationMs}ms</span>
+            <button type="button" class="note-code-output-close" title="Chiudi console output">✕ Chiudi</button>
+          </div>
+          ${bodyHtml}
+        `;
+        handleEditorInput();
+      } catch (err: any) {
+        outputBox.innerHTML = `
+          <div class="note-code-output-header">
+            <span class="note-code-output-badge is-error">⚠️ Errore Esecuzione</span>
+            <button type="button" class="note-code-output-close">✕ Chiudi</button>
+          </div>
+          <pre class="note-code-output-stderr">${err?.message || 'Errore imprevisto'}</pre>
+        `;
+      } finally {
+        runBtn.innerText = prevBtnText || '▶ Esegui';
+        runBtn.disabled = false;
+      }
       return;
     }
 
@@ -3395,6 +3667,20 @@ export default function App() {
       return;
     }
 
+    // Check if the user asked in chat to directly highlight or edit the notes (general or topic-specific)
+    if (!customPrompt && !isAnalysis && !attachedFile && userText) {
+      const editIntent = parseAiNoteEditIntent(userText);
+      if (editIntent.isDirectNoteEdit) {
+        setChatInput('');
+        await handleAiHighlightOrEditNotes({
+          mode: editIntent.mode === 'edit' ? 'edit' : 'highlight',
+          instruction: userText,
+          targetTopic: editIntent.targetTopic
+        });
+        return;
+      }
+    }
+
     // Build ordered list of keys starting with the selected/preferred key
     const orderedKeys: string[] = [];
     if (apiKeys[selectedKeyIndex]) orderedKeys.push(apiKeys[selectedKeyIndex]);
@@ -3674,6 +3960,171 @@ export default function App() {
     }
   };
 
+  // Direct AI Highlighting & In-Place Note Editing (Whole note, Specific Topic, or Right-Click Selection)
+  const handleAiHighlightOrEditNotes = async (options: {
+    mode: 'highlight' | 'edit';
+    instruction: string;
+    targetTopic?: string | null;
+    onlySelection?: boolean;
+    savedRange?: Range | null;
+  }) => {
+    if (!notesAreaRef.current) return;
+    if (apiKeys.length === 0) {
+      showToast('Aggiungi almeno una chiave API Gemini per usare le funzioni AI sugli appunti.', 'error');
+      handleOpenKeysModal();
+      return;
+    }
+
+    const orderedKeys: string[] = [];
+    if (apiKeys[selectedKeyIndex]) orderedKeys.push(apiKeys[selectedKeyIndex]);
+    apiKeys.forEach((k, idx) => {
+      if (idx !== selectedKeyIndex && k.trim()) orderedKeys.push(k.trim());
+    });
+
+    const currentFullHtml = notesAreaRef.current.innerHTML;
+    if (!currentFullHtml.trim()) {
+      showToast('Gli appunti sono vuoti! Scrivi prima qualcosa.', 'error');
+      return;
+    }
+
+    // Save Undo snapshot before AI modifies the note
+    setAiUndoHtmlSnapshot(currentFullHtml);
+    setIsAILoading(true);
+
+    try {
+      // Case A: Right-click Selection-only highlight or in-place rewrite
+      if (options.onlySelection && options.savedRange) {
+        const range = options.savedRange;
+        const fragment = range.cloneContents();
+        const tempDiv = document.createElement('div');
+        tempDiv.appendChild(fragment);
+        const selectedHtml = tempDiv.innerHTML || range.toString();
+
+        const sysPrompt =
+          options.mode === 'highlight'
+            ? `Sei un assistente didattico ITS. Riceverai un frammento HTML selezionato dagli appunti dello studente.
+Evidenzia SOLO i concetti chiave, le definizioni importanti e le parole fondamentali avvolgendole con:
+<mark style="background: rgba(250, 204, 21, 0.38); color: #fef08a; padding: 1px 4px; border-radius: 4px;">...</mark>
+REGOLE TASSATIVE:
+1. NON cancellare e NON riassumere il testo: mantieni il 100% delle frasi e dei tag originali.
+2. Restituisci SOLO il codice HTML aggiornato, senza blocchi markdown (\`\`\`html).`
+            : `Sei un assistente didattico ITS. Migliora la forma, la chiarezza e la formattazione HTML del frammento selezionato mantenendo tutti i concetti tecnici. Restituisci SOLO l'HTML aggiornato senza blocchi markdown (\`\`\`html).`;
+
+        const rawOut = await callGeminiWithRotation(
+          orderedKeys,
+          selectedModel,
+          sysPrompt,
+          [{ role: 'user', parts: [{ text: selectedHtml }] }]
+        );
+        const cleanedHtml = rawOut
+          .replace(/^```(?:html)?\s*/i, '')
+          .replace(/\s*```$/i, '')
+          .trim();
+
+        if (cleanedHtml) {
+          const sel = window.getSelection();
+          if (sel) {
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+          document.execCommand('insertHTML', false, cleanedHtml);
+          handleEditorInput();
+          showToast(
+            options.mode === 'highlight'
+              ? '🖍️ Concetti chiave evidenziati nella selezione!'
+              : '🪄 Selezione migliorata e sostituita sul posto!'
+          );
+        }
+        return;
+      }
+
+      // Case B: Full Note or Specific Topic Section Highlight/Edit from Chat or Button
+      const topicClause = options.targetTopic
+        ? `ATTENZIONE — FOCUS SU SEZIONE SPECIFICA: Lo studente ha chiesto di intervenire SOLO sulla parte dove si parla di: "${options.targetTopic}". Individua i paragrafi o le sezioni che trattano "${options.targetTopic}" e applica le evidenziazioni <mark> SOLO in quella parte, lasciando invariato tutto il resto della pagina!`
+        : `Applica l'intervento sui concetti chiave più importanti di tutta la nota.`;
+
+      const sysPrompt =
+        options.mode === 'highlight'
+          ? `Sei un assistente didattico ITS che modifica direttamente il foglio HTML degli appunti dello studente.
+Richiesta dello studente: "${options.instruction}"
+${topicClause}
+REGOLE TASSATIVE:
+1. Usa <mark style="background: rgba(250, 204, 21, 0.38); color: #fef08a; padding: 1px 4px; border-radius: 4px;">concetto chiave</mark> per evidenziare le frasi, parole chiave, comandi o definizioni più importanti.
+2. MANTIENI INTATTI tutti i blocchi codice (<div class="note-code-block">...</div>), le formule (<span class="note-formula-box">...</span>), le tabelle (<div class="note-table-wrapper">...</div>), le immagini (<img>) e i disegni (<svg>). Non rimuovere mai nulla!
+3. Restituisci ESCLUSIVAMENTE l'HTML completo aggiornato della nota, senza \`\`\`html e senza commenti.`
+          : `Sei un assistente didattico ITS che modifica direttamente il foglio HTML degli appunti dello studente.
+Richiesta dello studente: "${options.instruction}"
+${topicClause}
+REGOLE TASSATIVE:
+1. Applica la modifica richiesta direttamente sull'HTML mantenendo intatti tutti i blocchi codice (<div class="note-code-block">...</div>), formule, tabelle, immagini e disegni SVG.
+2. Puoi usare <mark style="background: rgba(250, 204, 21, 0.38); color: #fef08a; padding: 1px 4px; border-radius: 4px;">...</mark> e <b>...</b> per mettere in risalto i punti chiave.
+3. Restituisci ESCLUSIVAMENTE l'HTML completo aggiornato della nota, senza \`\`\`html.`;
+
+      showToast(
+        options.targetTopic
+          ? `🖍️ Evidenziazione AI in corso sulla sezione "${options.targetTopic}"...`
+          : '🖍️ Evidenziazione concetti chiave AI negli appunti in corso...'
+      );
+
+      const rawOut = await callGeminiWithRotation(
+        orderedKeys,
+        selectedModel,
+        sysPrompt,
+        [{ role: 'user', parts: [{ text: currentFullHtml }] }]
+      );
+
+      const cleanedHtml = rawOut
+        .replace(/^```(?:html)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+
+      if (cleanedHtml && notesAreaRef.current) {
+        notesAreaRef.current.innerHTML = sanitizeAndUpgradeNoteHtml(cleanedHtml).cleanedHtml;
+        handleEditorInput();
+        setActiveTab('notes');
+
+        const confirmText = options.targetTopic
+          ? `🖍️ Ho evidenziato direttamente negli appunti i concetti chiave relativi a **"${options.targetTopic}"**! *(Puoi premere "↩️ Annulla Modifica AI" sopra gli appunti se vuoi ripristinare).*`
+          : `🖍️ Ho evidenziato direttamente nei tuoi appunti i **concetti chiave**! *(Puoi premere "↩️ Annulla Modifica AI" sopra gli appunti in qualsiasi momento).*`;
+
+        const userChatMsg: ChatMessage = {
+          role: 'user',
+          parts: [{ text: options.instruction }],
+          rawText: options.instruction,
+          timestamp: Date.now()
+        };
+        const aiChatMsg: ChatMessage = {
+          role: 'model',
+          parts: [{ text: confirmText }],
+          rawText: confirmText,
+          timestamp: Date.now()
+        };
+        setChats(prev => {
+          const nextSubChats = [...(prev[activeSubject] || []), userChatMsg, aiChatMsg];
+          const updated = { ...prev, [activeSubject]: nextSubChats };
+          WorkspaceService.saveLocalChats(updated);
+          if (currentUser) {
+            WorkspaceService.saveChatToCloud(currentUser.uid, activeSubject, nextSubChats).catch(() => {});
+          }
+          return updated;
+        });
+        showToast('✨ Appunti evidenziati dall\'AI! (Annullabile in 1 click)');
+      }
+    } catch (err: any) {
+      showToast(`Errore modifica AI sugli appunti: ${err.message || 'Riprova'}`, 'error');
+    } finally {
+      setIsAILoading(false);
+    }
+  };
+
+  const handleUndoAiNoteEdit = () => {
+    if (!aiUndoHtmlSnapshot || !notesAreaRef.current) return;
+    notesAreaRef.current.innerHTML = aiUndoHtmlSnapshot;
+    setAiUndoHtmlSnapshot(null);
+    handleEditorInput();
+    showToast('↩️ Modifica AI annullata: appunti ripristinati!');
+  };
+
   // Analyze Notes with Gemini
   const handleAnalyzeNotes = () => {
     const currentNotes = notesAreaRef.current?.innerText.trim() || '';
@@ -3847,6 +4298,34 @@ export default function App() {
         lastEditorRangeRef.current = savedRange.cloneRange();
       }
     };
+
+    if (action === 'evidenzia_selezione' && savedRange) {
+      handleAiHighlightOrEditNotes({
+        mode: 'highlight',
+        instruction: 'Evidenzia i concetti chiave nella selezione',
+        onlySelection: true,
+        savedRange
+      });
+      return;
+    }
+
+    if (action === 'migliora_sul_posto' && savedRange) {
+      handleAiHighlightOrEditNotes({
+        mode: 'edit',
+        instruction: 'Migliora e formatta la selezione sul posto',
+        onlySelection: true,
+        savedRange
+      });
+      return;
+    }
+
+    if (action === 'evidenzia_tutta_nota') {
+      handleAiHighlightOrEditNotes({
+        mode: 'highlight',
+        instruction: 'Evidenzia i concetti chiave negli appunti'
+      });
+      return;
+    }
 
     if (action === 'incolla_ai') {
       if (lastAIResponse && notesAreaRef.current) {
@@ -4609,13 +5088,23 @@ export default function App() {
               insertHtmlAtEditorCursor(`<span class="note-formula-chip" contenteditable="false">${text}</span>&nbsp;`);
             }}
             showToast={showToast}
+            calendarEvents={calendarEvents}
+            subjects={subjects}
+            activeSubject={activeSubject}
+            onAddCalendarEvent={handleAddCalendarEvent}
+            onToggleCalendarComplete={handleToggleCalendarComplete}
+            onDeleteCalendarEvent={handleDeleteCalendarEvent}
+            isGoogleCalendarConnected={!!googleOAuthAccessToken}
+            isSyncingGoogleCalendar={isSyncingGoogleCalendar}
+            onSyncGoogleCalendar={handleSyncGoogleCalendar}
+            onOpenFullCalendar={() => setActiveTab('calendar')}
           />
         </div>
 
         {/* Center Column: Workspace Notes & Materials */}
         <div className={`panel ${isNotesMaximized ? 'notes-maximized' : ''} ${mobileTab === 'notes' || mobileTab === 'materials' ? 'mobile-active' : ''}`} id="notes-panel">
           
-          {/* Top Unified Bar: Mode Switcher (Personal vs Shared) + View Switcher (Appunti vs Materiali) */}
+          {/* Top Unified Bar: Mode Switcher (Personal vs Shared) + View Switcher (Appunti vs Materiali vs Calendario) */}
           <div className="workspace-mode-bar">
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <div className="workspace-mode-selector">
@@ -4658,6 +5147,13 @@ export default function App() {
                   onClick={() => setActiveTab('materials')}
                 >
                   📚 Materiali ({activeDisplayMaterials.length})
+                </button>
+                <button
+                  type="button"
+                  className={`tab-btn ${activeTab === 'calendar' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('calendar')}
+                >
+                  📅 Calendario ({calendarEvents.length})
                 </button>
               </div>
             </div>
@@ -5643,6 +6139,31 @@ export default function App() {
                   </div>
                 )}
 
+                {/* AI Direct Note Highlight / Edit 1-Click Undo Banner */}
+                {aiUndoHtmlSnapshot && (
+                  <div className="ai-undo-banner">
+                    <span>✨ Appunti evidenziati / modificati automaticamente da Gemini AI</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <button
+                        type="button"
+                        className="widget-mini-btn accent"
+                        onClick={handleUndoAiNoteEdit}
+                        title="Ripristina gli appunti esattamente com'erano prima dell'intervento AI"
+                      >
+                        ↩️ Annulla Modifica AI
+                      </button>
+                      <button
+                        type="button"
+                        className="widget-ctrl-btn"
+                        onClick={() => setAiUndoHtmlSnapshot(null)}
+                        title="Mantieni le modifiche AI e chiudi questo avviso"
+                      >
+                        ✓ Mantieni
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Contenteditable Notes Area (Supports Ctrl+V Screenshot Paste, Tables, Movable Photos & SVG Pen) */}
                 <div
                   id="notes-area"
@@ -5682,6 +6203,18 @@ export default function App() {
                   onContextMenu={handleNotesContextMenu}
                 />
               </div>
+            ) : activeTab === 'calendar' ? (
+              <StudyCalendarPanel
+                events={calendarEvents}
+                subjects={subjects}
+                activeSubject={activeSubject}
+                onAddEvent={handleAddCalendarEvent}
+                onToggleComplete={handleToggleCalendarComplete}
+                onDeleteEvent={handleDeleteCalendarEvent}
+                isGoogleCalendarConnected={!!googleOAuthAccessToken}
+                isSyncingGoogle={isSyncingGoogleCalendar}
+                onSyncGoogleCalendar={handleSyncGoogleCalendar}
+              />
             ) : (
               <div id="materials-area">
                 <div className="materials-header-bar">
@@ -5820,6 +6353,16 @@ export default function App() {
               insertHtmlAtEditorCursor(`<span class="note-formula-chip" contenteditable="false">${text}</span>&nbsp;`);
             }}
             showToast={showToast}
+            calendarEvents={calendarEvents}
+            subjects={subjects}
+            activeSubject={activeSubject}
+            onAddCalendarEvent={handleAddCalendarEvent}
+            onToggleCalendarComplete={handleToggleCalendarComplete}
+            onDeleteCalendarEvent={handleDeleteCalendarEvent}
+            isGoogleCalendarConnected={!!googleOAuthAccessToken}
+            isSyncingGoogleCalendar={isSyncingGoogleCalendar}
+            onSyncGoogleCalendar={handleSyncGoogleCalendar}
+            onOpenFullCalendar={() => setActiveTab('calendar')}
           />
         </div>
 
@@ -5940,8 +6483,7 @@ export default function App() {
                 )
               ) : currentSubChats.length === 0 ? (
                 <div className="chat-msg ai">
-                  Chiedi qualcosa, incolla uno screenshot (<b>Ctrl+V</b>) o premi <b>🔍 Analizza Note</b> per lavorare sugli appunti di{' '}
-                  <b>{activeSubject}</b>!
+                  Chiedi qualcosa, scrivi <b>"evidenzia le cose chiave"</b> (o una parte specifica es. <i>"evidenzia la parte sulle select"</i>), incolla uno screenshot (<b>Ctrl+V</b>) o premi <b>🖍️ Evidenzia Chiave</b>!
                 </div>
               ) : (
                 currentSubChats.map((msg, index) => {
@@ -6135,7 +6677,7 @@ export default function App() {
               <input
                 type="text"
                 id="user-chat-input"
-                placeholder="Chiedi a Gemini o incolla screenshot (Ctrl+V)..."
+                placeholder="Chiedi a Gemini o scrivi 'evidenzia le cose chiave'..."
                 value={chatInput}
                 onChange={e => setChatInput(e.target.value)}
                 onPaste={handleChatPaste}
@@ -6152,11 +6694,25 @@ export default function App() {
             </div>
 
             {/* Bottom Action Buttons */}
-            <div className="chat-input-row" style={{ marginTop: '8px', justifyContent: 'space-between' }}>
-              <button className="chat-btn" onClick={handleAnalyzeNotes}>
-                🔍 Analizza Note
+            <div className="chat-input-row" style={{ marginTop: '8px', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}>
+              <button className="chat-btn" onClick={handleAnalyzeNotes} title="Analizza o riassumi gli appunti in chat">
+                🔍 Analizza
               </button>
-              <button className="chat-btn" onClick={handleAppendLastResponse}>
+              <button
+                className="chat-btn"
+                onClick={() =>
+                  handleAiHighlightOrEditNotes({
+                    mode: 'highlight',
+                    instruction: chatInput.trim() || 'Evidenzia i concetti chiave negli appunti',
+                    targetTopic: chatInput.trim() ? parseAiNoteEditIntent(chatInput.trim()).targetTopic : null
+                  })
+                }
+                style={{ borderColor: 'rgba(250, 204, 21, 0.45)', color: '#fef08a' }}
+                title="Evidenzia direttamente negli appunti i concetti chiave (o scrivi nell'input un argomento specifico e premi qui)"
+              >
+                🖍️ Evidenzia Chiave
+              </button>
+              <button className="chat-btn" onClick={handleAppendLastResponse} title="Aggiungi l'ultima risposta AI in fondo agli appunti">
                 ➕ Aggiungi
               </button>
             </div>
@@ -6178,10 +6734,20 @@ export default function App() {
               insertHtmlAtEditorCursor(buildInteractiveFormulaBoxHtml(text));
             }}
             showToast={showToast}
+            calendarEvents={calendarEvents}
+            subjects={subjects}
+            activeSubject={activeSubject}
+            onAddCalendarEvent={handleAddCalendarEvent}
+            onToggleCalendarComplete={handleToggleCalendarComplete}
+            onDeleteCalendarEvent={handleDeleteCalendarEvent}
+            isGoogleCalendarConnected={!!googleOAuthAccessToken}
+            isSyncingGoogleCalendar={isSyncingGoogleCalendar}
+            onSyncGoogleCalendar={handleSyncGoogleCalendar}
+            onOpenFullCalendar={() => setActiveTab('calendar')}
           />
         </div>
 
-        {/* Dedicated Full-Height Column for Large Widgets (PDF Viewer, Website, Image, Calculator, etc.) */}
+        {/* Dedicated Full-Height Column for Large Widgets (PDF Viewer, Website, Image, Calculator, Calendar, etc.) */}
         {customWidgets.some(w => w.enabled && w.slot === 'full_column') && (
           <div className="panel widget-column" id="widget-column">
             <WorkspaceWidgetsDock
@@ -6201,6 +6767,16 @@ export default function App() {
               showToast={showToast}
               columnWidth={widgetColumnWidth}
               onChangeColumnWidth={handleChangeWidgetColumnWidth}
+              calendarEvents={calendarEvents}
+              subjects={subjects}
+              activeSubject={activeSubject}
+              onAddCalendarEvent={handleAddCalendarEvent}
+              onToggleCalendarComplete={handleToggleCalendarComplete}
+              onDeleteCalendarEvent={handleDeleteCalendarEvent}
+              isGoogleCalendarConnected={!!googleOAuthAccessToken}
+              isSyncingGoogleCalendar={isSyncingGoogleCalendar}
+              onSyncGoogleCalendar={handleSyncGoogleCalendar}
+              onOpenFullCalendar={() => setActiveTab('calendar')}
             />
           </div>
         )}
@@ -6808,6 +7384,24 @@ export default function App() {
             style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
             onClick={e => e.stopPropagation()}
           >
+            {/* Refined Context Menu Top Banner */}
+            <div className="ctx-menu-top-banner">
+              <span>
+                {contextMenu.selectedText
+                  ? `✂️ Selezione (${contextMenu.selectedText.length} car.)`
+                  : '⚡ Menu Rapido Appunti'}
+              </span>
+              <button
+                type="button"
+                className="widget-ctrl-btn"
+                style={{ height: '18px', minWidth: '18px', fontSize: '0.62rem' }}
+                onClick={() => setContextMenu(prev => ({ ...prev, visible: false }))}
+                title="Chiudi menu"
+              >
+                ✕
+              </button>
+            </div>
+
             {/* Box 1: Stile Testo & Evidenziatori */}
             <div className="ctx-group-box">
               <div className="ctx-group-box-header">
@@ -7013,37 +7607,68 @@ export default function App() {
               </div>
             </div>
 
-            {/* Box 4: Azioni AI Gemini */}
+            {/* Box 4: Azioni AI Gemini (Sulla Selezione o Sulla Nota Intera) */}
             <div className="ctx-group-box">
               <div className="ctx-group-box-header">
                 <span>🤖 Azioni AI Gemini</span>
               </div>
               {contextMenu.selectedText ? (
                 <>
+                  <button
+                    type="button"
+                    className="ctx-ai-highlight-btn"
+                    onClick={() => handleContextMenuAction('evidenzia_selezione')}
+                    title="Evidenzia con l'AI i concetti chiave solo nella parte selezionata"
+                  >
+                    <span>🖍️</span>
+                    <span>Evidenzia concetti chiave (qui)</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="ctx-ai-highlight-btn"
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(56, 189, 248, 0.14))',
+                      borderColor: 'rgba(99, 102, 241, 0.45)',
+                      color: '#c7d2fe'
+                    }}
+                    onClick={() => handleContextMenuAction('migliora_sul_posto')}
+                    title="Riscrive e formatta solo la parte selezionata sostituendola direttamente negli appunti"
+                  >
+                    <span>🪄</span>
+                    <span>Migliora e sostituisci sul posto</span>
+                  </button>
                   <div className="context-menu-item" onClick={() => handleContextMenuAction('correggi')}>
-                    <span>✨ Correggi grammatica</span>
-                  </div>
-                  <div className="context-menu-item" onClick={() => handleContextMenuAction('migliora')}>
-                    <span>🚀 Migliora scrittura</span>
+                    <span>✨ Correggi grammatica (in Chat)</span>
                   </div>
                   <div className="context-menu-item" onClick={() => handleContextMenuAction('riassumi')}>
-                    <span>📝 Riassumi selezione</span>
+                    <span>📝 Riassumi selezione (in Chat)</span>
                   </div>
                   <div className="context-menu-item" onClick={() => handleContextMenuAction('spiega')}>
-                    <span>🧠 Spiegami questo</span>
+                    <span>🧠 Spiegami questo concetto</span>
                   </div>
                   <div className="context-menu-item" onClick={() => handleContextMenuAction('traduci')}>
                     <span>🌍 Traduci e Analizza</span>
                   </div>
                 </>
               ) : (
-                <div
-                  className="context-menu-item"
-                  onClick={() => handleContextMenuAction('incolla_ai')}
-                  style={{ opacity: lastAIResponse ? 1 : 0.5, pointerEvents: lastAIResponse ? 'auto' : 'none' }}
-                >
-                  <span>📋 {lastAIResponse ? 'Incolla ultima risposta AI' : 'Seleziona testo per le azioni AI'}</span>
-                </div>
+                <>
+                  <button
+                    type="button"
+                    className="ctx-ai-highlight-btn"
+                    onClick={() => handleContextMenuAction('evidenzia_tutta_nota')}
+                    title="Chiedi a Gemini di evidenziare i concetti chiave in tutta la pagina"
+                  >
+                    <span>🖍️</span>
+                    <span>Evidenzia concetti chiave nella nota</span>
+                  </button>
+                  <div
+                    className="context-menu-item"
+                    onClick={() => handleContextMenuAction('incolla_ai')}
+                    style={{ opacity: lastAIResponse ? 1 : 0.5, pointerEvents: lastAIResponse ? 'auto' : 'none' }}
+                  >
+                    <span>📋 {lastAIResponse ? 'Incolla ultima risposta AI' : 'Seleziona testo per azioni mirate'}</span>
+                  </div>
+                </>
               )}
             </div>
           </div>

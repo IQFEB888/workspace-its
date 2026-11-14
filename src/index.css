@@ -4282,4 +4282,423 @@ body.is-resizing-column object {
   z-index: 2;
 }
 
+/* ==========================================================================
+   v2.7.0: IN-NOTE CODE EXECUTION (▶ ESEGUI), AI UNDO BANNER,
+   REFINED CONTEXT MENU & CUSTOM GOOGLE CALENDAR / STUDY PLANNER
+   ========================================================================== */
+
+/* 1. In-Note Code Block Run Button & Terminal Output Console */
+#notes-area .note-code-run-btn {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(5, 150, 105, 0.35));
+  border: 1px solid rgba(16, 185, 129, 0.55);
+  color: #6ee7b7;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 0.69rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+}
+#notes-area .note-code-run-btn:hover {
+  background: #10b981;
+  border-color: #34d399;
+  color: #052e16;
+  transform: translateY(-1px);
+}
+#notes-area .note-code-run-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+#notes-area .note-code-output {
+  border-top: 1px solid rgba(56, 189, 248, 0.22);
+  background: #06080f;
+  padding: 10px 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', Menlo, monospace;
+  font-size: 0.78rem;
+  color: #e2e8f0;
+  user-select: text;
+}
+
+#notes-area .note-code-output-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+#notes-area .note-code-output-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.65rem;
+  background: rgba(16, 185, 129, 0.16);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #6ee7b7;
+}
+#notes-area .note-code-output-badge.is-error {
+  background: rgba(244, 63, 94, 0.18);
+  border-color: rgba(244, 63, 94, 0.45);
+  color: #fda4af;
+}
+
+#notes-area .note-code-output-close {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+  border-radius: 5px;
+  padding: 1px 7px;
+  font-size: 0.66rem;
+  cursor: pointer;
+}
+#notes-area .note-code-output-close:hover {
+  color: #fff;
+  background: rgba(244, 63, 94, 0.25);
+  border-color: rgba(244, 63, 94, 0.5);
+}
+
+#notes-area .note-code-output-stdout {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #d1fae5;
+  line-height: 1.5;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+#notes-area .note-code-output-stderr {
+  margin: 6px 0 0 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(244, 63, 94, 0.12);
+  border-left: 3px solid #f43f5e;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #fecdd3;
+  line-height: 1.45;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+/* 2. AI Direct Note Highlight / Edit Undo Banner */
+.ai-undo-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 12px;
+  margin-bottom: 0.45rem;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(250, 204, 21, 0.16), rgba(99, 102, 241, 0.16));
+  border: 1px solid rgba(250, 204, 21, 0.45);
+  color: #fef08a;
+  font-size: 0.76rem;
+  font-weight: 600;
+  flex-wrap: wrap;
+  animation: slideIn 0.18s ease-out;
+}
+
+/* 3. Refined Right-Click Context Menu Header & AI Action Buttons */
+.ctx-menu-top-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(56, 189, 248, 0.12));
+  border: 1px solid rgba(99, 102, 241, 0.32);
+  font-size: 0.69rem;
+  font-weight: 700;
+  color: #e0e7ff;
+}
+
+.ctx-ai-highlight-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(250, 204, 21, 0.16), rgba(245, 158, 11, 0.12));
+  border: 1px solid rgba(250, 204, 21, 0.4);
+  color: #fef08a;
+  font-size: 0.73rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.14s ease;
+}
+.ctx-ai-highlight-btn:hover {
+  background: rgba(250, 204, 21, 0.28);
+  border-color: #facc15;
+  color: #fff;
+}
+
+/* 4. Custom Study, Homework & Lessons Calendar + Google Calendar Sync */
+.study-calendar-root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding: 4px 2px;
+}
+.study-calendar-root.is-compact {
+  padding: 6px;
+  gap: 6px;
+}
+
+.study-cal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--panel-border);
+  flex-wrap: wrap;
+}
+
+.study-cal-kpi-bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+@media (max-width: 720px) {
+  .study-cal-kpi-bar {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.study-cal-kpi-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--panel-border);
+  font-size: 0.73rem;
+  color: #cbd5e1;
+}
+.study-cal-kpi-pill strong {
+  font-size: 0.92rem;
+  color: #fff;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.study-cal-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.study-cal-filter-chip {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+  padding: 4px 9px;
+  border-radius: 8px;
+  font-size: 0.69rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+.study-cal-filter-chip:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.09);
+}
+.study-cal-filter-chip.active {
+  background: var(--accent-surface);
+  border-color: var(--accent-border);
+  color: #fff;
+}
+
+.study-cal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: rgba(13, 16, 26, 0.95);
+  border: 1px solid var(--accent-border);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+}
+
+.study-cal-grid-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+.study-cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  text-align: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+  padding: 2px 0;
+}
+
+.study-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.study-cal-day {
+  min-height: 68px;
+  padding: 5px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  cursor: pointer;
+  transition: all 0.14s ease;
+  overflow: hidden;
+}
+.study-calendar-root.is-compact .study-cal-day {
+  min-height: 44px;
+  padding: 3px;
+}
+.study-cal-day:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.study-cal-day.other-month {
+  opacity: 0.35;
+}
+.study-cal-day.is-today {
+  border-color: rgba(56, 189, 248, 0.65);
+  background: rgba(56, 189, 248, 0.08);
+}
+.study-cal-day.is-selected {
+  border-color: var(--accent-primary, #6366f1);
+  box-shadow: 0 0 0 1.5px var(--accent-primary, #6366f1);
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.study-cal-day-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.study-cal-day-num {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  font-family: 'JetBrains Mono', monospace;
+}
+.study-cal-day.is-today .study-cal-day-num {
+  color: #38bdf8;
+}
+.study-cal-day-count {
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.25);
+  color: #c7d2fe;
+}
+
+.study-cal-day-events {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.study-cal-day-pill {
+  font-size: 0.63rem;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.study-cal-day-detail {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(10, 12, 20, 0.78);
+  border: 1px solid var(--panel-border);
+}
+
+.study-cal-agenda-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.study-cal-event-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.14s ease;
+}
+.study-cal-event-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.study-cal-event-card.is-done {
+  opacity: 0.58;
+}
+
+.study-cal-check-btn {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  border-radius: 5px;
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.35);
+  color: #10b981;
+  font-size: 0.68rem;
+  font-weight: 800;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.study-cal-check-btn.checked {
+  background: rgba(16, 185, 129, 0.25);
+  border-color: #10b981;
+}
+
+
 
