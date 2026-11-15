@@ -987,7 +987,7 @@ export default function App() {
     if (pushToGoogle) {
       let token = googleOAuthAccessToken;
       if (!token) {
-        token = await handleAuthorizeGoogleCalendar();
+        token = await handleAuthorizeGoogleCalendar(false);
       }
       if (token) {
         try {
@@ -996,7 +996,23 @@ export default function App() {
             googleEventId = createdId;
           }
         } catch (err: any) {
-          showToast(`Salvato nel calendario locale (errore Google Calendar: ${err.message})`, 'error');
+          const errMsg = String(err?.message || '');
+          // If cached OAuth token expired (401), automatically refresh and retry once
+          if (errMsg.includes('401') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('Invalid Credentials')) {
+            const refreshedToken = await handleAuthorizeGoogleCalendar(false);
+            if (refreshedToken) {
+              try {
+                const retryId = await createGoogleCalendarEvent(refreshedToken, { ...newEvData, id });
+                if (retryId) {
+                  googleEventId = retryId;
+                }
+              } catch (retryErr: any) {
+                showToast(`Salvato nel calendario locale (errore Google Calendar: ${retryErr.message})`, 'error');
+              }
+            }
+          } else {
+            showToast(`Salvato nel calendario locale (errore Google Calendar: ${errMsg})`, 'error');
+          }
         }
       }
     }
@@ -1019,9 +1035,33 @@ export default function App() {
     if (currentUser) {
       await WorkspaceService.saveCalendarEventToCloud(currentUser.uid, fullEvent);
     }
+
+    // Trigger native Desktop / Browser notification if permitted
+    if ('Notification' in window) {
+      try {
+        if (Notification.permission === 'granted') {
+          new Notification(`📅 Impegno programmato: ${fullEvent.title}`, {
+            body: `${fullEvent.date} alle ${fullEvent.startTime || '09:00'} (${fullEvent.subject})`,
+            icon: './pwa-192x192.png'
+          });
+        } else if (Notification.permission === 'default') {
+          Notification.requestPermission().then(perm => {
+            if (perm === 'granted') {
+              new Notification(`📅 Impegno programmato: ${fullEvent.title}`, {
+                body: `${fullEvent.date} alle ${fullEvent.startTime || '09:00'} (${fullEvent.subject})`,
+                icon: './pwa-192x192.png'
+              });
+            }
+          }).catch(() => {});
+        }
+      } catch {
+        // ignore notification errors in restricted contexts
+      }
+    }
+
     showToast(
       googleEventId
-        ? `📅 "${fullEvent.title}" aggiunto e sincronizzato su Google Calendar!`
+        ? `📅 "${fullEvent.title}" salvato sul tuo Google Calendar Personale (calendario principale) con promemoria!`
         : `📅 "${fullEvent.title}" aggiunto al Calendario Studio!`
     );
   };

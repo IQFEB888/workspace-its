@@ -199,18 +199,34 @@ export async function createGoogleCalendarEvent(
   accessToken: string,
   event: CalendarEventItem
 ): Promise<string> {
-  const startIso = new Date(`${event.date}T${event.startTime || '09:00'}:00`).toISOString();
-  const endIso = new Date(`${event.date}T${event.endTime || '10:00'}:00`).toISOString();
+  const startDate = new Date(`${event.date}T${event.startTime || '09:00'}:00`);
+  let endDate = new Date(`${event.date}T${event.endTime || '10:00'}:00`);
+  if (isNaN(endDate.getTime()) || endDate.getTime() <= startDate.getTime()) {
+    endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+  }
+
+  const startIso = startDate.toISOString();
+  const endIso = endDate.toISOString();
   const catMeta = CATEGORY_META[event.category] || CATEGORY_META.lecture;
 
   const payload = {
     summary: `${catMeta.icon} [${event.subject}] ${event.title}`,
-    description: event.description || `Categoria: ${catMeta.label} • Materia: ${event.subject} (Creato da Workspace ITS)`,
+    description:
+      event.description ||
+      `Categoria: ${catMeta.label} • Materia: ${event.subject} (Creato da Workspace ITS)`,
     start: {
       dateTime: startIso
     },
     end: {
       dateTime: endIso
+    },
+    reminders: {
+      useDefault: false,
+      overrides: [
+        { method: 'popup', minutes: 10 },
+        { method: 'popup', minutes: 1 },
+        { method: 'email', minutes: 10 }
+      ]
     }
   };
 

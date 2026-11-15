@@ -89,12 +89,18 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
   const [showAddForm, setShowAddForm] = useState(false);
   const [showSchoolSyncGuide, setShowSchoolSyncGuide] = useState(false);
 
-  // New event form state
+  // New event form state (defaults to next upcoming slot so test events work immediately)
   const [newTitle, setNewTitle] = useState('');
   const [newCategory, setNewCategory] = useState<CalendarEventCategory>('lecture');
   const [newSubject, setNewSubject] = useState<string>(activeSubject || 'Database');
-  const [newStartTime, setNewStartTime] = useState('09:00');
-  const [newEndTime, setNewEndTime] = useState('11:00');
+  const [newStartTime, setNewStartTime] = useState(() => {
+    const d = new Date(Date.now() + 15 * 60 * 1000);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  });
+  const [newEndTime, setNewEndTime] = useState(() => {
+    const d = new Date(Date.now() + 75 * 60 * 1000);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  });
   const [newDesc, setNewDesc] = useState('');
   const [pushToGoogle, setPushToGoogle] = useState(true);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -197,7 +203,7 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
         color: catMeta.color,
         createdAt: new Date().toISOString()
       },
-      pushToGoogle && isGoogleCalendarConnected
+      pushToGoogle
     );
     setNewTitle('');
     setNewDesc('');
@@ -585,7 +591,17 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
                 type="time"
                 className="study-cal-field time-field"
                 value={newStartTime}
-                onChange={e => setNewStartTime(e.target.value)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setNewStartTime(val);
+                  if (val && newEndTime <= val) {
+                    const [hh, mm] = val.split(':').map(Number);
+                    if (!isNaN(hh) && !isNaN(mm)) {
+                      const nextH = (hh + 1) % 24;
+                      setNewEndTime(`${String(nextH).padStart(2, '0')}:${String(mm).padStart(2, '0')}`);
+                    }
+                  }
+                }}
               />
               <span className="study-cal-time-sep">–</span>
               <input
@@ -605,16 +621,17 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
               value={newDesc}
               onChange={e => setNewDesc(e.target.value)}
             />
-            {isGoogleCalendarConnected && (
-              <label className="study-cal-checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={pushToGoogle}
-                  onChange={e => setPushToGoogle(e.target.checked)}
-                />
-                <span>Sincronizza su Google Calendar</span>
-              </label>
-            )}
+            <label
+              className="study-cal-checkbox-label"
+              title="Salva automaticamente questo impegno nel tuo Google Calendar Personale principale con promemoria notifica + email"
+            >
+              <input
+                type="checkbox"
+                checked={pushToGoogle}
+                onChange={e => setPushToGoogle(e.target.checked)}
+              />
+              <span>☁️ Sincronizza su Google Calendar Personale (+ Notifica)</span>
+            </label>
             <button type="submit" className="study-cal-primary-btn">
               Salva Impegno
             </button>

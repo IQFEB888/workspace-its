@@ -6,7 +6,7 @@
 
 ## 1. Informazioni Generali & Versione
 - **Nome Applicazione**: `Workspace ITS`
-- **Versione Attuale**: `v3.2.0` (`APP_VERSION` in `src/utils/editorTools.ts`, mostrata nel badge fisso in basso a sinistra `.app-version-badge`).
+- **Versione Attuale**: `v3.3.0` (`APP_VERSION` in `src/utils/editorTools.ts`, mostrata nel badge fisso in basso a sinistra `.app-version-badge`).
 - **REGOLA OBBLIGATORIA DI VERSIONING**: **Ad ogni singola modifica al codice, incrementare sempre `APP_VERSION` in `src/utils/editorTools.ts`** (e aggiornare `PROJECT_MEMORY.md`), così che l'utente possa verificare immediatamente dal badge in basso a sinistra di avere l'ultima versione su tutti i dispositivi.
 - **PWA & Routing**:
   - Configurata con `vite.config.ts` (`base: './'`), `public/manifest.json` (`start_url: './'`, `scope: './'`), `public/sw.js` e cattura anticipata di `beforeinstallprompt` in `index.html` (`window.__deferredPwaPrompt`) per funzionare sia su AI Studio sia su GitHub Pages (`https://iqfeb888.github.io/...`) senza errori 404.
