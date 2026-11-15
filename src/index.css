@@ -5167,6 +5167,23 @@ body.is-resizing-column object {
 .note-resize-handle.w  { top: calc(50% - 6px); left: -6px; cursor: ew-resize; }
 .note-resize-handle.e  { top: calc(50% - 6px); right: -6px; cursor: ew-resize; }
 
+/* 6. Smooth Opacity & Slide Transition Between Central Panel Tabs (Appunti, Materiali, Calendario) */
+@keyframes tabSlideFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) translateX(8px) scale(0.994);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) translateX(0) scale(1);
+  }
+}
+
+.tab-panel-transition {
+  animation: tabSlideFadeIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: opacity, transform;
+}
+
 
 
 

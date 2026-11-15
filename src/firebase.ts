@@ -21,11 +21,11 @@ const primaryFirestoreConfig = {
 const app = initializeApp(primaryFirestoreConfig);
 
 // Secondary isolated Firebase App exclusively for Google Calendar & Drive OAuth token acquisition.
-// Uses firebaseConfig (from firebase-applet-config.json) where Google Calendar API is enabled,
-// and allows selecting a personal @gmail.com account without altering the main Workspace ITS session!
+// Uses primaryFirestoreConfig (workspace-its-10786) where the app's domains are already authorized in Firebase Auth,
+// while running in an isolated in-memory session so selecting a personal @gmail.com account never alters the main session!
 const calendarOAuthApp =
   getApps().find(a => a.name === 'CalendarOAuthClient') ||
-  initializeApp(firebaseConfig, 'CalendarOAuthClient');
+  initializeApp(primaryFirestoreConfig, 'CalendarOAuthClient');
 
 export const calendarAuth = (() => {
   try {

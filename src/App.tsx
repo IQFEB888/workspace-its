@@ -142,6 +142,7 @@ export default function App() {
   );
   const [isSyncingGoogleCalendar, setIsSyncingGoogleCalendar] = useState<boolean>(false);
   const [googleCalendarEmail, setGoogleCalendarEmail] = useState<string | null>(null);
+  const [calendarApiEnableUrl, setCalendarApiEnableUrl] = useState<string | null>(null);
   const [aiUndoHtmlSnapshot, setAiUndoHtmlSnapshot] = useState<string | null>(null);
   const [fontFamily, setFontFamily] = useState<string>('plus-jakarta');
   const [fontSize, setFontSize] = useState<number>(15);
@@ -913,10 +914,18 @@ export default function App() {
         }
         return nextList;
       });
+      setCalendarApiEnableUrl(null);
       showToast(`📅 Sincronizzati ${gEvents.length} impegni/lezioni dal Google Calendar personale!`);
     } catch (err: any) {
-      showToast(`Errore sync Google Calendar: ${err.message || 'Riprova riautorizzando Google.'}`, 'error');
-      setGoogleOAuthAccessToken(null);
+      const msg = String(err?.message || '');
+      const urlMatch = msg.match(/https:\/\/console\.[^\s"']+/);
+      if (urlMatch) {
+        setCalendarApiEnableUrl(urlMatch[0]);
+        showToast('⚠️ Attiva Google Calendar API col pulsante giallo comparso nel Calendario e premi Riprova!', 'error');
+      } else {
+        showToast(`Errore sync Google Calendar: ${msg || 'Riprova riautorizzando Google.'}`, 'error');
+        setGoogleOAuthAccessToken(null);
+      }
     } finally {
       setIsSyncingGoogleCalendar(false);
     }
@@ -6084,7 +6093,7 @@ REGOLE TASSATIVE:
                 </div>
               </div>
             ) : activeTab === 'notes' ? (
-              <div id="notes-area-container">
+              <div id="notes-area-container" key="tab-notes" className="tab-panel-transition">
                 {/* VS Code Style Tabs Bar */}
                 <div className="vscode-tabs-bar">
                   <div style={{ display: 'flex', gap: '4px', overflowX: 'auto' }}>
@@ -7010,23 +7019,31 @@ REGOLE TASSATIVE:
                 </div>
               </div>
             ) : activeTab === 'calendar' ? (
-              <StudyCalendarPanel
-                events={calendarEvents}
-                subjects={subjects}
-                activeSubject={activeSubject}
-                onAddEvent={handleAddCalendarEvent}
-                onToggleComplete={handleToggleCalendarComplete}
-                onDeleteEvent={handleDeleteCalendarEvent}
-                isGoogleCalendarConnected={!!googleOAuthAccessToken}
-                googleCalendarEmail={googleCalendarEmail}
-                isSyncingGoogle={isSyncingGoogleCalendar}
-                onSyncGoogleCalendar={handleSyncGoogleCalendar}
-                onSwitchGoogleCalendarAccount={handleSwitchGoogleCalendarAccount}
-                onImportIcsFile={handleImportIcsCalendarFile}
-                onBackToNotes={() => setActiveTab('notes')}
-              />
+              <div
+                key="tab-calendar"
+                className="tab-panel-transition"
+                style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
+              >
+                <StudyCalendarPanel
+                  events={calendarEvents}
+                  subjects={subjects}
+                  activeSubject={activeSubject}
+                  onAddEvent={handleAddCalendarEvent}
+                  onToggleComplete={handleToggleCalendarComplete}
+                  onDeleteEvent={handleDeleteCalendarEvent}
+                  isGoogleCalendarConnected={!!googleOAuthAccessToken}
+                  googleCalendarEmail={googleCalendarEmail}
+                  calendarApiEnableUrl={calendarApiEnableUrl}
+                  onDismissApiEnableUrl={() => setCalendarApiEnableUrl(null)}
+                  isSyncingGoogle={isSyncingGoogleCalendar}
+                  onSyncGoogleCalendar={handleSyncGoogleCalendar}
+                  onSwitchGoogleCalendarAccount={handleSwitchGoogleCalendarAccount}
+                  onImportIcsFile={handleImportIcsCalendarFile}
+                  onBackToNotes={() => setActiveTab('notes')}
+                />
+              </div>
             ) : (
-              <div id="materials-area">
+              <div id="materials-area" key="tab-materials" className="tab-panel-transition">
                 <div className="materials-header-bar">
                   <span className="materials-header-title">
                     {workspaceMode === 'shared'

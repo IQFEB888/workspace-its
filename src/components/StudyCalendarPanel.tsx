@@ -9,6 +9,8 @@ interface StudyCalendarPanelProps {
   isSyncingGoogle?: boolean;
   isGoogleCalendarConnected?: boolean;
   googleCalendarEmail?: string | null;
+  calendarApiEnableUrl?: string | null;
+  onDismissApiEnableUrl?: () => void;
   onAddEvent: (
     event: Omit<CalendarEventItem, 'id'>,
     alsoPushToGoogle: boolean
@@ -63,6 +65,8 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
   isSyncingGoogle = false,
   isGoogleCalendarConnected = false,
   googleCalendarEmail = null,
+  calendarApiEnableUrl = null,
+  onDismissApiEnableUrl,
   onAddEvent,
   onToggleComplete,
   onDeleteEvent,
@@ -404,6 +408,61 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
           </span>
         )}
       </div>
+
+      {/* 1-Click Activation Banner if Google Calendar API needs to be enabled on project 455460787207 */}
+      {calendarApiEnableUrl && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            flexWrap: 'wrap',
+            padding: '10px 14px',
+            background: 'rgba(245, 158, 11, 0.14)',
+            border: '1px solid rgba(245, 158, 11, 0.45)',
+            borderRadius: '10px',
+            fontSize: '0.78rem',
+            color: '#fef3c7'
+          }}
+        >
+          <span>
+            ⚠️ <strong>Attivazione richiesta una sola volta:</strong> l&apos;API Google Calendar non è ancora attiva sul progetto Firebase <code>workspace-its-10786</code> (455460787207). Clicca il pulsante a destra, premi il tasto blu <strong>&quot;Abilita / Enable&quot;</strong> nella pagina Google Cloud e poi riprova!
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <a
+              href={calendarApiEnableUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="study-cal-primary-btn"
+              style={{
+                textDecoration: 'none',
+                background: '#f59e0b',
+                color: '#09090b',
+                fontWeight: 700
+              }}
+            >
+              ⚡ Abilita Google Calendar API ↗
+            </a>
+            <button
+              type="button"
+              className="study-cal-ghost-btn sm"
+              onClick={onSyncGoogleCalendar}
+            >
+              ↻ Ho abilitato, riprova
+            </button>
+            {onDismissApiEnableUrl && (
+              <button
+                type="button"
+                className="study-cal-ghost-btn sm"
+                onClick={onDismissApiEnableUrl}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Collapsible Add Event / Homework Form */}
       {showAddForm && (
