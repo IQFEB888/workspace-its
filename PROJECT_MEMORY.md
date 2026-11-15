@@ -6,7 +6,7 @@
 
 ## 1. Informazioni Generali & Versione
 - **Nome Applicazione**: `Workspace ITS`
-- **Versione Attuale**: `v3.0.0` (`APP_VERSION` in `src/utils/editorTools.ts`, mostrata nel badge fisso in basso a sinistra `.app-version-badge`).
+- **Versione Attuale**: `v3.1.0` (`APP_VERSION` in `src/utils/editorTools.ts`, mostrata nel badge fisso in basso a sinistra `.app-version-badge`).
 - **REGOLA OBBLIGATORIA DI VERSIONING**: **Ad ogni singola modifica al codice, incrementare sempre `APP_VERSION` in `src/utils/editorTools.ts`** (e aggiornare `PROJECT_MEMORY.md`), così che l'utente possa verificare immediatamente dal badge in basso a sinistra di avere l'ultima versione su tutti i dispositivi.
 - **PWA & Routing**:
   - Configurata con `vite.config.ts` (`base: './'`), `public/manifest.json` (`start_url: './'`, `scope: './'`) e `public/sw.js` per funzionare sia su AI Studio sia su GitHub Pages (`https://iqfeb888.github.io/...`) senza errori 404 quando installata come app desktop/mobile.
@@ -36,7 +36,8 @@ L'editor `#notes-area` in `src/App.tsx` (supportato da `src/utils/editorTools.ts
      - **JavaScript / TypeScript, HTML/CSS, JSON** (locali nel browser) e **Python, C/C++, Java, PHP, Bash** (tramite Wandbox API keyless).
 4. **Foto Ridimensionabili dai Bordi (8 Maniglie) & Disegni Modificabili dopo `Esc`**:
    - Cliccando una foto o un tratto disegnato (anche dopo aver premuto `Esc`), compare la cornice `.note-object-selection-frame` con 8 maniglie trascinabili (`nw, n, ne, e, se, s, sw, w`), trascinamento libero col mouse e pulsante `🗑️ Elimina` (oltre ai tasti `Canc` / `Backspace`).
-5. **Barra Orizzontale Semplificata per il Disegno (`isDrawingMode`) & Animazione Slide-Down**:
+5. **Barra Orizzontale Semplificata per il Disegno (`isDrawingMode`), Collasso Barra Strumenti & Animazione Slide-Down**:
+   - Rimosso il vecchio tasto `⛶ Massimizza Spazio` e sostituito con il controllo di collasso della barra strumenti degli appunti (`isEditorToolbarCollapsed`, persistito in `localStorage`) tramite i pulsanti in alto a destra (`🛠️ ▲ Nascondi Strumenti` / `🛠️ ▼ Strumenti`, `▲` nella barra delle schede e `▲ Nascondi` a destra nella barra strumenti).
    - Quando `isDrawingMode` è attivo, la barra superiore dell'editor viene sostituita da un'unica barra orizzontale minimale con **✏️ Penna**, **🧹 Gomma**, colori rapidi, **↩️ Annulla**, **🗑️ Pulisci** e **✓ Chiudi Penna**, evitando qualsiasi doppia barra sovrapposta.
    - Sia `.editor-toolbar` sia `.notes-drawing-bar` utilizzano l'animazione `@keyframes toolbarSlideDown` (`toolbar-slide-down`) per comparire con una transizione fluida dall'alto verso il basso.
 

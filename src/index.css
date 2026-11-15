@@ -5203,3 +5203,49 @@ body.is-resizing-column object {
   transform-origin: top center;
   will-change: opacity, transform;
 }
+
+/* 8. Collapsible Notes Editor Toolbar Toggle Buttons (Top-Right) */
+.toolbar-corner-toggle-btn {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #cbd5e1;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.16s ease;
+}
+.toolbar-corner-toggle-btn:hover {
+  background: rgba(99, 102, 241, 0.22);
+  border-color: rgba(99, 102, 241, 0.45);
+  color: #ffffff;
+}
+.toolbar-corner-toggle-btn.is-collapsed {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+}
+
+.toolbar-collapse-header-btn.is-collapsed {
+  background: rgba(56, 189, 248, 0.15) !important;
+  border-color: rgba(56, 189, 248, 0.42) !important;
+  color: #38bdf8 !important;
+}
+
+.editor-toolbar .toolbar-inline-collapse-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #94a3b8;
+}
+.editor-toolbar .toolbar-inline-collapse-btn:hover {
+  background: rgba(244, 63, 94, 0.16);
+  border-color: rgba(244, 63, 94, 0.4);
+  color: #fda4af;
+}

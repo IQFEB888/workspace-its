@@ -135,7 +135,14 @@ export default function App() {
   const [isImmersion, setIsImmersion] = useState<boolean>(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [isChatCollapsed, setIsChatCollapsed] = useState<boolean>(false);
-  const [isNotesMaximized, setIsNotesMaximized] = useState<boolean>(false);
+  const [isNotesMaximized] = useState<boolean>(false);
+  const [isEditorToolbarCollapsed, setIsEditorToolbarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ws_editor_toolbar_collapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
   const [activeTab, setActiveTab] = useState<'notes' | 'materials' | 'calendar'>('notes');
   const [calendarEvents, setCalendarEvents] = useState<CalendarEventItem[]>(() =>
     WorkspaceService.getLocalCalendarEvents()
@@ -1607,9 +1614,17 @@ export default function App() {
     }
   };
 
-  // Fullscreen notes
-  const handleToggleFullscreenNotes = () => {
-    setIsNotesMaximized(prev => !prev);
+  // Toggle collapsible notes editor toolbar
+  const handleToggleEditorToolbar = () => {
+    setIsEditorToolbarCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('ws_editor_toolbar_collapsed', next ? '1' : '0');
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
   };
 
   // Subject change
@@ -5941,9 +5956,20 @@ REGOLE TASSATIVE:
                   </button>
                 </div>
                 <div className="notes-header-right">
-                  <button className="header-btn" id="fullscreen-btn" onClick={handleToggleFullscreenNotes}>
-                    {isNotesMaximized ? '🗗 Riduci' : '⛶ Massimizza Spazio'}
-                  </button>
+                  {activeTab === 'notes' && (
+                    <button
+                      type="button"
+                      className={`header-btn toolbar-collapse-header-btn ${isEditorToolbarCollapsed ? 'is-collapsed' : ''}`}
+                      onClick={handleToggleEditorToolbar}
+                      title={
+                        isEditorToolbarCollapsed
+                          ? 'Mostra barra strumenti degli appunti'
+                          : 'Nascondi barra strumenti degli appunti'
+                      }
+                    >
+                      {isEditorToolbarCollapsed ? '🛠️ ▼ Strumenti' : '🛠️ ▲ Nascondi Strumenti'}
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -6055,9 +6081,20 @@ REGOLE TASSATIVE:
                     👑🗑️ Elimina Stanza
                   </button>
                 )}
-                <button className="header-btn" id="fullscreen-btn" onClick={handleToggleFullscreenNotes}>
-                  {isNotesMaximized ? '🗗 Riduci' : '⛶ Massimizza'}
-                </button>
+                {activeTab === 'notes' && (
+                  <button
+                    type="button"
+                    className={`header-btn toolbar-collapse-header-btn ${isEditorToolbarCollapsed ? 'is-collapsed' : ''}`}
+                    onClick={handleToggleEditorToolbar}
+                    title={
+                      isEditorToolbarCollapsed
+                        ? 'Mostra barra strumenti degli appunti'
+                        : 'Nascondi barra strumenti degli appunti'
+                    }
+                  >
+                    {isEditorToolbarCollapsed ? '🛠️ ▼ Strumenti' : '🛠️ ▲ Nascondi Strumenti'}
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -6150,9 +6187,21 @@ REGOLE TASSATIVE:
                   >
                     +
                   </button>
+                  <button
+                    type="button"
+                    className={`toolbar-corner-toggle-btn ${isEditorToolbarCollapsed ? 'is-collapsed' : ''}`}
+                    onClick={handleToggleEditorToolbar}
+                    title={
+                      isEditorToolbarCollapsed
+                        ? 'Mostra barra degli strumenti degli appunti'
+                        : 'Nascondi barra degli strumenti degli appunti'
+                    }
+                  >
+                    {isEditorToolbarCollapsed ? '🛠️ ▼' : '▲'}
+                  </button>
                 </div>
 
-                {/* Simplified Horizontal Drawing Toolbar when isDrawingMode is active, or Rich Text Toolbar otherwise */}
+                {/* Simplified Horizontal Drawing Toolbar when isDrawingMode is active, or Collapsible Rich Text Toolbar otherwise */}
                 {isDrawingMode ? (
                   <div key="toolbar-drawing" className="editor-toolbar notes-drawing-bar toolbar-slide-down">
                     <button
@@ -6250,7 +6299,7 @@ REGOLE TASSATIVE:
                       ✓ Chiudi Penna
                     </button>
                   </div>
-                ) : (
+                ) : !isEditorToolbarCollapsed ? (
                 <div key="toolbar-editor" className="editor-toolbar toolbar-slide-down">
                   <button
                     type="button"
@@ -6628,9 +6677,17 @@ REGOLE TASSATIVE:
                     >
                       💾 Scarica
                     </button>
+                    <button
+                      type="button"
+                      className="editor-action-btn toolbar-inline-collapse-btn"
+                      onClick={handleToggleEditorToolbar}
+                      title="Nascondi la barra degli strumenti degli appunti"
+                    >
+                      ▲ Nascondi
+                    </button>
                   </div>
                 </div>
-                )}
+                ) : null}
 
                 {/* Floating Interactive Table Editing Bar (when cursor is inside a .note-table and not drawing) */}
                 {activeTableCell && !isDrawingMode && (
