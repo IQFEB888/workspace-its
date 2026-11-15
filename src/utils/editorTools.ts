@@ -32,7 +32,8 @@ export const CODE_LANGUAGES: CodeLanguageOption[] = [
     id: 'sql',
     label: 'SQL / Database',
     badge: 'SQL',
-    sample: 'SELECT nome, voto\nFROM esami\nWHERE voto >= 18;'
+    sample:
+      "CREATE TABLE studenti (\n  id INT PRIMARY KEY,\n  nome VARCHAR(50),\n  voto INT\n);\nINSERT INTO studenti VALUES (1, 'Marco', 28), (2, 'Giulia', 30);\nSELECT * FROM studenti WHERE voto >= 28;"
   },
   {
     id: 'java',
@@ -963,21 +964,21 @@ export function buildSvgElementString(
       const p = points[0];
       const r = Math.max(2, strokeWidth / 2);
       const opacity = tool === 'highlighter' ? '0.38' : '1';
-      return `<circle id="${strokeId}" data-stroke="true" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" fill="${color}" opacity="${opacity}" />`;
+      return `<circle id="${strokeId}" data-stroke="true" data-draw-item="true" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" fill="${color}" opacity="${opacity}" />`;
     }
     const d = points
       .map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
       .join(' ');
     const width = tool === 'highlighter' ? Math.max(14, strokeWidth * 2.6) : strokeWidth;
     const opacity = tool === 'highlighter' ? '0.36' : '0.96';
-    return `<path id="${strokeId}" data-stroke="true" d="${d}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" opacity="${opacity}" />`;
+    return `<path id="${strokeId}" data-stroke="true" data-draw-item="true" d="${d}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" opacity="${opacity}" />`;
   }
 
   const start = points[0];
   const end = points[points.length - 1];
 
   if (tool === 'line') {
-    return `<line id="${strokeId}" data-stroke="true" x1="${start.x.toFixed(1)}" y1="${start.y.toFixed(1)}" x2="${end.x.toFixed(1)}" y2="${end.y.toFixed(1)}" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round" />`;
+    return `<line id="${strokeId}" data-stroke="true" data-draw-item="true" x1="${start.x.toFixed(1)}" y1="${start.y.toFixed(1)}" x2="${end.x.toFixed(1)}" y2="${end.y.toFixed(1)}" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round" />`;
   }
 
   if (tool === 'rect') {
@@ -985,7 +986,7 @@ export function buildSvgElementString(
     const y = Math.min(start.y, end.y);
     const w = Math.max(4, Math.abs(end.x - start.x));
     const h = Math.max(4, Math.abs(end.y - start.y));
-    return `<rect id="${strokeId}" data-stroke="true" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="6" fill="none" stroke="${color}" stroke-width="${strokeWidth}" />`;
+    return `<rect id="${strokeId}" data-stroke="true" data-draw-item="true" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="6" fill="none" stroke="${color}" stroke-width="${strokeWidth}" />`;
   }
 
   if (tool === 'arrow') {
@@ -998,7 +999,7 @@ export function buildSvgElementString(
     const x2 = end.x - headLen * Math.cos(angle + Math.PI / 6);
     const y2 = end.y - headLen * Math.sin(angle + Math.PI / 6);
     const d = `M ${start.x.toFixed(1)} ${start.y.toFixed(1)} L ${end.x.toFixed(1)} ${end.y.toFixed(1)} M ${end.x.toFixed(1)} ${end.y.toFixed(1)} L ${x1.toFixed(1)} ${y1.toFixed(1)} M ${end.x.toFixed(1)} ${end.y.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)}`;
-    return `<path id="${strokeId}" data-stroke="true" d="${d}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" />`;
+    return `<path id="${strokeId}" data-stroke="true" data-draw-item="true" d="${d}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" />`;
   }
 
   return '';

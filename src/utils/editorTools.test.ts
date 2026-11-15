@@ -15,6 +15,7 @@ import {
   buildSvgElementString,
   parseAiNoteEditIntent
 } from './editorTools';
+import { executeSqlLocally, resetSqlDatabase } from './sqlEngine';
 
 test('evaluateMathExpression evaluates direct arithmetic, functions, and named formulas', () => {
   assert.equal(evaluateMathExpression('125 * 4'), '500');
@@ -124,6 +125,7 @@ test('buildInteractiveTableHtml and buildSvgElementString generate valid HTML/SV
   const arrowSvg = buildSvgElementString('arrow', [{ x: 10, y: 10 }, { x: 100, y: 50 }], '#38bdf8', 4);
   assert.ok(arrowSvg.includes('<path'));
   assert.ok(arrowSvg.includes('stroke="#38bdf8"'));
+  assert.ok(arrowSvg.includes('data-draw-item="true"'));
 });
 
 test('parseAiNoteEditIntent detects general and topic-specific highlight/edit commands', () => {
@@ -140,5 +142,30 @@ test('parseAiNoteEditIntent detects general and topic-specific highlight/edit co
   const normalQuestion = parseAiNoteEditIntent('spiegami cos e una inner join in sql');
   assert.equal(normalQuestion.isDirectNoteEdit, false);
 });
+
+test('executeSqlLocally creates tables, inserts rows, updates, deletes, and selects formatted results', () => {
+  resetSqlDatabase();
+  const script = `
+    CREATE TABLE corsi (
+      id INT PRIMARY KEY AUTOINCREMENT,
+      titolo VARCHAR(100),
+      crediti INT
+    );
+    INSERT INTO corsi (titolo, crediti) VALUES ('Database SQL', 10), ('Reti Cloud', 8), ('Sviluppo Web', 12);
+    UPDATE corsi SET crediti = 15 WHERE titolo = 'Database SQL';
+    DELETE FROM corsi WHERE crediti < 10;
+    SELECT id, titolo, crediti FROM corsi ORDER BY crediti DESC;
+  `;
+  const res = executeSqlLocally(script);
+  assert.equal(res.handled, true);
+  assert.equal(res.stderr, '');
+  assert.ok(res.stdout.includes("Tabella 'corsi' creata"));
+  assert.ok(res.stdout.includes('Database SQL'));
+  assert.ok(res.stdout.includes('15'));
+  assert.ok(res.stdout.includes('Sviluppo Web'));
+  assert.ok(!res.stdout.includes('Reti Cloud'));
+});
+
+
 
 

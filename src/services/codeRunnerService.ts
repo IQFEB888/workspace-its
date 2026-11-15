@@ -1,4 +1,5 @@
 import { callGeminiWithRotation } from './geminiService';
+import { executeSqlLocally, formatAsciiTable } from '../utils/sqlEngine';
 
 export interface CodeExecutionResult {
   stdout: string;
@@ -199,7 +200,13 @@ export async function executeCodeBlock(
     };
   }
 
-  if (lang === 'javascript') {
+  const looksLikeSql =
+    /^\s*(?:CREATE\s+(?:TEMP\s+|TEMPORARY\s+)?TABLE|DROP\s+TABLE|ALTER\s+TABLE|TRUNCATE\s+TABLE|INSERT\s+INTO|UPDATE\s+[a-zA-Z0-9_`"]+\s+SET|DELETE\s+FROM|SELECT\s+[\s\S]+?\s+FROM|SHOW\s+TABLES|DESCRIBE\s+|DESC\s+)/im.test(
+      code
+    );
+  const effectiveLang = looksLikeSql ? 'sql' : lang;
+
+  if (effectiveLang === 'javascript') {
     const jsRes = runJavaScriptInBrowser(code);
     // If JS threw a ReferenceError because it's a partial snippet using undeclared variables (e.g. `lista`), and Gemini key is available, offer fallback
     if (jsRes.stderr.includes('ReferenceError') && apiKeys.length > 0) {
@@ -247,8 +254,49 @@ export async function executeCodeBlock(
     }
   }
 
-  if (lang === 'sql') {
-    return runWithGeminiSimulator(code, 'sql', apiKeys, selectedModel);
+  if (effectiveLang === 'sql') {
+    const start = performance.now();
+    const localSql = executeSqlLocally(code);
+    if (localSql.handled) {
+      return {
+        stdout: localSql.stdout || (!localSql.stderr ? '✓ Query SQL eseguita con successo.' : ''),
+        stderr: localSql.stderr,
+        durationMs: Math.max(1, Math.round(performance.now() - start)),
+        engineLabel: 'Motore SQL Relazionale (Locale • Zero Key)'
+      };
+    }
+
+    // If user ran SELECT on a table they haven't created yet:
+    if (apiKeys && apiKeys.length > 0) {
+      const simRes = await runWithGeminiSimulator(code, 'sql', apiKeys, selectedModel);
+      if (simRes.stdout && !simRes.stderr) {
+        return {
+          ...simRes,
+          stdout: localSql.stdout ? `${localSql.stdout}\n\n${simRes.stdout}` : simRes.stdout
+        };
+      }
+    }
+
+    // Zero-key local fallback when querying an uncreated table: show helpful demo result + hint
+    const tblMatch = code.match(/FROM\s+[`"']?([a-zA-Z0-9_]+)[`"']?/i);
+    const tblName = tblMatch ? tblMatch[1] : 'esempio';
+    const demoTable = formatAsciiTable(
+      ['id', 'nome', 'valore', 'stato'],
+      [
+        { id: 1, nome: `${tblName}_item_1`, valore: 100, stato: 'ATTIVO' },
+        { id: 2, nome: `${tblName}_item_2`, valore: 250, stato: 'ATTIVO' },
+        { id: 3, nome: `${tblName}_item_3`, valore: 80, stato: 'COMPLETATO' }
+      ]
+    );
+    return {
+      stdout:
+        (localSql.stdout ? `${localSql.stdout}\n\n` : '') +
+        `ℹ️ Nota: la tabella '${tblName}' non era ancora stata creata con CREATE TABLE, ecco un'anteprima simulata:\n` +
+        demoTable,
+      stderr: '',
+      durationMs: Math.max(1, Math.round(performance.now() - start)),
+      engineLabel: 'Motore SQL Relazionale (Locale • Zero Key)'
+    };
   }
 
   // Python, C/C++, Java, PHP, Bash -> try free keyless Wandbox first

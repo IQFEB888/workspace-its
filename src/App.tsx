@@ -177,8 +177,15 @@ export default function App() {
   const isPointerDrawingRef = useRef<boolean>(false);
   const tempDrawElementRef = useRef<SVGElement | null>(null);
 
-  // Selected Movable / Anchored Image State in Notes
+  // Selected Movable / Anchored Image & Post-Esc Drawing State in Notes
   const [selectedImageEl, setSelectedImageEl] = useState<HTMLImageElement | null>(null);
+  const [selectedDrawingEl, setSelectedDrawingEl] = useState<SVGElement | null>(null);
+  const [selectionBoxRect, setSelectionBoxRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const [selectedImageMeta, setSelectedImageMeta] = useState<{
     layout: ImageLayoutMode;
     pinned: boolean;
@@ -188,12 +195,38 @@ export default function App() {
     pinned: false,
     widthPct: 60
   });
+  const notesStageRef = useRef<HTMLDivElement>(null);
+  const lastLoadedNoteKeyRef = useRef<string>('');
   const draggingImageRef = useRef<{
     img: HTMLImageElement;
     startX: number;
     startY: number;
     origLeft: number;
     origTop: number;
+    hasMoved: boolean;
+  } | null>(null);
+  const draggingDrawingRef = useRef<{
+    el: SVGElement;
+    startX: number;
+    startY: number;
+    origTx: number;
+    origTy: number;
+    origSx: number;
+    origSy: number;
+  } | null>(null);
+  const resizingObjectRef = useRef<{
+    kind: 'image' | 'drawing';
+    handle: 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+    startX: number;
+    startY: number;
+    origWidth: number;
+    origHeight: number;
+    origLeft: number;
+    origTop: number;
+    origTx: number;
+    origTy: number;
+    origSx: number;
+    origSy: number;
   } | null>(null);
 
   // Active Interactive Table Cell State in Notes
@@ -1003,6 +1036,61 @@ export default function App() {
     };
   }, [workspaceMode, activeRoomId, currentUser, activeRoomPageId]);
 
+  // Helper to get scroll storage key for the current note page
+  const getNoteScrollStorageKey = useCallback(() => {
+    return workspaceMode === 'shared'
+      ? `ws_notes_scroll_shared_${activeRoomId}_${activeRoomPageId}`
+      : `ws_notes_scroll_personal_${activeSubject}_${activePageId}`;
+  }, [workspaceMode, activeRoomId, activeRoomPageId, activeSubject, activePageId]);
+
+  const handleNotesScroll = useCallback(() => {
+    const el = notesAreaRef.current;
+    if (!el) return;
+    const top = Math.round(el.scrollTop);
+    try {
+      localStorage.setItem(getNoteScrollStorageKey(), String(top));
+      localStorage.setItem('ws_notes_scroll_last', String(top));
+    } catch {
+      // ignore storage quota errors
+    }
+    // Keep selection frame aligned while scrolling
+    const activeTarget = selectedImageEl || selectedDrawingEl;
+    if (activeTarget && notesStageRef.current && el.contains(activeTarget)) {
+      const stageRect = notesStageRef.current.getBoundingClientRect();
+      const tRect = activeTarget.getBoundingClientRect();
+      setSelectionBoxRect({
+        top: Math.round(tRect.top - stageRect.top),
+        left: Math.round(tRect.left - stageRect.left),
+        width: Math.max(24, Math.round(tRect.width)),
+        height: Math.max(24, Math.round(tRect.height))
+      });
+    }
+  }, [getNoteScrollStorageKey, selectedImageEl, selectedDrawingEl]);
+
+  const restoreNotesScrollPosition = useCallback(() => {
+    const el = notesAreaRef.current;
+    if (!el) return;
+    try {
+      const specificRaw = localStorage.getItem(getNoteScrollStorageKey());
+      const fallbackRaw = localStorage.getItem('ws_notes_scroll_last');
+      const savedTop = parseInt(specificRaw ?? fallbackRaw ?? '0', 10);
+      if (!isNaN(savedTop) && savedTop > 0) {
+        requestAnimationFrame(() => {
+          if (notesAreaRef.current) {
+            notesAreaRef.current.scrollTop = savedTop;
+          }
+        });
+        setTimeout(() => {
+          if (notesAreaRef.current && Math.abs(notesAreaRef.current.scrollTop - savedTop) > 10) {
+            notesAreaRef.current.scrollTop = savedTop;
+          }
+        }, 80);
+      }
+    } catch {
+      // ignore
+    }
+  }, [getNoteScrollStorageKey]);
+
   // Sync active page content into editor (handles both personal workspace and shared room modes)
   useEffect(() => {
     if (workspaceMode === 'shared') {
@@ -1013,8 +1101,16 @@ export default function App() {
       }
       const rawContent = currentRoomPage ? currentRoomPage.content : '';
       const targetContent = sanitizeAndUpgradeNoteHtml(rawContent).cleanedHtml;
-      if (notesAreaRef.current && notesAreaRef.current.innerHTML !== targetContent) {
+      const noteKey = `shared:${activeRoomId}:${currentRoomPage?.id || ''}:${activeTab}`;
+      const isEditingSelf = document.activeElement === notesAreaRef.current;
+      if (
+        notesAreaRef.current &&
+        (lastLoadedNoteKeyRef.current !== noteKey || (!isEditingSelf && !selectedImageEl && !selectedDrawingEl && !isDrawingMode)) &&
+        notesAreaRef.current.innerHTML !== targetContent
+      ) {
         notesAreaRef.current.innerHTML = targetContent;
+        lastLoadedNoteKeyRef.current = noteKey;
+        restoreNotesScrollPosition();
       }
       return;
     }
@@ -1027,13 +1123,35 @@ export default function App() {
     }
     const rawContent = currentPage ? currentPage.content : '';
     const targetContent = sanitizeAndUpgradeNoteHtml(rawContent).cleanedHtml;
-    if (notesAreaRef.current && notesAreaRef.current.innerHTML !== targetContent) {
-      notesAreaRef.current.innerHTML = targetContent;
+    const noteKey = `personal:${activeSubject}:${currentPage?.id || ''}:${activeTab}`;
+    if (
+      notesAreaRef.current &&
+      (lastLoadedNoteKeyRef.current !== noteKey || (!notesAreaRef.current.innerHTML.trim() && !!targetContent.trim()))
+    ) {
+      if (notesAreaRef.current.innerHTML !== targetContent) {
+        notesAreaRef.current.innerHTML = targetContent;
+      }
+      lastLoadedNoteKeyRef.current = noteKey;
+      restoreNotesScrollPosition();
     }
     // Update drive link for active subject
     const currentSub = subjects.find(s => s.id === activeSubject);
     setDriveLink(currentSub?.driveLink || '');
-  }, [workspaceMode, activeSubject, activePageId, pages, subjects, activeRoomPages, activeRoomPageId, authLoading, activeTab]);
+  }, [
+    workspaceMode,
+    activeSubject,
+    activePageId,
+    pages,
+    subjects,
+    activeRoomPages,
+    activeRoomPageId,
+    authLoading,
+    activeTab,
+    selectedImageEl,
+    selectedDrawingEl,
+    isDrawingMode,
+    restoreNotesScrollPosition
+  ]);
 
   // Scroll chat messages to bottom on new message or tab opening
   useEffect(() => {
@@ -2242,9 +2360,22 @@ export default function App() {
       e.stopPropagation();
       const codeBlock = runBtn.closest('.note-code-block') as HTMLElement | null;
       if (!codeBlock) return;
-      const lang = codeBlock.getAttribute('data-lang') || 'javascript';
+      const selectEl = codeBlock.querySelector('.note-code-lang-select') as HTMLSelectElement | null;
+      const lang = selectEl?.value || codeBlock.getAttribute('data-lang') || 'javascript';
+      if (selectEl && codeBlock.getAttribute('data-lang') !== lang) {
+        codeBlock.setAttribute('data-lang', lang);
+      }
       const codeEl = codeBlock.querySelector('code');
-      const rawCode = codeEl?.textContent || '';
+      let rawCode = codeEl?.textContent || '';
+      if (
+        lang === 'sql' &&
+        codeEl &&
+        rawCode.trim() === 'for (let i = 0; i < 10; i++) {\n    console.log(i);\n}'
+      ) {
+        rawCode =
+          "CREATE TABLE IF NOT EXISTS studenti (\n    id INT PRIMARY KEY AUTOINCREMENT,\n    nome VARCHAR(50),\n    corso VARCHAR(50),\n    voto INT\n);\nINSERT INTO studenti (nome, corso, voto) VALUES ('Marco Rossi', 'Cloud & DevOps', 29), ('Giulia Bianchi', 'Database SQL', 30);\nSELECT * FROM studenti ORDER BY voto DESC;";
+        codeEl.innerHTML = highlightCodeSyntax(rawCode, 'sql');
+      }
       if (!rawCode.trim()) {
         showToast('Scrivi prima del codice dentro il blocco per eseguirlo!', 'error');
         return;
@@ -2368,9 +2499,44 @@ export default function App() {
       return;
     }
 
-    // Track if user clicked an image inside #notes-area (Word-style movable & anchored image bar)
+    // If user is currently in active Pen Drawing Mode, do NOT open image/drawing selection toolbars
+    if (isDrawingMode) {
+      return;
+    }
+
+    // Track if user clicked an SVG drawing item after pressing Esc
+    const clickedDrawing = target.closest('[data-draw-item="true"], [data-stroke="true"]') as SVGElement | null;
+    if (clickedDrawing && notesAreaRef.current?.contains(clickedDrawing)) {
+      e.preventDefault();
+      e.stopPropagation();
+      notesAreaRef.current.querySelectorAll('img.selected-note-image').forEach(el => {
+        el.classList.remove('selected-note-image');
+      });
+      notesAreaRef.current.querySelectorAll('[data-selected-drawing="true"]').forEach(el => {
+        if (el !== clickedDrawing) el.removeAttribute('data-selected-drawing');
+      });
+      clickedDrawing.setAttribute('data-selected-drawing', 'true');
+      setSelectedImageEl(null);
+      setSelectedDrawingEl(clickedDrawing);
+      if (notesStageRef.current) {
+        const stageRect = notesStageRef.current.getBoundingClientRect();
+        const dRect = clickedDrawing.getBoundingClientRect();
+        setSelectionBoxRect({
+          top: Math.round(dRect.top - stageRect.top),
+          left: Math.round(dRect.left - stageRect.left),
+          width: Math.max(24, Math.round(dRect.width)),
+          height: Math.max(24, Math.round(dRect.height))
+        });
+      }
+      return;
+    }
+
+    // Track if user clicked an image inside #notes-area (Word-style movable & border-resizable image)
     const clickedImg = target.closest('img') as HTMLImageElement | null;
     if (clickedImg && notesAreaRef.current?.contains(clickedImg)) {
+      notesAreaRef.current.querySelectorAll('[data-selected-drawing="true"]').forEach(el => {
+        el.removeAttribute('data-selected-drawing');
+      });
       notesAreaRef.current.querySelectorAll('img.selected-note-image').forEach(el => {
         if (el !== clickedImg) el.classList.remove('selected-note-image');
       });
@@ -2378,17 +2544,37 @@ export default function App() {
       const layout = (clickedImg.getAttribute('data-layout') as ImageLayoutMode) || 'inline';
       const pinned = clickedImg.getAttribute('data-pinned') === 'true';
       const rawW = parseInt(clickedImg.getAttribute('data-width-pct') || '60', 10);
+      setSelectedDrawingEl(null);
       setSelectedImageEl(clickedImg);
       setSelectedImageMeta({
         layout,
         pinned,
         widthPct: isNaN(rawW) ? 60 : rawW
       });
-    } else if (selectedImageEl) {
-      notesAreaRef.current?.querySelectorAll('img.selected-note-image').forEach(el => {
-        el.classList.remove('selected-note-image');
-      });
-      setSelectedImageEl(null);
+      if (notesStageRef.current) {
+        const stageRect = notesStageRef.current.getBoundingClientRect();
+        const iRect = clickedImg.getBoundingClientRect();
+        setSelectionBoxRect({
+          top: Math.round(iRect.top - stageRect.top),
+          left: Math.round(iRect.left - stageRect.left),
+          width: Math.max(24, Math.round(iRect.width)),
+          height: Math.max(24, Math.round(iRect.height))
+        });
+      }
+    } else {
+      if (selectedImageEl) {
+        notesAreaRef.current?.querySelectorAll('img.selected-note-image').forEach(el => {
+          el.classList.remove('selected-note-image');
+        });
+        setSelectedImageEl(null);
+      }
+      if (selectedDrawingEl) {
+        notesAreaRef.current?.querySelectorAll('[data-selected-drawing="true"]').forEach(el => {
+          el.removeAttribute('data-selected-drawing');
+        });
+        setSelectedDrawingEl(null);
+      }
+      setSelectionBoxRect(null);
     }
 
     // Track if user clicked inside an interactive table cell (.note-table td or th)
@@ -2510,27 +2696,48 @@ export default function App() {
   };
 
   // ==========================================
-  // MOVABLE & ANCHORED IMAGES IN NOTES (WORD-STYLE)
+  // MOVABLE, BORDER-RESIZABLE IMAGES & POST-ESC INTERACTIVE DRAWINGS IN NOTES
   // ==========================================
-  const handleImageLayoutChange = (mode: ImageLayoutMode) => {
-    if (!selectedImageEl || !notesAreaRef.current?.contains(selectedImageEl)) return;
-    selectedImageEl.setAttribute('data-layout', mode);
-    if (mode === 'front' || mode === 'behind') {
-      selectedImageEl.style.position = 'absolute';
-      if (!selectedImageEl.style.left) selectedImageEl.style.left = '32px';
-      if (!selectedImageEl.style.top) {
-        const editorRect = notesAreaRef.current.getBoundingClientRect();
-        const imgRect = selectedImageEl.getBoundingClientRect();
-        const relTop = Math.max(16, Math.round(imgRect.top - editorRect.top + notesAreaRef.current.scrollTop));
-        selectedImageEl.style.top = `${relTop}px`;
-      }
-    } else {
-      selectedImageEl.style.position = '';
-      selectedImageEl.style.left = '';
-      selectedImageEl.style.top = '';
+  const syncSelectionBoxToElement = useCallback((el: Element | null) => {
+    if (!el || !notesStageRef.current || !notesAreaRef.current?.contains(el)) {
+      setSelectionBoxRect(null);
+      return;
     }
+    const stageRect = notesStageRef.current.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    setSelectionBoxRect({
+      top: Math.round(r.top - stageRect.top),
+      left: Math.round(r.left - stageRect.left),
+      width: Math.max(24, Math.round(r.width)),
+      height: Math.max(24, Math.round(r.height))
+    });
+  }, []);
+
+  const handleImageLayoutChange = (mode: ImageLayoutMode) => {
+    const img =
+      selectedImageEl && notesAreaRef.current?.contains(selectedImageEl)
+        ? selectedImageEl
+        : (notesAreaRef.current?.querySelector('img.selected-note-image') as HTMLImageElement | null);
+    if (!img || !notesAreaRef.current) return;
+
+    img.setAttribute('data-layout', mode);
+    if (mode === 'front' || mode === 'behind') {
+      const editorRect = notesAreaRef.current.getBoundingClientRect();
+      const imgRect = img.getBoundingClientRect();
+      const relLeft = Math.max(12, Math.round(imgRect.left - editorRect.left + notesAreaRef.current.scrollLeft));
+      const relTop = Math.max(12, Math.round(imgRect.top - editorRect.top + notesAreaRef.current.scrollTop));
+      img.style.position = 'absolute';
+      if (!img.style.left) img.style.left = `${relLeft}px`;
+      if (!img.style.top) img.style.top = `${relTop}px`;
+    } else {
+      img.style.position = '';
+      img.style.left = '';
+      img.style.top = '';
+    }
+    setSelectedImageEl(img);
     setSelectedImageMeta(prev => ({ ...prev, layout: mode }));
     handleEditorInput();
+    requestAnimationFrame(() => syncSelectionBoxToElement(img));
     const labels: Record<ImageLayoutMode, string> = {
       inline: 'In linea col testo',
       'wrap-left': 'Affiancata a Sinistra',
@@ -2542,9 +2749,13 @@ export default function App() {
   };
 
   const handleToggleImagePin = () => {
-    if (!selectedImageEl || !notesAreaRef.current?.contains(selectedImageEl)) return;
+    const img =
+      selectedImageEl && notesAreaRef.current?.contains(selectedImageEl)
+        ? selectedImageEl
+        : (notesAreaRef.current?.querySelector('img.selected-note-image') as HTMLImageElement | null);
+    if (!img) return;
     const nextPinned = !selectedImageMeta.pinned;
-    selectedImageEl.setAttribute('data-pinned', nextPinned ? 'true' : 'false');
+    img.setAttribute('data-pinned', nextPinned ? 'true' : 'false');
     setSelectedImageMeta(prev => ({ ...prev, pinned: nextPinned }));
     handleEditorInput();
     showToast(
@@ -2555,24 +2766,282 @@ export default function App() {
   };
 
   const handleImageWidthChange = (nextPct: number) => {
-    if (!selectedImageEl || !notesAreaRef.current?.contains(selectedImageEl)) return;
+    const img =
+      selectedImageEl && notesAreaRef.current?.contains(selectedImageEl)
+        ? selectedImageEl
+        : (notesAreaRef.current?.querySelector('img.selected-note-image') as HTMLImageElement | null);
+    if (!img) return;
     const clamped = Math.max(15, Math.min(100, Math.round(nextPct)));
-    selectedImageEl.setAttribute('data-width-pct', String(clamped));
-    selectedImageEl.style.width = `${clamped}%`;
-    selectedImageEl.style.maxWidth = `${clamped}%`;
+    img.setAttribute('data-width-pct', String(clamped));
+    img.style.width = `${clamped}%`;
+    img.style.height = 'auto';
+    img.style.maxWidth = '100%';
     setSelectedImageMeta(prev => ({ ...prev, widthPct: clamped }));
     handleEditorInput();
+    requestAnimationFrame(() => syncSelectionBoxToElement(img));
   };
 
-  const handleDeleteSelectedImage = () => {
-    if (!selectedImageEl) return;
-    selectedImageEl.remove();
+  const handleDeleteSelectedImage = useCallback(() => {
+    const img =
+      selectedImageEl && notesAreaRef.current?.contains(selectedImageEl)
+        ? selectedImageEl
+        : (notesAreaRef.current?.querySelector('img.selected-note-image') as HTMLImageElement | null);
+    if (img) {
+      img.remove();
+    } else if (selectedImageEl) {
+      selectedImageEl.remove();
+    }
     setSelectedImageEl(null);
+    setSelectionBoxRect(null);
     handleEditorInput();
     showToast('🗑️ Immagine rimossa dagli appunti.');
+  }, [selectedImageEl]);
+
+  const handleDeleteSelectedDrawing = useCallback(() => {
+    const drawEl =
+      selectedDrawingEl && notesAreaRef.current?.contains(selectedDrawingEl)
+        ? selectedDrawingEl
+        : (notesAreaRef.current?.querySelector('[data-selected-drawing="true"]') as SVGElement | null);
+    if (drawEl) {
+      drawEl.remove();
+    } else if (selectedDrawingEl) {
+      selectedDrawingEl.remove();
+    }
+    setSelectedDrawingEl(null);
+    setSelectionBoxRect(null);
+    handleEditorInput();
+    showToast('🗑️ Disegno rimosso dagli appunti.');
+  }, [selectedDrawingEl]);
+
+  const handleModifySelectedDrawingColor = (newColor: string) => {
+    const drawEl =
+      selectedDrawingEl && notesAreaRef.current?.contains(selectedDrawingEl)
+        ? selectedDrawingEl
+        : (notesAreaRef.current?.querySelector('[data-selected-drawing="true"]') as SVGElement | null);
+    if (!drawEl) return;
+    if (drawEl.tagName.toLowerCase() === 'circle') {
+      drawEl.setAttribute('fill', newColor);
+    } else {
+      drawEl.setAttribute('stroke', newColor);
+    }
+    setDrawingColor(newColor);
+    handleEditorInput();
   };
 
-  // Dragging unpinned images inside #notes-area
+  const handleModifySelectedDrawingWidth = (newWidth: number) => {
+    const drawEl =
+      selectedDrawingEl && notesAreaRef.current?.contains(selectedDrawingEl)
+        ? selectedDrawingEl
+        : (notesAreaRef.current?.querySelector('[data-selected-drawing="true"]') as SVGElement | null);
+    if (!drawEl) return;
+    if (drawEl.tagName.toLowerCase() === 'circle') {
+      drawEl.setAttribute('r', String(Math.max(2, newWidth / 2)));
+    } else {
+      drawEl.setAttribute('stroke-width', String(newWidth));
+    }
+    setDrawingWidth(newWidth);
+    handleEditorInput();
+    requestAnimationFrame(() => syncSelectionBoxToElement(drawEl));
+  };
+
+  // Start dragging one of the 8 border/corner resize handles on the selected Photo or Drawing
+  const handleStartResizeObject = (
+    handle: 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w',
+    e: React.MouseEvent
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!notesAreaRef.current) return;
+
+    const img =
+      selectedImageEl && notesAreaRef.current.contains(selectedImageEl)
+        ? selectedImageEl
+        : (notesAreaRef.current.querySelector('img.selected-note-image') as HTMLImageElement | null);
+
+    if (img) {
+      const editorRect = notesAreaRef.current.getBoundingClientRect();
+      const imgRect = img.getBoundingClientRect();
+      const origLeft =
+        parseFloat(img.style.left) ||
+        Math.max(0, Math.round(imgRect.left - editorRect.left + notesAreaRef.current.scrollLeft));
+      const origTop =
+        parseFloat(img.style.top) ||
+        Math.max(0, Math.round(imgRect.top - editorRect.top + notesAreaRef.current.scrollTop));
+
+      resizingObjectRef.current = {
+        kind: 'image',
+        handle,
+        startX: e.clientX,
+        startY: e.clientY,
+        origWidth: Math.max(40, imgRect.width),
+        origHeight: Math.max(40, imgRect.height),
+        origLeft,
+        origTop,
+        origTx: 0,
+        origTy: 0,
+        origSx: 1,
+        origSy: 1
+      };
+      return;
+    }
+
+    const drawEl =
+      selectedDrawingEl && notesAreaRef.current.contains(selectedDrawingEl)
+        ? selectedDrawingEl
+        : (notesAreaRef.current.querySelector('[data-selected-drawing="true"]') as SVGElement | null);
+
+    if (drawEl) {
+      const dRect = drawEl.getBoundingClientRect();
+      const origTx = parseFloat(drawEl.getAttribute('data-tx') || '0') || 0;
+      const origTy = parseFloat(drawEl.getAttribute('data-ty') || '0') || 0;
+      const origSx = parseFloat(drawEl.getAttribute('data-sx') || '1') || 1;
+      const origSy = parseFloat(drawEl.getAttribute('data-sy') || '1') || 1;
+      resizingObjectRef.current = {
+        kind: 'drawing',
+        handle,
+        startX: e.clientX,
+        startY: e.clientY,
+        origWidth: Math.max(24, dRect.width),
+        origHeight: Math.max(24, dRect.height),
+        origLeft: 0,
+        origTop: 0,
+        origTx,
+        origTy,
+        origSx,
+        origSy
+      };
+    }
+  };
+
+  // Global mousemove / mouseup listener for smooth border resizing & object dragging
+  useEffect(() => {
+    const onGlobalMouseMove = (e: MouseEvent) => {
+      if (!notesAreaRef.current) return;
+
+      // 1. Border / Corner Resize Handle Dragging
+      if (resizingObjectRef.current) {
+        const {
+          kind,
+          handle,
+          startX,
+          startY,
+          origWidth,
+          origHeight,
+          origLeft,
+          origTop,
+          origTx,
+          origTy,
+          origSx,
+          origSy
+        } = resizingObjectRef.current;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        if (kind === 'image') {
+          const img =
+            selectedImageEl && notesAreaRef.current.contains(selectedImageEl)
+              ? selectedImageEl
+              : (notesAreaRef.current.querySelector('img.selected-note-image') as HTMLImageElement | null);
+          if (!img) return;
+
+          let nextW = origWidth;
+          let nextH = origHeight;
+          let nextLeft = origLeft;
+          let nextTop = origTop;
+
+          if (handle.includes('e')) nextW = Math.max(48, origWidth + dx);
+          if (handle.includes('w')) {
+            nextW = Math.max(48, origWidth - dx);
+            nextLeft = Math.max(0, origLeft + (origWidth - nextW));
+          }
+          if (handle.includes('s')) nextH = Math.max(48, origHeight + dy);
+          if (handle.includes('n')) {
+            nextH = Math.max(48, origHeight - dy);
+            nextTop = Math.max(0, origTop + (origHeight - nextH));
+          }
+
+          // Corner handles preserve aspect ratio unless Shift is held
+          if ((handle === 'nw' || handle === 'ne' || handle === 'sw' || handle === 'se') && !e.shiftKey) {
+            const ratio = origHeight / Math.max(1, origWidth);
+            nextH = Math.max(48, Math.round(nextW * ratio));
+            if (handle.includes('n')) {
+              nextTop = Math.max(0, origTop + (origHeight - nextH));
+            }
+          }
+
+          img.style.width = `${Math.round(nextW)}px`;
+          img.style.height = `${Math.round(nextH)}px`;
+          img.style.maxWidth = 'none';
+
+          const layout = (img.getAttribute('data-layout') as ImageLayoutMode) || 'inline';
+          if (layout === 'front' || layout === 'behind') {
+            img.style.left = `${Math.round(nextLeft)}px`;
+            img.style.top = `${Math.round(nextTop)}px`;
+          }
+          const editorW = Math.max(1, notesAreaRef.current.clientWidth);
+          const pct = Math.min(100, Math.max(10, Math.round((nextW / editorW) * 100)));
+          img.setAttribute('data-width-pct', String(pct));
+          setSelectedImageMeta(prev => ({ ...prev, widthPct: pct }));
+          syncSelectionBoxToElement(img);
+          return;
+        }
+
+        if (kind === 'drawing') {
+          const drawEl =
+            selectedDrawingEl && notesAreaRef.current.contains(selectedDrawingEl)
+              ? selectedDrawingEl
+              : (notesAreaRef.current.querySelector('[data-selected-drawing="true"]') as SVGElement | null);
+          if (!drawEl) return;
+
+          const scaleDeltaX = handle.includes('w') ? -dx / origWidth : handle.includes('e') ? dx / origWidth : 0;
+          const scaleDeltaY = handle.includes('n') ? -dy / origHeight : handle.includes('s') ? dy / origHeight : 0;
+          const nextSx = Math.max(0.25, Math.min(5, Number((origSx * (1 + scaleDeltaX)).toFixed(3))));
+          const nextSy = Math.max(0.25, Math.min(5, Number((origSy * (1 + (scaleDeltaY || scaleDeltaX))).toFixed(3))));
+
+          drawEl.setAttribute('data-sx', String(nextSx));
+          drawEl.setAttribute('data-sy', String(nextSy));
+          drawEl.setAttribute('transform', `translate(${origTx}, ${origTy}) scale(${nextSx}, ${nextSy})`);
+          drawEl.style.transformOrigin = 'center center';
+          drawEl.style.transformBox = 'fill-box';
+          syncSelectionBoxToElement(drawEl);
+          return;
+        }
+      }
+
+      // 2. Post-Esc Drawing Dragging
+      if (draggingDrawingRef.current) {
+        const { el, startX, startY, origTx, origTy, origSx, origSy } = draggingDrawingRef.current;
+        const nextTx = Math.round(origTx + (e.clientX - startX));
+        const nextTy = Math.round(origTy + (e.clientY - startY));
+        el.setAttribute('data-tx', String(nextTx));
+        el.setAttribute('data-ty', String(nextTy));
+        el.setAttribute('transform', `translate(${nextTx}, ${nextTy}) scale(${origSx}, ${origSy})`);
+        el.style.transformOrigin = 'center center';
+        el.style.transformBox = 'fill-box';
+        syncSelectionBoxToElement(el);
+      }
+    };
+
+    const onGlobalMouseUp = () => {
+      if (resizingObjectRef.current) {
+        resizingObjectRef.current = null;
+        handleEditorInput();
+      }
+      if (draggingDrawingRef.current) {
+        draggingDrawingRef.current = null;
+        handleEditorInput();
+      }
+    };
+
+    window.addEventListener('mousemove', onGlobalMouseMove);
+    window.addEventListener('mouseup', onGlobalMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onGlobalMouseMove);
+      window.removeEventListener('mouseup', onGlobalMouseUp);
+    };
+  }, [selectedImageEl, selectedDrawingEl, syncSelectionBoxToElement]);
+
+  // Dragging unpinned images or drawings inside #notes-area
   const handleNotesMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!notesAreaRef.current) return;
     const target = e.target as HTMLElement;
@@ -2600,7 +3069,7 @@ export default function App() {
 
       // If eraser tool is active, clicking a stroke deletes it
       if (drawingTool === 'eraser') {
-        const hitDrawItem = target.closest('[data-draw-item="true"]');
+        const hitDrawItem = target.closest('[data-draw-item="true"], [data-stroke="true"]');
         if (hitDrawItem && svg.contains(hitDrawItem)) {
           hitDrawItem.remove();
           handleEditorInput();
@@ -2624,17 +3093,41 @@ export default function App() {
       return;
     }
 
-    // 2. If clicking an image that is NOT pinned, allow dragging it freely
+    // 2. If clicking a drawn SVG stroke/shape when NOT in drawing mode (after Esc), allow dragging it freely
+    const drawEl = target.closest('[data-draw-item="true"], [data-stroke="true"]') as SVGElement | null;
+    if (drawEl && notesAreaRef.current.contains(drawEl)) {
+      e.preventDefault();
+      e.stopPropagation();
+      notesAreaRef.current.querySelectorAll('[data-selected-drawing="true"]').forEach(el => {
+        if (el !== drawEl) el.removeAttribute('data-selected-drawing');
+      });
+      drawEl.setAttribute('data-selected-drawing', 'true');
+      setSelectedImageEl(null);
+      setSelectedDrawingEl(drawEl);
+      syncSelectionBoxToElement(drawEl);
+
+      const origTx = parseFloat(drawEl.getAttribute('data-tx') || '0') || 0;
+      const origTy = parseFloat(drawEl.getAttribute('data-ty') || '0') || 0;
+      const origSx = parseFloat(drawEl.getAttribute('data-sx') || '1') || 1;
+      const origSy = parseFloat(drawEl.getAttribute('data-sy') || '1') || 1;
+      draggingDrawingRef.current = {
+        el: drawEl,
+        startX: e.clientX,
+        startY: e.clientY,
+        origTx,
+        origTy,
+        origSx,
+        origSy
+      };
+      return;
+    }
+
+    // 3. If clicking an image that is NOT pinned, allow dragging it freely anywhere in #notes-area
     const imgEl = target.closest('img') as HTMLImageElement | null;
     if (imgEl && notesAreaRef.current.contains(imgEl)) {
       const isPinned = imgEl.getAttribute('data-pinned') === 'true';
-      const layout = (imgEl.getAttribute('data-layout') as ImageLayoutMode) || 'inline';
-      if (!isPinned && (layout === 'front' || layout === 'behind' || e.altKey)) {
+      if (!isPinned) {
         e.preventDefault();
-        if (layout !== 'front' && layout !== 'behind') {
-          imgEl.setAttribute('data-layout', 'front');
-          imgEl.style.position = 'absolute';
-        }
         const editorRect = notesAreaRef.current.getBoundingClientRect();
         const imgRect = imgEl.getBoundingClientRect();
         const origLeft =
@@ -2644,14 +3137,13 @@ export default function App() {
           parseFloat(imgEl.style.top) ||
           Math.max(0, Math.round(imgRect.top - editorRect.top + notesAreaRef.current.scrollTop));
 
-        imgEl.style.left = `${origLeft}px`;
-        imgEl.style.top = `${origTop}px`;
         draggingImageRef.current = {
           img: imgEl,
           startX: e.clientX,
           startY: e.clientY,
           origLeft,
-          origTop
+          origTop,
+          hasMoved: false
         };
       }
     }
@@ -2689,15 +3181,27 @@ export default function App() {
       return;
     }
 
-    // 2. Live Image Drag update
+    // 2. Live Image Drag update (auto-promotes to free movement once dragged > 4px)
     if (draggingImageRef.current) {
-      const { img, startX, startY, origLeft, origTop } = draggingImageRef.current;
+      const { img, startX, startY, origLeft, origTop, hasMoved } = draggingImageRef.current;
       const dx = e.clientX - startX;
       const dy = e.clientY - startY;
+      if (!hasMoved && Math.hypot(dx, dy) < 4) return;
+
+      if (!hasMoved) {
+        draggingImageRef.current.hasMoved = true;
+        const layout = (img.getAttribute('data-layout') as ImageLayoutMode) || 'inline';
+        if (layout !== 'front' && layout !== 'behind') {
+          img.setAttribute('data-layout', 'front');
+          img.style.position = 'absolute';
+          setSelectedImageMeta(prev => ({ ...prev, layout: 'front' }));
+        }
+      }
       const nextLeft = Math.max(0, Math.round(origLeft + dx));
       const nextTop = Math.max(0, Math.round(origTop + dy));
       img.style.left = `${nextLeft}px`;
       img.style.top = `${nextTop}px`;
+      syncSelectionBoxToElement(img);
     }
   };
 
@@ -2709,17 +3213,22 @@ export default function App() {
       handleEditorInput();
     }
     if (draggingImageRef.current) {
+      const moved = draggingImageRef.current.hasMoved;
       draggingImageRef.current = null;
-      handleEditorInput();
+      if (moved) {
+        handleEditorInput();
+      }
     }
   };
 
   const handleUndoLastDrawing = () => {
     if (!notesAreaRef.current) return;
     const svg = notesAreaRef.current.querySelector('svg.note-drawing-svg');
-    const items = svg?.querySelectorAll('[data-draw-item="true"]');
+    const items = svg?.querySelectorAll('[data-draw-item="true"], [data-stroke="true"]');
     if (items && items.length > 0) {
       items[items.length - 1].remove();
+      setSelectedDrawingEl(null);
+      setSelectionBoxRect(null);
       handleEditorInput();
       showToast('↩️ Ultimo tratto rimosso.');
     } else {
@@ -2732,6 +3241,8 @@ export default function App() {
     const svg = notesAreaRef.current.querySelector('svg.note-drawing-svg');
     if (svg) {
       svg.remove();
+      setSelectedDrawingEl(null);
+      setSelectionBoxRect(null);
       handleEditorInput();
       showToast('🧹 Tutti i disegni sulla pagina sono stati rimossi.');
     }
@@ -2757,7 +3268,26 @@ export default function App() {
         });
         const codeEl = codeBlock.querySelector('.note-code-content') as HTMLElement | null;
         if (codeEl) {
-          const rawCode = codeEl.textContent || '';
+          const starterSnippets: Record<string, string> = {
+            javascript: 'for (let i = 0; i < 10; i++) {\n    console.log(i);\n}',
+            python: 'for i in range(5):\n    print("Valore:", i)',
+            sql: "CREATE TABLE IF NOT EXISTS studenti (\n    id INT PRIMARY KEY AUTOINCREMENT,\n    nome VARCHAR(50),\n    corso VARCHAR(50),\n    voto INT\n);\nINSERT INTO studenti (nome, corso, voto) VALUES ('Marco Rossi', 'Cloud & DevOps', 29), ('Giulia Bianchi', 'Database SQL', 30);\nSELECT * FROM studenti ORDER BY voto DESC;",
+            html: '<div style="padding:12px;background:#1e293b;color:#38bdf8;border-radius:8px;font-family:sans-serif;">\n  <h3 style="margin:0 0 6px 0;">Anteprima Live HTML</h3>\n  <p style="margin:0;color:#e2e8f0;">Modifica questo blocco e premi Esegui!</p>\n</div>',
+            json: '{\n  "progetto": "Workspace ITS",\n  "versione": "2.7.0",\n  "attivo": true\n}',
+            cpp: '#include <iostream>\nusing namespace std;\n\nint main() {\n    for (int i = 0; i < 5; i++) {\n        cout << "Iterazione: " << i << endl;\n    }\n    return 0;\n}',
+            java: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Ciao da Java!");\n    }\n}',
+            php: '<?php\nfor ($i = 1; $i <= 3; $i++) {\n    echo "Riga $i\\n";\n}\n?>',
+            bash: 'echo " Workspace ITS Shell"\nuname -a'
+          };
+          let rawCode = codeEl.textContent || '';
+          const trimmed = rawCode.trim();
+          const isDefaultStarter =
+            !trimmed ||
+            Object.values(starterSnippets).some(s => s.trim() === trimmed) ||
+            trimmed === '// Scrivi il tuo codice qui...';
+          if (isDefaultStarter && starterSnippets[newLang]) {
+            rawCode = starterSnippets[newLang];
+          }
           codeEl.innerHTML = highlightCodeSyntax(rawCode, newLang);
         }
         handleEditorInput();
@@ -2825,9 +3355,27 @@ export default function App() {
     }
   };
 
+  // Attach native 'change' listener to #notes-area so dynamically injected <select class="note-code-lang-select"> elements always trigger handleNotesAreaChange
+  useEffect(() => {
+    const el = notesAreaRef.current;
+    if (!el) return;
+    const onNativeChange = (ev: Event) => {
+      const t = ev.target as HTMLElement | null;
+      if (t && t.classList.contains('note-code-lang-select')) {
+        handleNotesAreaChange({ target: t } as unknown as React.FormEvent<HTMLDivElement>);
+      }
+    };
+    el.addEventListener('change', onNativeChange);
+    return () => el.removeEventListener('change', onNativeChange);
+  });
+
   // Handle live syntax re-highlighting in .note-code-pre and live formula evaluation in .note-formula-input on input
   const handleNotesAreaInput = (e: React.FormEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
+    if (target && target.classList.contains('note-code-lang-select')) {
+      handleNotesAreaChange(e);
+      return;
+    }
     const sel = window.getSelection();
     const anchorNode = sel?.anchorNode;
     const activeEl =
@@ -2907,6 +3455,12 @@ export default function App() {
 
   // Paste Screenshot / Image directly into Notes (#notes-area)
   const handleNotesPaste = async (e: React.ClipboardEvent<HTMLDivElement>) => {
+    // If clipboard contains plain text (e.g. user copied a sentence), paste the text normally!
+    const plainText = e.clipboardData?.getData('text/plain') || '';
+    if (plainText.trim().length > 0) {
+      return;
+    }
+
     const items = e.clipboardData?.items;
     if (!items) return;
 
@@ -2919,12 +3473,12 @@ export default function App() {
         try {
           showToast('📸 Elaborazione screenshot in corso...');
           const compressed = await compressImageFromBlob(blob, 1150, 0.84);
-          const imgHtml = `<img src="${compressed.dataUrl}" alt="Screenshot Appunti" class="note-pasted-screenshot" /><p><br></p>`;
+          const imgHtml = `<img src="${compressed.dataUrl}" alt="Screenshot Appunti" class="note-pasted-screenshot" data-layout="inline" style="width: 60%; max-width: 100%;" /><p><br></p>`;
           insertHtmlAtEditorCursor(imgHtml);
-          showToast('📸 Screenshot incollato negli appunti!');
+          showToast('📸 Foto incollata! Cliccala per spostarla liberamente, ridimensionarla dai bordi o eliminarla.');
         } catch (err) {
           console.error('Screenshot paste error:', err);
-          showToast('Errore durante l\'incollaggio dello screenshot.', 'error');
+          showToast("Errore durante l'incollaggio dello screenshot.", 'error');
         }
         return;
       }
@@ -2933,6 +3487,14 @@ export default function App() {
 
   // Paste Screenshot / Image directly into AI Chat (#user-chat-input / .ai-chat-panel)
   const handleChatPaste = async (e: React.ClipboardEvent<HTMLElement>) => {
+    e.stopPropagation();
+
+    // If the user copied a text phrase, let the browser paste the text into the input!
+    const plainText = e.clipboardData?.getData('text/plain') || '';
+    if (plainText.trim().length > 0) {
+      return;
+    }
+
     const items = e.clipboardData?.items;
     if (!items) return;
 
@@ -2944,11 +3506,13 @@ export default function App() {
         if (!blob) return;
         try {
           const compressed = await compressImageFromBlob(blob, 1280, 0.86);
-          const timeStamp = new Date().toLocaleTimeString('it-IT', {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-          }).replace(/:/g, '-');
+          const timeStamp = new Date()
+            .toLocaleTimeString('it-IT', {
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit'
+            })
+            .replace(/:/g, '-');
           setAttachedFile({
             name: `Screenshot_${timeStamp}.jpg`,
             mimeType: compressed.mimeType,
@@ -2960,7 +3524,7 @@ export default function App() {
           showToast('📸 Screenshot allegato alla Chat AI! Premi Invia per analizzarlo.');
         } catch (err) {
           console.error('Chat screenshot paste error:', err);
-          showToast('Errore nell\'allegare lo screenshot alla chat.', 'error');
+          showToast("Errore nell'allegare lo screenshot alla chat.", 'error');
         }
         return;
       }
@@ -2973,7 +3537,36 @@ export default function App() {
       if (e.key === 'Escape') {
         if (isFindBarOpen) setIsFindBarOpen(false);
         if (isDrawingMode) setIsDrawingMode(false);
+        if (selectedImageEl) {
+          notesAreaRef.current?.querySelectorAll('img.selected-note-image').forEach(el => {
+            el.classList.remove('selected-note-image');
+          });
+          setSelectedImageEl(null);
+          setSelectionBoxRect(null);
+        }
+        if (selectedDrawingEl) {
+          notesAreaRef.current?.querySelectorAll('[data-selected-drawing="true"]').forEach(el => {
+            el.removeAttribute('data-selected-drawing');
+          });
+          setSelectedDrawingEl(null);
+          setSelectionBoxRect(null);
+        }
         return;
+      }
+
+      // Delete or Backspace while a Photo or Post-Esc Drawing is selected deletes it immediately
+      if ((e.key === 'Delete' || e.key === 'Backspace') && (selectedImageEl || selectedDrawingEl)) {
+        const activeTag = (document.activeElement?.tagName || '').toLowerCase();
+        if (activeTag !== 'input' && activeTag !== 'textarea' && activeTag !== 'select') {
+          e.preventDefault();
+          e.stopPropagation();
+          if (selectedImageEl) {
+            handleDeleteSelectedImage();
+          } else if (selectedDrawingEl) {
+            handleDeleteSelectedDrawing();
+          }
+          return;
+        }
       }
 
       if (!currentUser || !isApproved) return;
@@ -3077,6 +3670,10 @@ export default function App() {
     isApproved,
     isFindBarOpen,
     isDrawingMode,
+    selectedImageEl,
+    selectedDrawingEl,
+    handleDeleteSelectedImage,
+    handleDeleteSelectedDrawing,
     customShortcuts,
     savedHighlightColors,
     workspaceMode,
@@ -3692,7 +4289,7 @@ export default function App() {
     const userParts: any[] = [];
     if (userText) userParts.push({ text: userText });
 
-    // 1. Transient manual attached image/file
+    // 1. Transient manual attached image/file (clear immediately once consumed so next message doesn't resend it)
     if (attachedFile) {
       userParts.push({
         inlineData: {
@@ -3700,6 +4297,8 @@ export default function App() {
           data: attachedFile.data
         }
       });
+      setAttachedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
 
     // 2. Active Course Material / PDF attached to Chat
@@ -5052,12 +5651,25 @@ REGOLE TASSATIVE:
               </svg>
               <span className="app-name">GitHub</span>
             </a>
-            <a href="https://itsar.registrodiclasse.it/geopcfp2/" className="app-card" target="_blank" rel="noreferrer">
-              <svg className="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="4" y="2" width="16" height="20" rx="2" ry="2" /><path d="M9 22v-4h6v4" /><path d="M8 6h.01" /><path d="M16 6h.01" /><path d="M12 6h.01" /><path d="M12 10h.01" /><path d="M12 14h.01" /><path d="M16 10h.01" /><path d="M16 14h.01" /><path d="M8 10h.01" /><path d="M8 14h.01" />
+            <button
+              type="button"
+              className={`app-card ${activeTab === 'calendar' ? 'active-tool-card' : ''}`}
+              onClick={() => setActiveTab(prev => (prev === 'calendar' ? 'notes' : 'calendar'))}
+              title="Apri il Calendario Studio, Compiti, Lezioni e Google Calendar"
+              style={{ border: '1px solid var(--panel-border)', cursor: 'pointer', textAlign: 'left' }}
+            >
+              <svg className="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+                <path d="M8 14h.01" /><path d="M12 14h.01" /><path d="M16 14h.01" />
+                <path d="M8 18h.01" /><path d="M12 18h.01" />
               </svg>
-              <span className="app-name">GEOP ITS</span>
-            </a>
+              <span className="app-name">
+                Calendario{calendarEvents.length > 0 ? ` (${calendarEvents.length})` : ''}
+              </span>
+            </button>
             <a href="https://drive.google.com" className="app-card" target="_blank" rel="noreferrer">
               <svg className="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M22 12H12l-5 9h10l5-9z" /><path d="M6 12L2 5h10l4 7-10 9z" />
@@ -5714,7 +6326,17 @@ REGOLE TASSATIVE:
                   <button
                     type="button"
                     onMouseDown={e => e.preventDefault()}
-                    onClick={() => setIsDrawingMode(prev => !prev)}
+                    onClick={() => {
+                      setIsDrawingMode(prev => {
+                        const next = !prev;
+                        if (next) {
+                          setSelectedImageEl(null);
+                          setSelectedDrawingEl(null);
+                          setSelectionBoxRect(null);
+                        }
+                        return next;
+                      });
+                    }}
                     title={`Attiva/Disattiva Penna Disegno a mano libera su appunti e foto (${customShortcuts.toggle_pen || 'Alt+P'})`}
                     style={
                       isDrawingMode
@@ -5996,25 +6618,26 @@ REGOLE TASSATIVE:
                   </div>
                 )}
 
-                {/* Floating Word-Style Image Layout & Anchor Toolbar (when clicking an image in #notes-area) */}
-                {selectedImageEl && (
+                {/* Floating Word-Style Image Layout & Anchor Toolbar (ONLY when an image is selected and NOT in Drawing Mode) */}
+                {selectedImageEl && !isDrawingMode && (
                   <div className="note-image-floating-bar">
-                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#a5b4fc' }}>
-                      🖼️ Layout &amp; Ancora Foto:
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#38bdf8' }}>
+                      🖼️ Foto selezionata (trascina la foto per spostarla o i bordi blu per ridimensionarla):
                     </span>
                     {(
                       [
                         { id: 'inline', label: '═ In linea' },
                         { id: 'wrap-left', label: '◧ Testo a Destra' },
                         { id: 'wrap-right', label: '◨ Testo a Sinistra' },
-                        { id: 'behind', label: '🌅 Dietro al Testo' },
-                        { id: 'front', label: '🚀 Davanti al Testo (Libera)' }
+                        { id: 'behind', label: '🌅 Dietro Testo' },
+                        { id: 'front', label: '🚀 Libera (Davanti)' }
                       ] as Array<{ id: ImageLayoutMode; label: string }>
                     ).map(m => (
                       <button
                         key={m.id}
                         type="button"
                         className={`drawing-tool-pill ${selectedImageMeta.layout === m.id ? 'active' : ''}`}
+                        onMouseDown={e => e.preventDefault()}
                         onClick={() => handleImageLayoutChange(m.id)}
                       >
                         {m.label}
@@ -6024,31 +6647,23 @@ REGOLE TASSATIVE:
                     <button
                       type="button"
                       className={`drawing-tool-pill ${selectedImageMeta.pinned ? 'active' : ''}`}
+                      onMouseDown={e => e.preventDefault()}
                       onClick={handleToggleImagePin}
-                      title="Blocca/Fissa la foto con l'ancora oppure sbloccala per trascinarla liberamente col mouse"
+                      title="Blocca/Fissa la foto oppure sbloccala per trascinarla liberamente col mouse"
                     >
-                      {selectedImageMeta.pinned ? '📌 Fissata (Sblocca)' : '🔓 Sbloccata (Fissa Ancora)'}
+                      {selectedImageMeta.pinned ? '📌 Fissata' : '🔓 Libera'}
                     </button>
-
-                    <span className="divider" style={{ height: '18px' }}></span>
-
-                    {[25, 50, 75, 100].map(pct => (
-                      <button
-                        key={pct}
-                        type="button"
-                        className={`drawing-tool-pill ${selectedImageMeta.widthPct === pct ? 'active' : ''}`}
-                        onClick={() => handleImageWidthChange(pct)}
-                        title={`Dimensione foto ${pct}%`}
-                      >
-                        {pct}%
-                      </button>
-                    ))}
 
                     <button
                       type="button"
                       className="drawing-tool-pill"
-                      onClick={() => setIsDrawingMode(true)}
-                      title="Attiva la penna per disegnare frecce o appunti direttamente sopra questa foto"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => {
+                        setSelectedImageEl(null);
+                        setSelectionBoxRect(null);
+                        setIsDrawingMode(true);
+                      }}
+                      title="Attiva la penna per disegnare sopra questa foto (chiude questa barra)"
                     >
                       ✏️ Disegna su Foto
                     </button>
@@ -6057,10 +6672,71 @@ REGOLE TASSATIVE:
                       type="button"
                       className="drawing-tool-pill danger"
                       style={{ marginLeft: 'auto' }}
+                      onMouseDown={e => e.preventDefault()}
                       onClick={handleDeleteSelectedImage}
-                      title="Elimina questa immagine dagli appunti"
+                      title="Elimina questa foto dagli appunti (oppure premi Canc / Backspace)"
                     >
                       🗑️ Elimina Foto
+                    </button>
+                  </div>
+                )}
+
+                {/* Floating Post-Esc Drawing Selection & Modification Toolbar */}
+                {selectedDrawingEl && !isDrawingMode && (
+                  <div className="note-image-floating-bar">
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#38bdf8' }}>
+                      ✏️ Disegno selezionato (trascinalo per spostarlo o usa i bordi per ridimensionarlo):
+                    </span>
+
+                    <div className="toolbar-swatch-group" title="Cambia colore al disegno selezionato">
+                      {savedPenColors.map(c => (
+                        <button
+                          key={c}
+                          type="button"
+                          className="swatch-dot-btn"
+                          style={{ backgroundColor: c }}
+                          onMouseDown={e => e.preventDefault()}
+                          onClick={() => handleModifySelectedDrawingColor(c)}
+                          title={`Colore ${c}`}
+                        />
+                      ))}
+                    </div>
+
+                    {[2, 4, 7, 12].map(w => (
+                      <button
+                        key={w}
+                        type="button"
+                        className="drawing-tool-pill"
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => handleModifySelectedDrawingWidth(w)}
+                        title={`Cambia spessore a ${w}px`}
+                      >
+                        {w}px
+                      </button>
+                    ))}
+
+                    <button
+                      type="button"
+                      className="drawing-tool-pill"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => {
+                        setSelectedDrawingEl(null);
+                        setSelectionBoxRect(null);
+                        setIsDrawingMode(true);
+                      }}
+                    >
+                      ✏️ Aggiungi Tratti
+                    </button>
+
+                    <button
+                      type="button"
+                      className="drawing-tool-pill danger"
+                      style={{ marginLeft: 'auto' }}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={handleDeleteSelectedDrawing}
+                      title="Elimina questo disegno dagli appunti (Canc / Backspace)"
+                    >
+                      🗑️ Elimina Disegno
                     </button>
                   </div>
                 )}
@@ -6164,44 +6840,103 @@ REGOLE TASSATIVE:
                   </div>
                 )}
 
-                {/* Contenteditable Notes Area (Supports Ctrl+V Screenshot Paste, Tables, Movable Photos & SVG Pen) */}
+                {/* Stage Wrapper for #notes-area + Interactive 8-Handle Photo/Drawing Resize Frame */}
                 <div
-                  id="notes-area"
-                  className={`font-${fontFamily} ${isDrawingMode ? 'drawing-mode-active' : ''} ${
-                    isDrawingMode && drawingTool === 'eraser' ? 'eraser-active' : ''
-                  }`}
-                  style={{ fontSize: `${fontSize}px` }}
-                  ref={el => {
-                    (notesAreaRef as any).current = el;
-                    if (el) {
-                      const currentSubPages = pages[activeSubject] || [];
-                      const currentPage = currentSubPages.find(p => p.id === activePageId) || currentSubPages[0];
-                      const rawTarget = workspaceMode === 'shared'
-                        ? (activeRoomPages.find(p => p.id === activeRoomPageId) || activeRoomPages[0])?.content || ''
-                        : (currentPage?.content || '');
-                      const targetContent = sanitizeAndUpgradeNoteHtml(rawTarget).cleanedHtml;
-                      if (el.innerHTML !== targetContent) {
-                        el.innerHTML = targetContent;
-                      }
-                    }
+                  ref={notesStageRef}
+                  className="notes-surface-stage"
+                  style={{
+                    position: 'relative',
+                    flex: 1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    minHeight: 0
                   }}
-                  contentEditable={!isDrawingMode}
-                  suppressContentEditableWarning
-                  data-placeholder="Inizia a scrivere i tuoi appunti... Incolla screenshot (Ctrl+V), inserisci tabelle, disegna con la penna o usa le scorciatoie."
-                  onInput={handleNotesAreaInput}
-                  onChange={handleNotesAreaChange}
-                  onKeyDown={handleNotesAreaKeyDown}
-                  onPaste={handleNotesPaste}
-                  onClick={handleNotesAreaClick}
-                  onMouseDown={handleNotesMouseDown}
-                  onMouseMove={handleNotesMouseMove}
-                  onMouseUp={e => {
-                    handleNotesMouseUp();
-                    handleRecordEditorSelection();
-                  }}
-                  onKeyUp={handleRecordEditorSelection}
-                  onContextMenu={handleNotesContextMenu}
-                />
+                >
+                  <div
+                    id="notes-area"
+                    ref={notesAreaRef}
+                    className={`font-${fontFamily} ${isDrawingMode ? 'drawing-mode-active' : ''} ${
+                      isDrawingMode && drawingTool === 'eraser' ? 'eraser-active' : ''
+                    }`}
+                    style={{ fontSize: `${fontSize}px` }}
+                    contentEditable={!isDrawingMode}
+                    suppressContentEditableWarning
+                    data-placeholder="Inizia a scrivere i tuoi appunti... Incolla screenshot (Ctrl+V), inserisci tabelle, disegna con la penna o usa le scorciatoie."
+                    onInput={handleNotesAreaInput}
+                    onChange={handleNotesAreaChange}
+                    onKeyDown={handleNotesAreaKeyDown}
+                    onPaste={handleNotesPaste}
+                    onScroll={handleNotesScroll}
+                    onClick={handleNotesAreaClick}
+                    onMouseDown={handleNotesMouseDown}
+                    onMouseMove={handleNotesMouseMove}
+                    onMouseUp={e => {
+                      handleNotesMouseUp();
+                      handleRecordEditorSelection();
+                    }}
+                    onKeyUp={handleRecordEditorSelection}
+                    onContextMenu={handleNotesContextMenu}
+                  />
+
+                  {/* 8-Handle Interactive Border/Corner Resize Frame for Selected Photo or Post-Esc Drawing */}
+                  {!isDrawingMode && (selectedImageEl || selectedDrawingEl) && selectionBoxRect && (
+                    <div
+                      className="note-object-selection-frame"
+                      style={{
+                        top: `${selectionBoxRect.top}px`,
+                        left: `${selectionBoxRect.left}px`,
+                        width: `${selectionBoxRect.width}px`,
+                        height: `${selectionBoxRect.height}px`
+                      }}
+                    >
+                      {(
+                        ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as Array<
+                          'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
+                        >
+                      ).map(h => (
+                        <div
+                          key={h}
+                          className={`note-resize-handle ${h}`}
+                          onMouseDown={e => handleStartResizeObject(h, e)}
+                          title="Trascina per ridimensionare"
+                        />
+                      ))}
+                      <button
+                        type="button"
+                        className="note-object-del-corner"
+                        onMouseDown={e => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                        onClick={e => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (selectedImageEl) handleDeleteSelectedImage();
+                          else if (selectedDrawingEl) handleDeleteSelectedDrawing();
+                        }}
+                        title="Elimina elemento selezionato"
+                        style={{
+                          position: 'absolute',
+                          top: '-14px',
+                          right: '14px',
+                          pointerEvents: 'auto',
+                          background: '#e11d48',
+                          color: '#ffffff',
+                          border: '1px solid #fda4af',
+                          borderRadius: '6px',
+                          padding: '2px 7px',
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.45)',
+                          zIndex: 32
+                        }}
+                      >
+                        🗑️ Elimina
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : activeTab === 'calendar' ? (
               <StudyCalendarPanel
@@ -6214,6 +6949,7 @@ REGOLE TASSATIVE:
                 isGoogleCalendarConnected={!!googleOAuthAccessToken}
                 isSyncingGoogle={isSyncingGoogleCalendar}
                 onSyncGoogleCalendar={handleSyncGoogleCalendar}
+                onBackToNotes={() => setActiveTab('notes')}
               />
             ) : (
               <div id="materials-area">

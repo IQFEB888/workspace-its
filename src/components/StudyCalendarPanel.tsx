@@ -16,6 +16,7 @@ interface StudyCalendarPanelProps {
   onDeleteEvent: (event: CalendarEventItem) => void;
   onSyncGoogleCalendar: () => Promise<void> | void;
   onOpenFullCalendar?: () => void;
+  onBackToNotes?: () => void;
   compact?: boolean;
 }
 
@@ -42,6 +43,16 @@ function toDateStr(d: Date): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function formatReadableDateIt(dateStr: string, todayStr: string): string {
+  if (dateStr === todayStr) return 'Oggi';
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return dateStr;
+  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  if (Number.isNaN(d.getTime())) return dateStr;
+  const dayNames = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
+  return `${dayNames[d.getDay()]} ${Number(parts[2])} ${MONTHS_IT[d.getMonth()]?.slice(0, 3) || ''}`;
+}
+
 export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
   events,
   subjects,
@@ -52,6 +63,8 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
   onToggleComplete,
   onDeleteEvent,
   onSyncGoogleCalendar,
+  onOpenFullCalendar,
+  onBackToNotes,
   compact = false
 }) => {
   const todayStr = useMemo(() => toDateStr(new Date()), []);
@@ -98,7 +111,6 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
     const year = currentMonthDate.getFullYear();
     const month = currentMonthDate.getMonth();
     const firstDayOfMonth = new Date(year, month, 1);
-    // Convert Sunday=0..Saturday=6 into Monday=0..Sunday=6
     const startWeekday = (firstDayOfMonth.getDay() + 6) % 7;
     const startDate = new Date(year, month, 1 - startWeekday);
 
@@ -130,7 +142,7 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
     return [...filteredEvents]
       .filter(ev => ev.date >= todayStr)
       .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`))
-      .slice(0, 25);
+      .slice(0, 20);
   }, [filteredEvents, todayStr]);
 
   const stats = useMemo(() => {
@@ -181,69 +193,110 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
   };
 
   return (
-    <div className={`study-calendar-root ${compact ? 'is-compact-widget' : 'is-full-panel'}`}>
-      {/* Header Controls */}
-      <div className="study-cal-header">
-        <div className="study-cal-title-group">
-          <div className="study-cal-month-nav">
-            <button type="button" className="study-cal-nav-btn" onClick={handlePrevMonth} title="Mese precedente">
-              ◀
+    <div className={`study-calendar-root ${compact ? 'is-compact' : 'is-full'}`}>
+      {/* Top Toolbar */}
+      <div className="study-cal-toolbar">
+        <div className="study-cal-nav-group">
+          {!compact && onBackToNotes && (
+            <button
+              type="button"
+              className="study-cal-back-btn"
+              onClick={onBackToNotes}
+              title="Torna agli Appunti"
+            >
+              ← Appunti
             </button>
-            <span className="study-cal-month-label">
+          )}
+          <div className="study-cal-month-switcher">
+            <button
+              type="button"
+              className="study-cal-icon-btn"
+              onClick={handlePrevMonth}
+              aria-label="Mese precedente"
+              title="Mese precedente"
+            >
+              ‹
+            </button>
+            <h3 className="study-cal-month-title">
               {MONTHS_IT[currentMonthDate.getMonth()]} {currentMonthDate.getFullYear()}
-            </span>
-            <button type="button" className="study-cal-nav-btn" onClick={handleNextMonth} title="Mese successivo">
-              ▶
-            </button>
-            <button type="button" className="study-cal-today-btn" onClick={handleGoToday}>
-              Oggi
+            </h3>
+            <button
+              type="button"
+              className="study-cal-icon-btn"
+              onClick={handleNextMonth}
+              aria-label="Mese successivo"
+              title="Mese successivo"
+            >
+              ›
             </button>
           </div>
-
-          {!compact && (
-            <div className="study-cal-kpi-pills">
-              <span className="study-cal-kpi-pill">📅 Oggi: <b>{stats.todayCount}</b></span>
-              <span className="study-cal-kpi-pill warn">📝 Da fare: <b>{stats.pendingHomework}</b></span>
-              <span className="study-cal-kpi-pill danger">🏆 Esami: <b>{stats.upcomingExams}</b></span>
-            </div>
-          )}
+          <button type="button" className="study-cal-ghost-btn" onClick={handleGoToday}>
+            Oggi
+          </button>
         </div>
 
-        <div className="study-cal-actions-group">
-          <div className="study-cal-view-switch">
+        {!compact && (
+          <div className="study-cal-metrics">
+            <span className="study-cal-metric-item">
+              Oggi <strong>{stats.todayCount}</strong>
+            </span>
+            <span className="study-cal-metric-sep">·</span>
+            <span className="study-cal-metric-item">
+              Compiti <strong>{stats.pendingHomework}</strong>
+            </span>
+            <span className="study-cal-metric-sep">·</span>
+            <span className="study-cal-metric-item">
+              Esami <strong>{stats.upcomingExams}</strong>
+            </span>
+          </div>
+        )}
+
+        <div className="study-cal-right-controls">
+          <div className="study-cal-segmented">
             <button
               type="button"
-              className={`study-cal-switch-btn ${viewMode === 'month' ? 'active' : ''}`}
+              className={`study-cal-seg-btn ${viewMode === 'month' ? 'active' : ''}`}
               onClick={() => setViewMode('month')}
             >
-              📅 Mese
+              Griglia Mese
             </button>
             <button
               type="button"
-              className={`study-cal-switch-btn ${viewMode === 'agenda' ? 'active' : ''}`}
+              className={`study-cal-seg-btn ${viewMode === 'agenda' ? 'active' : ''}`}
               onClick={() => setViewMode('agenda')}
             >
-              📋 Agenda
+              Lista Agenda
             </button>
           </div>
 
           <button
             type="button"
-            className={`study-cal-gcal-btn ${isGoogleCalendarConnected ? 'connected' : ''}`}
+            className={`study-cal-sync-btn ${isGoogleCalendarConnected ? 'is-linked' : ''}`}
             onClick={onSyncGoogleCalendar}
             disabled={isSyncingGoogle}
-            title="Sincronizza lezioni, esami e scadenze con il tuo Google Calendar"
+            title="Sincronizza con il tuo Google Calendar"
           >
             {isSyncingGoogle
-              ? '⏳ Sincronizzazione...'
+              ? 'Sincronizzazione...'
               : isGoogleCalendarConnected
-              ? '🔄 Sync Google Calendar'
-              : '🔗 Collega Google Calendar'}
+              ? 'Sync Google'
+              : 'Google Calendar'}
           </button>
+
+          {compact && onOpenFullCalendar && (
+            <button
+              type="button"
+              className="study-cal-ghost-btn"
+              onClick={onOpenFullCalendar}
+              title="Apri vista calendario a schermo intero"
+            >
+              ↗ Espandi
+            </button>
+          )}
 
           <button
             type="button"
-            className="study-cal-add-btn"
+            className="study-cal-primary-btn"
             onClick={() => setShowAddForm(prev => !prev)}
           >
             {showAddForm ? '✕ Chiudi' : '+ Nuovo Impegno'}
@@ -252,7 +305,7 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
       </div>
 
       {/* Category Filter Strip */}
-      <div className="study-cal-filter-bar">
+      <div className="study-cal-filter-row">
         <button
           type="button"
           className={`study-cal-filter-chip ${categoryFilter === 'all' ? 'active' : ''}`}
@@ -262,6 +315,7 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
         </button>
         {(Object.keys(CATEGORY_META) as CalendarEventCategory[]).map(catKey => {
           const meta = CATEGORY_META[catKey];
+          const count = events.filter(e => e.category === catKey).length;
           return (
             <button
               key={catKey}
@@ -269,32 +323,37 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
               className={`study-cal-filter-chip ${categoryFilter === catKey ? 'active' : ''}`}
               onClick={() => setCategoryFilter(catKey)}
             >
-              {meta.icon} {meta.label}
+              <span
+                className="study-cal-cat-dot"
+                style={{ backgroundColor: meta.color }}
+              />
+              {meta.label} ({count})
             </button>
           );
         })}
       </div>
 
-      {/* Inline Add Event / Task Form */}
+      {/* Collapsible Add Event / Homework Form */}
       {showAddForm && (
-        <form className="study-cal-add-form" onSubmit={handleCreateSubmit}>
-          <div className="study-cal-form-top">
-            <span className="study-cal-form-heading">
-              ➕ Nuovo Impegno per il <b>{selectedDate}</b>
+        <form className="study-cal-form" onSubmit={handleCreateSubmit}>
+          <div className="study-cal-form-header">
+            <span className="study-cal-form-title">
+              Pianifica lezione, compito o esame per il{' '}
+              <strong>{formatReadableDateIt(selectedDate, todayStr)}</strong>
             </span>
             <input
               type="date"
-              className="study-cal-input date-input"
+              className="study-cal-field date-field"
               value={selectedDate}
               onChange={e => setSelectedDate(e.target.value)}
             />
           </div>
 
-          <div className="study-cal-form-grid">
+          <div className="study-cal-form-row">
             <input
               type="text"
-              className="study-cal-input title-input"
-              placeholder="Titolo (es. Lezione SQL Join, Compito Normalizzazione, Studio Esame...)"
+              className="study-cal-field flex-2"
+              placeholder="Titolo impegno (es. Lezione Database SQL, Consegna Progetto, Esame...)"
               value={newTitle}
               onChange={e => setNewTitle(e.target.value)}
               required
@@ -302,90 +361,91 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
             />
 
             <select
-              className="study-cal-input"
+              className="study-cal-field"
               value={newCategory}
               onChange={e => setNewCategory(e.target.value as CalendarEventCategory)}
             >
-              <option value="lecture">🎓 Lezione</option>
-              <option value="homework">📝 Compito / Scadenza</option>
-              <option value="study">📖 Sessione Studio</option>
-              <option value="exam">🏆 Esame / Verifica</option>
+              <option value="lecture">Lezione</option>
+              <option value="homework">Compito / Scadenza</option>
+              <option value="study">Sessione Studio</option>
+              <option value="exam">Esame / Verifica</option>
             </select>
 
             <select
-              className="study-cal-input"
+              className="study-cal-field"
               value={newSubject}
               onChange={e => setNewSubject(e.target.value)}
             >
               {subjects.map(s => (
                 <option key={s.id} value={s.name}>
-                  📚 {s.name}
+                  {s.name}
                 </option>
               ))}
-              <option value="Generale">📚 Generale</option>
+              <option value="Generale">Generale</option>
             </select>
 
-            <div className="study-cal-time-pair">
+            <div className="study-cal-time-group">
               <input
                 type="time"
-                className="study-cal-input"
+                className="study-cal-field time-field"
                 value={newStartTime}
                 onChange={e => setNewStartTime(e.target.value)}
               />
-              <span>→</span>
+              <span className="study-cal-time-sep">–</span>
               <input
                 type="time"
-                className="study-cal-input"
+                className="study-cal-field time-field"
                 value={newEndTime}
                 onChange={e => setNewEndTime(e.target.value)}
               />
             </div>
           </div>
 
-          <div className="study-cal-form-bottom">
+          <div className="study-cal-form-footer">
             <input
               type="text"
-              className="study-cal-input desc-input"
-              placeholder="Note / Capitoli da studiare / Link aula (opzionale)..."
+              className="study-cal-field flex-1"
+              placeholder="Note aggiuntive, argomenti da ripassare o aula (opzionale)..."
               value={newDesc}
               onChange={e => setNewDesc(e.target.value)}
             />
             {isGoogleCalendarConnected && (
-              <label className="study-cal-gcal-check">
+              <label className="study-cal-checkbox-label">
                 <input
                   type="checkbox"
                   checked={pushToGoogle}
                   onChange={e => setPushToGoogle(e.target.checked)}
                 />
-                <span>Salva anche su Google Calendar</span>
+                <span>Sincronizza su Google Calendar</span>
               </label>
             )}
-            <button type="submit" className="study-cal-submit-btn">
-              💾 Salva in Calendario
+            <button type="submit" className="study-cal-primary-btn">
+              Salva Impegno
             </button>
           </div>
         </form>
       )}
 
-      {/* Main Content Area: Month Grid + Day Sidebar OR Agenda List */}
-      <div className={`study-cal-body ${viewMode === 'agenda' ? 'agenda-only' : ''}`}>
+      {/* Workspace Split Layout: Month Grid + Selected Day / Upcoming Sidebar */}
+      <div className={`study-cal-workspace ${viewMode === 'agenda' || compact ? 'is-single-col' : ''}`}>
         {viewMode === 'month' && (
           <div className="study-cal-grid-wrap">
             <div className="study-cal-weekdays">
               {WEEKDAYS_SHORT.map(w => (
-                <div key={w} className="study-cal-weekday-cell">
+                <div key={w} className="study-cal-weekday-label">
                   {w}
                 </div>
               ))}
             </div>
-            <div className="study-cal-days-grid">
+
+            <div className="study-cal-grid">
               {calendarDays.map(day => {
                 const dayEvs = eventsByDate[day.dateStr] || [];
                 const isSelected = day.dateStr === selectedDate;
                 return (
                   <div
                     key={day.dateStr}
-                    className={`study-cal-day-cell ${!day.isCurrentMonth ? 'other-month' : ''} ${
+                    className={`study-cal-day ${!day.isCurrentMonth ? 'other-month' : ''} ${
                       day.isToday ? 'is-today' : ''
                     } ${isSelected ? 'is-selected' : ''}`}
                     onClick={() => setSelectedDate(day.dateStr)}
@@ -395,31 +455,37 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
                     }}
                   >
                     <div className="study-cal-day-top">
-                      <span className="study-cal-day-number">{day.dayNum}</span>
+                      <span className="study-cal-day-num">{day.dayNum}</span>
                       {dayEvs.length > 0 && (
                         <span className="study-cal-day-count">{dayEvs.length}</span>
                       )}
                     </div>
+
                     <div className="study-cal-day-events">
                       {dayEvs.slice(0, compact ? 2 : 3).map(ev => {
                         const meta = CATEGORY_META[ev.category] || CATEGORY_META.lecture;
                         return (
                           <div
                             key={ev.id}
-                            className={`study-cal-event-pill ${ev.completed ? 'is-done' : ''}`}
+                            className={`study-cal-day-pill ${ev.completed ? 'is-done' : ''}`}
                             style={{
-                              borderLeftColor: meta.color,
-                              background: meta.badgeBg
+                              backgroundColor: meta.badgeBg,
+                              borderColor: `${meta.color}44`,
+                              color: '#f8fafc'
                             }}
-                            title={`${ev.startTime} - ${ev.title} (${ev.subject})`}
+                            title={`${ev.startTime} · ${ev.title} (${ev.subject})`}
                           >
-                            <span className="ev-pill-time">{ev.startTime}</span>
-                            <span className="ev-pill-title">{ev.title}</span>
+                            <span
+                              className="study-cal-cat-dot"
+                              style={{ backgroundColor: meta.color }}
+                            />
+                            <span className="study-cal-pill-time">{ev.startTime}</span>
+                            <span className="study-cal-pill-text">{ev.title}</span>
                           </div>
                         );
                       })}
                       {dayEvs.length > (compact ? 2 : 3) && (
-                        <div className="study-cal-more-pill">
+                        <div className="study-cal-day-more">
                           +{dayEvs.length - (compact ? 2 : 3)} altri
                         </div>
                       )}
@@ -431,16 +497,17 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
           </div>
         )}
 
-        {/* Right / Bottom Day Detail & Upcoming Study Plan */}
-        <div className="study-cal-sidebar">
-          <div className="study-cal-sidebar-section">
-            <div className="study-cal-sidebar-header">
-              <span>
-                📌 Programma del <b>{selectedDate === todayStr ? 'Oggi' : selectedDate}</b>
-              </span>
+        {/* Right / Agenda Column */}
+        <div className="study-cal-side-panel">
+          {/* Selected Date Schedule */}
+          <div className="study-cal-section-box">
+            <div className="study-cal-section-head">
+              <div className="study-cal-section-title">
+                Programma · <strong>{formatReadableDateIt(selectedDate, todayStr)}</strong>
+              </div>
               <button
                 type="button"
-                className="study-cal-mini-add"
+                className="study-cal-ghost-btn sm"
                 onClick={() => setShowAddForm(true)}
               >
                 + Aggiungi
@@ -448,76 +515,91 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
             </div>
 
             {selectedDayEvents.length === 0 ? (
-              <div className="study-cal-empty-day">
-                Nessuna lezione o compito per questa data. Clicca <b>+ Aggiungi</b> o fai doppio clic su un giorno.
+              <div className="study-cal-empty-state">
+                Nessuna lezione o scadenza per questa giornata. Doppio clic su una data o premi{' '}
+                <strong>+ Aggiungi</strong> per pianificare.
               </div>
             ) : (
-              <div className="study-cal-event-list">
+              <div className="study-cal-agenda-list">
                 {selectedDayEvents.map(ev => {
                   const meta = CATEGORY_META[ev.category] || CATEGORY_META.lecture;
                   return (
                     <div
                       key={ev.id}
                       className={`study-cal-event-card ${ev.completed ? 'is-done' : ''}`}
-                      style={{ borderLeftColor: meta.color }}
                     >
-                      <div className="study-cal-event-card-top">
-                        <label className="study-cal-check-wrap">
-                          <input
-                            type="checkbox"
-                            checked={!!ev.completed}
-                            onChange={() => onToggleComplete(ev.id)}
-                          />
-                          <span className="study-cal-event-title">
-                            {meta.icon} {ev.title}
-                          </span>
-                        </label>
+                      <div className="study-cal-event-main">
+                        <button
+                          type="button"
+                          className={`study-cal-check-btn ${ev.completed ? 'checked' : ''}`}
+                          onClick={() => onToggleComplete(ev.id)}
+                          aria-label={`Segna ${ev.title} come completato`}
+                          title="Segna come completato"
+                        >
+                          {ev.completed ? '✓' : ''}
+                        </button>
+                        <div className="study-cal-event-info">
+                          <div className="study-cal-event-title-row">
+                            <span
+                              className="study-cal-cat-dot"
+                              style={{ backgroundColor: meta.color }}
+                            />
+                            <span className="study-cal-event-name">{ev.title}</span>
+                          </div>
+                          <div className="study-cal-event-submeta">
+                            <span className="tabular-nums">
+                              {ev.startTime} – {ev.endTime}
+                            </span>
+                            <span>·</span>
+                            <span>{ev.subject}</span>
+                            <span>·</span>
+                            <span style={{ color: meta.color }}>{meta.label}</span>
+                            {ev.googleEventId && (
+                              <>
+                                <span>·</span>
+                                <span>Google Sync</span>
+                              </>
+                            )}
+                          </div>
+                          {ev.description && (
+                            <div className="study-cal-event-note">{ev.description}</div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="study-cal-event-actions">
                         {confirmDeleteId === ev.id ? (
-                          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                          <>
                             <button
                               type="button"
-                              className="study-cal-del-btn"
-                              style={{ color: '#f43f5e', fontWeight: 700, fontSize: '0.68rem' }}
+                              className="study-cal-del-confirm"
                               onClick={() => {
                                 setConfirmDeleteId(null);
                                 onDeleteEvent(ev);
                               }}
-                              title="Conferma eliminazione"
                             >
-                              Conferma
+                              Elimina
                             </button>
                             <button
                               type="button"
-                              className="study-cal-del-btn"
-                              style={{ fontSize: '0.68rem' }}
+                              className="study-cal-ghost-btn sm"
                               onClick={() => setConfirmDeleteId(null)}
                             >
                               Annulla
                             </button>
-                          </div>
+                          </>
                         ) : (
                           <button
                             type="button"
-                            className="study-cal-del-btn"
+                            className="study-cal-del-icon"
                             onClick={() => setConfirmDeleteId(ev.id)}
-                            title="Elimina impegno"
+                            aria-label={`Elimina ${ev.title}`}
+                            title="Rimuovi impegno"
                           >
-                            🗑️
+                            ✕
                           </button>
                         )}
                       </div>
-                      <div className="study-cal-event-meta">
-                        <span>🕒 {ev.startTime} - {ev.endTime}</span>
-                        <span className="study-cal-sub-badge">📚 {ev.subject}</span>
-                        {ev.googleEventId && (
-                          <span className="study-cal-gcal-badge" title="Sincronizzato con Google Calendar">
-                            ☁️ GCal
-                          </span>
-                        )}
-                      </div>
-                      {ev.description && (
-                        <div className="study-cal-event-desc">{ev.description}</div>
-                      )}
                     </div>
                   );
                 })}
@@ -525,44 +607,55 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
             )}
           </div>
 
-          <div className="study-cal-sidebar-section">
-            <div className="study-cal-sidebar-header">
-              <span>🚀 Prossime Lezioni, Compiti & Esami</span>
+          {/* Upcoming Study & Deadlines */}
+          <div className="study-cal-section-box">
+            <div className="study-cal-section-head">
+              <div className="study-cal-section-title">Prossime Scadenze &amp; Lezioni</div>
+              <span className="study-cal-muted-count">{upcomingEvents.length} in agenda</span>
             </div>
+
             {upcomingEvents.length === 0 ? (
-              <div className="study-cal-empty-day">
-                Nessun impegno futuro in programma.
+              <div className="study-cal-empty-state">
+                Nessun impegno futuro programmato.
               </div>
             ) : (
-              <div className="study-cal-event-list">
+              <div className="study-cal-agenda-list">
                 {upcomingEvents.map(ev => {
                   const meta = CATEGORY_META[ev.category] || CATEGORY_META.lecture;
                   return (
                     <div
                       key={ev.id}
-                      className={`study-cal-event-card compact-card ${ev.completed ? 'is-done' : ''}`}
-                      style={{ borderLeftColor: meta.color }}
+                      className={`study-cal-event-card is-compact-row ${ev.completed ? 'is-done' : ''}`}
                       onClick={() => setSelectedDate(ev.date)}
                     >
-                      <div className="study-cal-event-card-top">
-                        <label
-                          className="study-cal-check-wrap"
-                          onClick={e => e.stopPropagation()}
+                      <div className="study-cal-event-main">
+                        <button
+                          type="button"
+                          className={`study-cal-check-btn ${ev.completed ? 'checked' : ''}`}
+                          onClick={e => {
+                            e.stopPropagation();
+                            onToggleComplete(ev.id);
+                          }}
+                          aria-label={`Completa ${ev.title}`}
                         >
-                          <input
-                            type="checkbox"
-                            checked={!!ev.completed}
-                            onChange={() => onToggleComplete(ev.id)}
-                          />
-                          <span className="study-cal-event-title">
-                            {meta.icon} {ev.title}
-                          </span>
-                        </label>
-                        <span className="study-cal-date-chip">{ev.date.slice(5)}</span>
-                      </div>
-                      <div className="study-cal-event-meta">
-                        <span>{ev.startTime}</span>
-                        <span className="study-cal-sub-badge">{ev.subject}</span>
+                          {ev.completed ? '✓' : ''}
+                        </button>
+                        <div className="study-cal-event-info">
+                          <div className="study-cal-event-title-row">
+                            <span
+                              className="study-cal-cat-dot"
+                              style={{ backgroundColor: meta.color }}
+                            />
+                            <span className="study-cal-event-name">{ev.title}</span>
+                          </div>
+                          <div className="study-cal-event-submeta">
+                            <span className="tabular-nums">
+                              {formatReadableDateIt(ev.date, todayStr)} · {ev.startTime}
+                            </span>
+                            <span>·</span>
+                            <span>{ev.subject}</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   );
