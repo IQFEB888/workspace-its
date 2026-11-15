@@ -1955,11 +1955,41 @@ body .dashboard-container.chat-collapsed .chat-vertical-title { display: block; 
   to { transform: translateY(0); opacity: 1; }
 }
 
-/* Scrollbars & Responsive */
-#notes-area::-webkit-scrollbar, #materials-area::-webkit-scrollbar, .panel::-webkit-scrollbar { width: 5px; }
-#notes-area::-webkit-scrollbar-track, #materials-area::-webkit-scrollbar-track, .panel::-webkit-scrollbar-track { background: transparent; }
-#notes-area::-webkit-scrollbar-thumb, #materials-area::-webkit-scrollbar-thumb, .panel::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 10px; }
-#notes-area::-webkit-scrollbar-thumb:hover, #materials-area::-webkit-scrollbar-thumb:hover, .panel::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
+/* Universal Theme-Aware Dark Scrollbars Across All Views (Calendar, Notes, Modals, Widgets, Chat) */
+:root,
+html,
+body {
+  color-scheme: dark;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) rgba(9, 10, 15, 0.38);
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: rgba(9, 10, 15, 0.38);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-primary, #6366f1);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
 
 @media (max-width: 1180px) {
   .dashboard-container {

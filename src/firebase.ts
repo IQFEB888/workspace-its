@@ -6,11 +6,23 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, initializeAuth, 
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+// Primary Firebase configuration for Workspace ITS Firestore database & main user session
+const primaryFirestoreConfig = {
+  projectId: 'workspace-its-10786',
+  appId: '1:455460787207:web:6993eabd770791a55606a2',
+  apiKey: 'AIzaSyAEJ1jKTIP4Jh0NsrO48rOFzGlCMNsgeII',
+  authDomain: 'workspace-its-10786.firebaseapp.com',
+  firestoreDatabaseId: 'ai-studio-workspaceits-3bed4683-d225-4e08-9dfa-deedfa0b0a7d',
+  storageBucket: 'workspace-its-10786.firebasestorage.app',
+  messagingSenderId: '455460787207',
+  measurementId: 'G-PYD8940MLR'
+};
 
-// Secondary isolated Firebase App exclusively for Google Calendar OAuth token acquisition.
-// This allows the user to pick their personal @gmail.com account for Calendar events
-// without signing out or switching their primary Workspace ITS account!
+const app = initializeApp(primaryFirestoreConfig);
+
+// Secondary isolated Firebase App exclusively for Google Calendar & Drive OAuth token acquisition.
+// Uses firebaseConfig (from firebase-applet-config.json) where Google Calendar API is enabled,
+// and allows selecting a personal @gmail.com account without altering the main Workspace ITS session!
 const calendarOAuthApp =
   getApps().find(a => a.name === 'CalendarOAuthClient') ||
   initializeApp(firebaseConfig, 'CalendarOAuthClient');
@@ -26,10 +38,8 @@ export const calendarAuth = (() => {
   }
 })();
 
-// Connect to workspace-its-10786 database
-export const db = (firebaseConfig as any).firestoreDatabaseId
-  ? getFirestore(app, (firebaseConfig as any).firestoreDatabaseId)
-  : getFirestore(app);
+// Connect to ai-studio-workspaceits-3bed4683-d225-4e08-9dfa-deedfa0b0a7d database
+export const db = getFirestore(app, primaryFirestoreConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({

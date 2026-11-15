@@ -4160,21 +4160,18 @@ export default function App() {
     try {
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/drive.file');
+      provider.addScope('https://www.googleapis.com/auth/calendar.events');
+      provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
       provider.setCustomParameters({
-        prompt: 'consent'
+        prompt: 'select_account'
       });
-      const result = await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(calendarAuth, provider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       const token = credential?.accessToken || null;
       if (token) {
         setGoogleOAuthAccessToken(token);
-        if (result.user) {
-          const isSuper = WorkspaceService.isSuperAdmin(result.user.email, result.user.displayName);
-          if (isSuper) {
-            setIsApproved(true);
-            setIsAdmin(true);
-            WorkspaceService.cleanupSuperAdminRecords(result.user);
-          }
+        if (result.user?.email) {
+          setGoogleCalendarEmail(result.user.email);
         }
         return token;
       }

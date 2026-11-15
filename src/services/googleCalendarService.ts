@@ -109,7 +109,15 @@ export async function fetchGoogleCalendarEvents(
         if (!res.ok) {
           if (calId === 'primary' || calendarIds.length === 1) {
             const errText = await res.text();
-            primaryError = new Error(`Errore Google Calendar (${res.status}): ${errText}`);
+            if (errText.includes('SERVICE_DISABLED') || errText.includes('accessNotConfigured')) {
+              const urlMatch = errText.match(/https:\/\/console\.developers\.google\.com\/apis\/api\/calendar-json\.googleapis\.com\/overview\?project=\d+/);
+              const enableUrl = urlMatch ? urlMatch[0] : 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com';
+              primaryError = new Error(
+                `L'API Google Calendar non è ancora attiva sul progetto Cloud. Abilitala dal card OAuth qui in AI Studio oppure cliccando su: ${enableUrl}`
+              );
+            } else {
+              primaryError = new Error(`Errore Google Calendar (${res.status}): ${errText.slice(0, 180)}`);
+            }
           }
           return;
         }

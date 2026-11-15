@@ -1,12 +1,11 @@
 {
-  "projectId": "workspace-its-10786",
-  "appId": "1:455460787207:web:6993eabd770791a55606a2",
-  "apiKey": "AIzaSyAEJ1jKTIP4Jh0NsrO48rOFzGlCMNsgeII",
-  "authDomain": "workspace-its-10786.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-workspaceits-3bed4683-d225-4e08-9dfa-deedfa0b0a7d",
-  "storageBucket": "workspace-its-10786.firebasestorage.app",
-  "messagingSenderId": "455460787207",
-  "measurementId": "G-PYD8940MLR",
-  "oAuthClientId": "455460787207-a6j25vf309hr4odclrahk0m034kffut8.apps.googleusercontent.com",
+  "projectId": "gen-lang-client-0367932711",
+  "appId": "1:319601966292:web:cb827932c95d5a58d24f41",
+  "apiKey": "AIzaSyDOEIHds-licXGezYjU8uBFonoGgktqyx4",
+  "authDomain": "gen-lang-client-0367932711.firebaseapp.com",
+  "storageBucket": "gen-lang-client-0367932711.firebasestorage.app",
+  "messagingSenderId": "319601966292",
+  "measurementId": "",
+  "oAuthClientId": "319601966292-c1vdi5g29sjp2rcmns9n645oi2kdqui8.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }
