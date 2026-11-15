@@ -6,11 +6,11 @@
 
 ## 1. Informazioni Generali & Versione
 - **Nome Applicazione**: `Workspace ITS`
-- **Versione Attuale**: `v3.3.0` (`APP_VERSION` in `src/utils/editorTools.ts`, mostrata nel badge fisso in basso a sinistra `.app-version-badge`).
+- **Versione Attuale**: `v3.4.0` (`APP_VERSION` in `src/utils/editorTools.ts`, mostrata nel badge fisso in basso a sinistra `.app-version-badge`).
 - **REGOLA OBBLIGATORIA DI VERSIONING**: **Ad ogni singola modifica al codice, incrementare sempre `APP_VERSION` in `src/utils/editorTools.ts`** (e aggiornare `PROJECT_MEMORY.md`), così che l'utente possa verificare immediatamente dal badge in basso a sinistra di avere l'ultima versione su tutti i dispositivi.
 - **PWA & Routing**:
   - Configurata con `vite.config.ts` (`base: './'`), `public/manifest.json` (`start_url: './'`, `scope: './'`), `public/sw.js` e cattura anticipata di `beforeinstallprompt` in `index.html` (`window.__deferredPwaPrompt`) per funzionare sia su AI Studio sia su GitHub Pages (`https://iqfeb888.github.io/...`) senza errori 404.
-  - Hook `src/hooks/usePWAInstall.ts` + `handleInstallAppClick`: su PC attiva immediatamente il prompt di installazione nativo del browser (se supportato da Chrome/Edge) oppure scarica direttamente il collegamento Desktop `Workspace ITS.url` / `.html` sul computer senza mai bloccarsi su un semplice popup di istruzioni.
+  - Hook `src/hooks/usePWAInstall.ts` + `handleInstallAppClick`: su PC attiva immediatamente il prompt di installazione nativo del browser (se supportato da Chrome/Edge) oppure scarica il launcher standalone **`Workspace ITS Desktop.html`** (evitando file `.url` che Opera/Chromium convertono in testo `[InternetShortcut]`).
 
 ---
 
@@ -43,12 +43,13 @@ L'editor `#notes-area` in `src/App.tsx` (supportato da `src/utils/editorTools.ts
 
 ---
 
-## 4. Calendario Studi & Lezioni (`StudyCalendarPanel.tsx`), Temi, Scrollbar Scure & Transizioni
-- **Calendario nella Barra Laterale Sinistra**:
-  - Sostituisce `GEOP ITS` nella griglia **Strumenti** a sinistra.
-  - Supporta sincronizzazione con Google Calendar personale (`calendarAuth`), lettura automatica di tutti i calendari secondari/condivisi (`users/me/calendarList`, incluso il calendario scolastico condiviso o aggiunto via URL iCal nel Gmail personale), guida integrata `🎓 Sincronizza Scuola → Personale`, pulsante 1-click per abilitare la Google Calendar API su Google Cloud e importazione diretta di file **`.ics` (iCal)** scolastici (`parseIcsCalendarContent`).
-- **Transizioni Fluide & Scrollbar a Tema Scuro**:
-  - Passando tra **Appunti**, **Materiali** e **Calendario** viene applicata l'animazione `.tab-panel-transition` (`tabSlideFadeIn` con opacità e scorrimento).
-  - Tutte le barre di scorrimento dell'app usano `color-scheme: dark` e regole globali `*::-webkit-scrollbar` a tema scuro.
-
-
+## 4. Calendario Studi & Lezioni (`StudyCalendarPanel.tsx`), Viste Giorno/Settimana/Mese/Agenda & AI Chat Integration
+- **4 Viste Calendario (`Giorno`, `Settimana`, `Mese`, `Agenda`)**:
+  - **⏰ Giorno (`'day'`)**: timeline oraria (`07:00`–`21:00`) con inserimento rapido 1-click (`+ Aggiungi alle HH:00`) su ogni fascia oraria.
+  - **📊 Settimana (`'week'`)**: bacheca settimanale a 7 colonne (`Lun`–`Dom`) con card degli impegni e pulsante `+` su ogni giorno.
+  - **🗓️ Mese (`'month'`)** e **📋 Agenda (`'agenda'`)**.
+- **Propagazione Firestore & Listener Cloud (`users/{uid}/calendar_events`)**:
+  - `saveCalendarEventToCloud` sanitizza tutti i campi (evitando `googleEventId: undefined` che bloccava `setDoc` in Firestore) e il listener `onCalendarEvents` unisce gli eventi locali e cloud senza mai sovrascrivere gli eventi appena creati.
+- **Comandi Vocali/Testuali Calendario nella Chat AI (`parseCalendarChatCommand` & `buildCalendarScheduleContextForChat`)**:
+  - Scrivendo in chat frasi come *"aggiungi un promemoria per domani alle 15:30 per studiare Database"* l'evento viene creato automaticamente nel Calendario (e su Google Calendar personale se collegato).
+  - Scrivendo domande come *"che materie ho domani?"* o *"che impegni ho questa settimana?"*, la Chat AI ha visibilità completa sul calendario (e risponde anche senza API key tramite `answerCalendarQueryLocally`).

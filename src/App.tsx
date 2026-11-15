@@ -55,7 +55,10 @@ import {
   setCaretCharOffsetWithin,
   computeContextMenuPosition,
   compressImageFromBlob,
-  parseAiNoteEditIntent
+  parseAiNoteEditIntent,
+  parseCalendarChatCommand,
+  buildCalendarScheduleContextForChat,
+  answerCalendarQueryLocally
 } from './utils/editorTools';
 import { uploadNoteToDrive } from './services/googleDriveService';
 import { executeCodeBlock } from './services/codeRunnerService';
@@ -63,7 +66,8 @@ import {
   fetchGoogleCalendarEvents,
   createGoogleCalendarEvent,
   deleteGoogleCalendarEvent,
-  parseIcsCalendarContent
+  parseIcsCalendarContent,
+  CATEGORY_META
 } from './services/googleCalendarService';
 import { callGeminiWithRotation } from './services/geminiService';
 import { usePWAInstall } from './hooks/usePWAInstall';
@@ -147,6 +151,7 @@ export default function App() {
   const [calendarEvents, setCalendarEvents] = useState<CalendarEventItem[]>(() =>
     WorkspaceService.getLocalCalendarEvents()
   );
+  const deletedCalendarIdsRef = useRef<Set<string>>(new Set());
   const [isSyncingGoogleCalendar, setIsSyncingGoogleCalendar] = useState<boolean>(false);
   const [googleCalendarEmail, setGoogleCalendarEmail] = useState<string | null>(null);
   const [calendarApiEnableUrl, setCalendarApiEnableUrl] = useState<string | null>(null);
@@ -820,9 +825,41 @@ export default function App() {
             setApiKeys(keys);
             setSelectedKeyIndex(idx);
           },
-          onCalendarEvents: evs => {
-            setCalendarEvents(evs);
-            WorkspaceService.saveLocalCalendarEvents(evs);
+          onCalendarEvents: cloudEvs => {
+            setCalendarEvents(prevLocal => {
+              const cloudById = new Map<string, CalendarEventItem>();
+              cloudEvs.forEach(ev => {
+                if (ev && ev.id && !deletedCalendarIdsRef.current.has(ev.id)) {
+                  cloudById.set(ev.id, ev);
+                }
+              });
+
+              const unsyncedLocals: CalendarEventItem[] = [];
+              prevLocal.forEach(localEv => {
+                if (!localEv || !localEv.id || deletedCalendarIdsRef.current.has(localEv.id)) return;
+                const existingCloud = cloudById.get(localEv.id);
+                if (!existingCloud) {
+                  cloudById.set(localEv.id, localEv);
+                  unsyncedLocals.push(localEv);
+                } else if ((localEv.updatedAt || 0) > (existingCloud.updatedAt || 0)) {
+                  cloudById.set(localEv.id, localEv);
+                  unsyncedLocals.push(localEv);
+                }
+              });
+
+              const merged = Array.from(cloudById.values()).sort((a, b) =>
+                (a.date + (a.startTime || '')).localeCompare(b.date + (b.startTime || ''))
+              );
+              WorkspaceService.saveLocalCalendarEvents(merged);
+
+              if (unsyncedLocals.length > 0 && user?.uid) {
+                unsyncedLocals.forEach(ev => {
+                  WorkspaceService.saveCalendarEventToCloud(user.uid, ev).catch(() => {});
+                });
+              }
+
+              return merged;
+            });
           }
         });
 
@@ -982,7 +1019,7 @@ export default function App() {
     pushToGoogle: boolean
   ) => {
     const id = 'cal_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
-    let googleEventId: string | undefined;
+    let googleEventId = '';
 
     if (pushToGoogle) {
       let token = googleOAuthAccessToken;
@@ -1020,12 +1057,13 @@ export default function App() {
     const fullEvent: CalendarEventItem = {
       ...newEvData,
       id,
-      googleEventId,
+      googleEventId: googleEventId || '',
       updatedAt: Date.now()
     };
 
     setCalendarEvents(prev => {
-      const next = [...prev, fullEvent].sort((a, b) =>
+      const filtered = prev.filter(item => item.id !== fullEvent.id);
+      const next = [...filtered, fullEvent].sort((a, b) =>
         (a.date + (a.startTime || '')).localeCompare(b.date + (b.startTime || ''))
       );
       WorkspaceService.saveLocalCalendarEvents(next);
@@ -1061,8 +1099,8 @@ export default function App() {
 
     showToast(
       googleEventId
-        ? `📅 "${fullEvent.title}" salvato sul tuo Google Calendar Personale (calendario principale) con promemoria!`
-        : `📅 "${fullEvent.title}" aggiunto al Calendario Studio!`
+        ? `📅 "${fullEvent.title}" salvato nel Cloud e sul tuo Google Calendar Personale!`
+        : `📅 "${fullEvent.title}" salvato nel Calendario Studio e sincronizzato nel Cloud!`
     );
   };
 
@@ -1085,6 +1123,7 @@ export default function App() {
   };
 
   const handleDeleteCalendarEvent = async (ev: CalendarEventItem) => {
+    deletedCalendarIdsRef.current.add(ev.id);
     setCalendarEvents(prev => {
       const next = prev.filter(item => item.id !== ev.id);
       WorkspaceService.saveLocalCalendarEvents(next);
@@ -2170,47 +2209,83 @@ export default function App() {
     const isMobileOrTablet = /Android|iPhone|iPad|iPod/i.test(ua);
 
     if (!isMobileOrTablet) {
-      // On Desktop PC (e.g. Opera GX, Firefox, or inside an iframe where beforeinstallprompt is blocked):
-      // Directly download the Desktop App Launcher (.bat / .url) so the button works immediately without showing instructions!
+      // On Desktop PC (e.g. Opera / Opera GX / Firefox, where .url files get blocked or opened as raw [InternetShortcut] text):
+      // Download a self-contained HTML Desktop App Launcher ("Workspace ITS Desktop.html") that opens cleanly in any browser on double-click!
       const rawUrl = window.location.href.split('#')[0];
       const appUrl = rawUrl.replace(/[?&]autostart=1/g, '');
       const iconUrl = new URL('./pwa-192x192.png', window.location.href).href;
-      const isWindows = /Win/i.test(navigator.platform || ua);
 
-      if (isWindows) {
-        // Download native Windows Internet Shortcut (.url) that launches Workspace ITS directly from Desktop
-        const shortcutContent = [
-          '[InternetShortcut]',
-          `URL=${appUrl}`,
-          `IconFile=${iconUrl}`,
-          'IconIndex=0',
-          'HotKey=0',
-          'IDList='
-        ].join('\r\n');
-        const blob = new Blob([shortcutContent], { type: 'application/internet-shortcut' });
-        const blobUrl = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = 'Workspace ITS.url';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
-      } else {
-        // macOS / Linux Desktop: download .webloc / standalone HTML launcher
-        const desktopHtml = `<!doctype html><html><head><meta charset="utf-8"><title>Workspace ITS</title><meta http-equiv="refresh" content="0;url=${appUrl}"><script>window.location.replace(${JSON.stringify(appUrl)});</script></head><body style="background:#070709;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">Apertura di Workspace ITS...</body></html>`;
-        const blob = new Blob([desktopHtml], { type: 'text/html;charset=utf-8' });
-        const blobUrl = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = 'Workspace ITS.html';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
-      }
+      const desktopLauncherHtml = `<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Workspace ITS — Desktop Launcher</title>
+  <link rel="icon" type="image/png" href="${iconUrl}" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: radial-gradient(circle at 50% 20%, #1e1b4b 0%, #09090b 75%);
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    .card {
+      background: rgba(24, 24, 34, 0.9);
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      border-radius: 20px;
+      padding: 36px 42px;
+      max-width: 440px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+    }
+    img { width: 72px; height: 72px; border-radius: 16px; margin-bottom: 16px; }
+    h1 { font-size: 22px; font-weight: 800; margin-bottom: 8px; }
+    p { font-size: 13px; color: #94a3b8; margin-bottom: 24px; line-height: 1.5; }
+    .btn {
+      display: inline-block;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 14px;
+      padding: 12px 24px;
+      border-radius: 12px;
+      border: none;
+      cursor: pointer;
+    }
+  </style>
+  <script>
+    window.addEventListener('DOMContentLoaded', function() {
+      var target = ${JSON.stringify(appUrl)};
+      window.location.replace(target);
+    });
+  </script>
+</head>
+<body>
+  <div class="card">
+    <img src="${iconUrl}" alt="Workspace ITS" />
+    <h1>Workspace ITS</h1>
+    <p>Avvio automatico dell'applicazione desktop in corso...</p>
+    <a class="btn" href="${appUrl}">🚀 Apri Workspace ITS</a>
+  </div>
+</body>
+</html>`;
 
-      showToast('💻 Collegamento Desktop "Workspace ITS" scaricato sul tuo PC!');
+      const blob = new Blob([desktopLauncherHtml], { type: 'text/html;charset=utf-8' });
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = 'Workspace ITS Desktop.html';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2500);
+
+      showToast('💻 App Launcher "Workspace ITS Desktop.html" scaricato! Aprilo con doppio clic dal PC.');
       return;
     }
 
@@ -4442,10 +4517,113 @@ export default function App() {
     return { icon: '🔗', color: 'rgba(168, 85, 247, 0.2)', border: 'rgba(168, 85, 247, 0.4)', type: 'Risorsa Web' };
   };
 
-  // Gemini AI Chat Execution with Keys Auto-Rotation & Document Grounding
+  // Gemini AI Chat Execution with Keys Auto-Rotation, Calendar Commands & Document Grounding
   const handleSendAIChat = async (customPrompt: string | null = null, isAnalysis: boolean = false) => {
     const userText = customPrompt || chatInput.trim();
     if (!userText && !attachedFile && !chatSelectedMaterial) return;
+
+    // 1. Check if the user asked in chat to add a Calendar Reminder / Exam / Lesson / Event
+    // Works immediately even without a Gemini API Key!
+    if (!customPrompt && !isAnalysis && !attachedFile && userText) {
+      const subjectNames = subjects.map(s => s.name);
+      const calCmd = parseCalendarChatCommand(userText, subjectNames);
+      if (calCmd && calCmd.isAddCommand) {
+        setChatInput('');
+        const evToCreate = {
+          title: calCmd.title,
+          date: calCmd.date,
+          startTime: calCmd.startTime,
+          endTime: calCmd.endTime,
+          category: calCmd.category,
+          subject: calCmd.subject || activeSubject || 'Generale',
+          description: calCmd.description,
+          completed: false
+        };
+
+        await handleAddCalendarEvent(evToCreate, Boolean(googleOAuthAccessToken));
+        const catMeta = CATEGORY_META[evToCreate.category] || CATEGORY_META.study;
+        const aiConfirmText =
+          `✅ **Promemoria aggiunto al Calendario!**\n\n` +
+          `• **Impegno:** ${catMeta.icon} ${evToCreate.title}\n` +
+          `• **Data:** ${calCmd.readableDateIt} (${evToCreate.date}, ${evToCreate.startTime} - ${evToCreate.endTime})\n` +
+          `• **Materia:** ${evToCreate.subject}\n` +
+          `• **Categoria:** ${catMeta.label}\n\n` +
+          `Lo trovi subito nella scheda **📅 Calendario** (viste *Giorno*, *Settimana*, *Mese* e *Agenda*)${googleOAuthAccessToken ? ' ed è stato sincronizzato anche sul tuo **Google Calendar Personale**!' : '.'}`;
+
+        if (workspaceMode === 'shared' && activeRoomId) {
+          await WorkspaceService.sendRoomMessage(activeRoomId, {
+            id: 'msg_' + Date.now(),
+            role: 'user',
+            senderId: currentUser?.uid || 'anon',
+            senderName: currentUser?.displayName || 'Studente',
+            senderPhoto: currentUser?.photoURL || '',
+            parts: [{ text: userText }],
+            rawText: userText,
+            timestamp: Date.now()
+          });
+          await WorkspaceService.sendRoomMessage(activeRoomId, {
+            id: 'ai_' + (Date.now() + 1),
+            role: 'model',
+            senderId: 'gemini',
+            senderName: 'Calendario AI ✦',
+            parts: [{ text: aiConfirmText }],
+            rawText: aiConfirmText,
+            timestamp: Date.now() + 1
+          });
+        } else {
+          const userMsg: ChatMessage = {
+            role: 'user',
+            parts: [{ text: userText }],
+            rawText: userText,
+            timestamp: Date.now()
+          };
+          const aiMsg: ChatMessage = {
+            role: 'model',
+            parts: [{ text: aiConfirmText }],
+            rawText: aiConfirmText,
+            timestamp: Date.now() + 1
+          };
+          const updatedList = [...(chats[activeSubject] || []), userMsg, aiMsg];
+          setChats(prev => {
+            const next = { ...prev, [activeSubject]: updatedList };
+            WorkspaceService.saveLocalChats(next);
+            return next;
+          });
+          if (currentUser) {
+            WorkspaceService.saveChatToCloud(currentUser.uid, activeSubject, updatedList).catch(() => {});
+          }
+        }
+        return;
+      }
+    }
+
+    // 2. If user asks about their schedule/subjects ("che materie ho domani?", "che impegni ho oggi?") and has no API key configured,
+    // answer directly from the local/cloud calendar!
+    if (apiKeys.length === 0 && !customPrompt && !isAnalysis && userText) {
+      const localCalReply = answerCalendarQueryLocally(userText, calendarEvents);
+      if (localCalReply.isCalendarQuery && localCalReply.replyMarkdown) {
+        setChatInput('');
+        const userMsg: ChatMessage = {
+          role: 'user',
+          parts: [{ text: userText }],
+          rawText: userText,
+          timestamp: Date.now()
+        };
+        const aiMsg: ChatMessage = {
+          role: 'model',
+          parts: [{ text: localCalReply.replyMarkdown }],
+          rawText: localCalReply.replyMarkdown,
+          timestamp: Date.now() + 1
+        };
+        const updatedList = [...(chats[activeSubject] || []), userMsg, aiMsg];
+        setChats(prev => {
+          const next = { ...prev, [activeSubject]: updatedList };
+          WorkspaceService.saveLocalChats(next);
+          return next;
+        });
+        return;
+      }
+    }
 
     if (apiKeys.length === 0) {
       showToast('Nessuna API Key salvata! Aggiungi almeno una chiave per Gemini.', 'error');
@@ -4518,6 +4696,10 @@ export default function App() {
       }
     }
 
+    // Build Calendar & Subjects Context so Gemini Copilot can answer "che materie ho domani?", "quali esami ho questa settimana?", etc.
+    const calendarContextBlock = buildCalendarScheduleContextForChat(calendarEvents);
+    const allSubjectsLine = `Materie del corso dell'utente: ${subjects.map(s => s.name).join(', ')}.`;
+
     // If in Shared Room Mode, send message to room and broadcast Gemini's response to all participants
     if (workspaceMode === 'shared') {
       if (!activeRoomId) {
@@ -4545,7 +4727,7 @@ export default function App() {
       setIsAILoading(true);
 
       const noteText = notesAreaRef.current?.innerText.trim() || '';
-      let systemContext = `Sei l'assistente AI ITS del gruppo di studio "${currentRoom?.name || 'Stanza ITS'}". Rispondi in italiano in modo chiaro, utile e accademico.`;
+      let systemContext = `Sei l'assistente AI ITS del gruppo di studio "${currentRoom?.name || 'Stanza ITS'}". Rispondi in italiano in modo chiaro, utile e accademico.\n${allSubjectsLine}\n\n${calendarContextBlock}`;
       if (noteText) {
         systemContext += `\n\nAppunti condivisi della stanza:\n${noteText}`;
       }
@@ -4653,8 +4835,8 @@ export default function App() {
 
     const noteText = notesAreaRef.current?.innerText.trim() || '';
     let systemContext = noteText
-      ? `Sei un assistente ITS per "${activeSubject}". Appunti della lezione:\n\n${noteText}`
-      : `Sei un assistente ITS per "${activeSubject}".`;
+      ? `Sei un assistente ITS per "${activeSubject}".\n${allSubjectsLine}\n\n${calendarContextBlock}\n\nAppunti della lezione:\n\n${noteText}`
+      : `Sei un assistente ITS per "${activeSubject}".\n${allSubjectsLine}\n\n${calendarContextBlock}`;
 
     if (chatSelectedMaterial) {
       systemContext += `\n\n[FONTE COLLEGATA DALL'UTENTE]: "${chatSelectedMaterial.name}" (${chatSelectedMaterial.category}). Rispondi in modo esaustivo facendo riferimento e spiegando accuratamente i contenuti di questo materiale.`;

@@ -592,7 +592,7 @@ export function compressImageFromBlob(
 // APP VERSION & PROGRAMMABLE KEYBOARD SHORTCUTS
 // ============================================================================
 
-export const APP_VERSION = 'v3.3.0';
+export const APP_VERSION = 'v3.4.0';
 
 export interface ShortcutDefinition {
   id:
@@ -1005,3 +1005,394 @@ export function buildSvgElementString(
   return '';
 }
 
+// ============================================================================
+// NATURAL-LANGUAGE CALENDAR CHAT ASSISTANT (ADD REMINDERS & QUERY SCHEDULE)
+// ============================================================================
+
+export interface ParsedCalendarCommand {
+  isAddCommand: boolean;
+  title: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  category: 'lecture' | 'homework' | 'study' | 'exam';
+  subject: string;
+  description: string;
+  readableDateIt: string;
+}
+
+const ITALIAN_MONTHS_MAP: Record<string, number> = {
+  gennaio: 1,
+  gen: 1,
+  febbraio: 2,
+  feb: 2,
+  marzo: 3,
+  mar: 3,
+  aprile: 4,
+  apr: 4,
+  maggio: 5,
+  mag: 5,
+  giugno: 6,
+  giu: 6,
+  luglio: 7,
+  lug: 7,
+  agosto: 8,
+  ago: 8,
+  settembre: 9,
+  set: 9,
+  ottobre: 10,
+  ott: 10,
+  novembre: 11,
+  nov: 11,
+  dicembre: 12,
+  dic: 12
+};
+
+const ITALIAN_WEEKDAYS_MAP: Record<string, number> = {
+  domenica: 0,
+  lunedi: 1,
+  'lunedì': 1,
+  martedi: 2,
+  'martedì': 2,
+  mercoledi: 3,
+  'mercoledì': 3,
+  giovedi: 4,
+  'giovedì': 4,
+  venerdi: 5,
+  'venerdì': 5,
+  sabato: 6
+};
+
+const WEEKDAY_NAMES_FULL_IT = [
+  'Domenica',
+  'Lunedì',
+  'Martedì',
+  'Mercoledì',
+  'Giovedì',
+  'Venerdì',
+  'Sabato'
+];
+
+const MONTH_NAMES_FULL_IT = [
+  'Gennaio',
+  'Febbraio',
+  'Marzo',
+  'Aprile',
+  'Maggio',
+  'Giugno',
+  'Luglio',
+  'Agosto',
+  'Settembre',
+  'Ottobre',
+  'Novembre',
+  'Dicembre'
+];
+
+function toIsoDateLocal(d: Date): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+export function formatItalianDateNice(dateStr: string): string {
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return dateStr;
+  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  if (isNaN(d.getTime())) return dateStr;
+  return `${WEEKDAY_NAMES_FULL_IT[d.getDay()]} ${Number(parts[2])} ${MONTH_NAMES_FULL_IT[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+export function resolveItalianDateFromText(text: string, now: Date = new Date()): string | null {
+  const lower = text.toLowerCase();
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  if (/\bdopodomani\b/.test(lower)) {
+    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + 2);
+    return toIsoDateLocal(d);
+  }
+  if (/\bdomani\b/.test(lower)) {
+    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + 1);
+    return toIsoDateLocal(d);
+  }
+  if (/\b(oggi|stasera|stamattina)\b/i.test(lower)) {
+    return toIsoDateLocal(base);
+  }
+
+  // ISO YYYY-MM-DD
+  const isoMatch = lower.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/);
+  if (isoMatch) {
+    const y = Number(isoMatch[1]);
+    const m = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+    return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  // DD/MM/YYYY or DD/MM
+  const slashMatch = lower.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (slashMatch) {
+    const day = Number(slashMatch[1]);
+    const m = Number(slashMatch[2]);
+    let y = slashMatch[3] ? Number(slashMatch[3]) : base.getFullYear();
+    if (y < 100) y += 2000;
+    if (m >= 1 && m <= 12 && day >= 1 && day <= 31) {
+      return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  // "20 novembre" / "il 5 dicembre"
+  const monthNamesPattern = Object.keys(ITALIAN_MONTHS_MAP).join('|');
+  const namedMonthRegex = new RegExp(`\\b(\\d{1,2})\\s+(${monthNamesPattern})(?:\\s+(20\\d{2}))?\\b`, 'i');
+  const namedMatch = lower.match(namedMonthRegex);
+  if (namedMatch) {
+    const day = Number(namedMatch[1]);
+    const m = ITALIAN_MONTHS_MAP[namedMatch[2].toLowerCase()];
+    const y = namedMatch[3] ? Number(namedMatch[3]) : base.getFullYear();
+    if (m && day >= 1 && day <= 31) {
+      return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  // Weekday names ("lunedì", "martedì", "venerdì prossimo", etc.)
+  for (const [wName, targetDow] of Object.entries(ITALIAN_WEEKDAYS_MAP)) {
+    const wRegex = new RegExp(`\\b${wName}\\b`, 'i');
+    if (wRegex.test(lower)) {
+      const currentDow = base.getDay();
+      let diff = (targetDow - currentDow + 7) % 7;
+      if (diff === 0) diff = 7;
+      const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + diff);
+      return toIsoDateLocal(d);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Parses natural-language Italian chat prompts asking to add a reminder, homework, exam, or lecture to the calendar.
+ */
+export function parseCalendarChatCommand(
+  userMessage: string,
+  availableSubjects: string[] = ['Database'],
+  now: Date = new Date()
+): ParsedCalendarCommand | null {
+  if (!userMessage || typeof userMessage !== 'string') return null;
+  const text = userMessage.trim();
+  const lower = text.toLowerCase();
+
+  const hasAddVerb =
+    /\b(aggiungi|metti|crea|segna|ricordami|pianifica|programma|inserisci|fissa|imposta)\b/i.test(lower);
+  const hasCalendarTarget =
+    /\b(promemoria|calendario|impegno|evento|verifica|esame|compito|consegna|lezione|studio|ripasso|test|interrogazione)\b/i.test(
+      lower
+    );
+
+  // Exclude note-editing commands like "aggiungi negli appunti"
+  if (/\b(negli\s+appunti|nella\s+nota|nella\s+pagina|tabella\s+negli\s+appunti)\b/i.test(lower)) {
+    return null;
+  }
+
+  if (!hasAddVerb || !hasCalendarTarget) {
+    return null;
+  }
+
+  const resolvedDate = resolveItalianDateFromText(text, now) || toIsoDateLocal(now);
+
+  let startTime = '09:00';
+  let endTime = '10:00';
+
+  const rangeMatch = lower.match(
+    /\bdalle\s+(\d{1,2})(?:[:.](\d{2}))?\s+alle\s+(\d{1,2})(?:[:.](\d{2}))?\b/i
+  );
+  const singleTimeMatch = lower.match(/\b(?:alle|ore|per\s+le)\s+(\d{1,2})(?:[:.](\d{2}))?\b/i);
+
+  if (rangeMatch) {
+    const sh = Math.min(23, Math.max(0, Number(rangeMatch[1])));
+    const sm = Math.min(59, Math.max(0, Number(rangeMatch[2] || '0')));
+    const eh = Math.min(23, Math.max(0, Number(rangeMatch[3])));
+    const em = Math.min(59, Math.max(0, Number(rangeMatch[4] || '0')));
+    startTime = `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+    endTime = `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+  } else if (singleTimeMatch) {
+    const sh = Math.min(23, Math.max(0, Number(singleTimeMatch[1])));
+    const sm = Math.min(59, Math.max(0, Number(singleTimeMatch[2] || '0')));
+    const eh = (sh + 1) % 24;
+    startTime = `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+    endTime = `${String(eh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+  }
+
+  let category: 'lecture' | 'homework' | 'study' | 'exam' = 'study';
+  if (/\b(esame|verifica|test|parziale|interrogazione|orale|scritto)\b/i.test(lower)) {
+    category = 'exam';
+  } else if (/\b(compito|consegna|scadenza|progetto|esercizi|relazione)\b/i.test(lower)) {
+    category = 'homework';
+  } else if (/\b(lezione|corso|laboratorio)\b/i.test(lower)) {
+    category = 'lecture';
+  } else {
+    category = 'study';
+  }
+
+  let matchedSubject = availableSubjects[0] || 'Generale';
+  for (const sub of availableSubjects) {
+    if (sub && lower.includes(sub.toLowerCase())) {
+      matchedSubject = sub;
+      break;
+    }
+  }
+
+  const monthNamesPattern = Object.keys(ITALIAN_MONTHS_MAP).join('|');
+  let rawTitle = text
+    .replace(
+      /^(?:per\s+favore\s+|ehi\s+|ciao\s+)?(?:aggiungi|metti|crea|segna|ricordami|pianifica|programma|inserisci|fissa|imposta)\s+(?:un\s+|una\s+|il\s+|la\s+)?(?:promemoria|evento|impegno|nel\s+calendario|in\s+calendario|sul\s+calendario)?\s*/i,
+      ''
+    )
+    .replace(/\b(?:nel\s+calendario|in\s+calendario|sul\s+calendario)\b/gi, '')
+    .replace(/\bdalle\s+\d{1,2}(?:[:.]\d{2})?\s+alle\s+\d{1,2}(?:[:.]\d{2})?\b/gi, '')
+    .replace(/\b(?:alle|ore|per\s+le)\s+\d{1,2}(?:[:.]\d{2})?\b/gi, '')
+    .replace(/\b(?:per\s+)?(?:oggi|domani|dopodomani|stasera|stamattina)\b/gi, '')
+    .replace(
+      /\b(?:per\s+|di\s+|il\s+)?(?:luned[iì]|marted[iì]|mercoled[iì]|gioved[iì]|venerd[iì]|sabato|domenica)(?:\s+prossim[oa])?\b/gi,
+      ''
+    )
+    .replace(/\b(?:per\s+il\s+|il\s+)?\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/gi, '')
+    .replace(
+      new RegExp(`\\b(?:per\\s+il\\s+|il\\s+)?\\d{1,2}\\s+(?:${monthNamesPattern})(?:\\s+20\\d{2})?\\b`, 'gi'),
+      ''
+    )
+    .replace(/^(?:\s*(?:per|di|che|su|a|:|-)\s+)+/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  if (!rawTitle) {
+    rawTitle =
+      category === 'exam'
+        ? `Verifica di ${matchedSubject}`
+        : category === 'homework'
+        ? `Compito di ${matchedSubject}`
+        : category === 'lecture'
+        ? `Lezione di ${matchedSubject}`
+        : `Promemoria ${matchedSubject}`;
+  } else {
+    rawTitle = rawTitle.charAt(0).toUpperCase() + rawTitle.slice(1);
+  }
+
+  return {
+    isAddCommand: true,
+    title: rawTitle,
+    date: resolvedDate,
+    startTime,
+    endTime,
+    category,
+    subject: matchedSubject,
+    description: `Creato tramite assistente Chat: "${text}"`,
+    readableDateIt: formatItalianDateNice(resolvedDate)
+  };
+}
+
+/**
+ * Builds a structured Italian summary of the user's Calendar events to inject into Gemini Copilot's system prompt
+ * so Gemini can answer any question about the user's classes, subjects, exams, and schedule.
+ */
+export function buildCalendarScheduleContextForChat(
+  events: Array<{
+    id: string;
+    title: string;
+    date: string;
+    startTime?: string;
+    endTime?: string;
+    category: string;
+    subject: string;
+    description?: string;
+    completed?: boolean;
+  }>,
+  now: Date = new Date()
+): string {
+  const todayStr = toIsoDateLocal(now);
+  const tomorrowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const tomorrowStr = toIsoDateLocal(tomorrowDate);
+
+  const header = `[CALENDARIO STUDI & LEZIONI DELL'UTENTE — Data di oggi: ${formatItalianDateNice(todayStr)} (${todayStr}), Domani: ${formatItalianDateNice(tomorrowStr)} (${tomorrowStr})]`;
+
+  if (!events || events.length === 0) {
+    return `${header}\nNessun evento o lezione attualmente presente nel calendario.`;
+  }
+
+  const sorted = [...events].sort((a, b) =>
+    `${a.date} ${a.startTime || '09:00'}`.localeCompare(`${b.date} ${b.startTime || '09:00'}`)
+  );
+
+  const relevant = sorted.filter(e => e.date >= todayStr).slice(0, 60);
+  if (relevant.length === 0) {
+    return `${header}\nNessun impegno futuro a partire da oggi (${todayStr}).`;
+  }
+
+  const lines = relevant.map(ev => {
+    const niceDay = formatItalianDateNice(ev.date);
+    const tag =
+      ev.date === todayStr ? '[OGGI] ' : ev.date === tomorrowStr ? '[DOMANI] ' : '';
+    const status = ev.completed ? ' (Completato)' : '';
+    const desc = ev.description ? ` — Note: ${ev.description}` : '';
+    return `- ${tag}${niceDay} (${ev.date}) dalle ${ev.startTime || '09:00'} alle ${ev.endTime || '10:00'} | Materia: ${ev.subject} | Titolo: ${ev.title} [${ev.category}]${status}${desc}`;
+  });
+
+  return `${header}\nElenco lezioni, materie, compiti ed esami in calendario:\n${lines.join('\n')}\n\n(Se l'utente ti chiede che materie/lezioni ha domani, oggi o in un giorno specifico, rispondi elencando con precisione gli orari e le materie qui sopra.)`;
+}
+
+/**
+ * Answers direct calendar questions locally (e.g. "che materie ho domani?", "cosa ho in calendario oggi?")
+ * so the user gets an instant, accurate answer even without an API key or alongside Gemini.
+ */
+export function answerCalendarQueryLocally(
+  userMessage: string,
+  events: Array<{
+    id: string;
+    title: string;
+    date: string;
+    startTime?: string;
+    endTime?: string;
+    category: string;
+    subject: string;
+    description?: string;
+    completed?: boolean;
+  }>,
+  now: Date = new Date()
+): { isCalendarQuery: boolean; replyMarkdown: string } {
+  if (!userMessage || typeof userMessage !== 'string') {
+    return { isCalendarQuery: false, replyMarkdown: '' };
+  }
+  const lower = userMessage.trim().toLowerCase();
+
+  const isQuestionAboutSchedule =
+    /\b(che\s+materie|quali\s+materie|che\s+lezioni|quali\s+lezioni|cosa\s+ho|che\s+impegni|quali\s+impegni|che\s+esami|che\s+verifiche|cosa\s+c'è\s+in\s+calendario|programma\s+di\s+(?:oggi|domani|dopodomani|luned|marted|mercoled|gioved|venerd|sabato|domenica))\b/i.test(
+      lower
+    );
+
+  if (!isQuestionAboutSchedule) {
+    return { isCalendarQuery: false, replyMarkdown: '' };
+  }
+
+  const targetDate = resolveItalianDateFromText(userMessage, now) || toIsoDateLocal(now);
+  const niceDate = formatItalianDateNice(targetDate);
+  const dayEvents = (events || [])
+    .filter(e => e.date === targetDate)
+    .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+
+  if (dayEvents.length === 0) {
+    return {
+      isCalendarQuery: true,
+      replyMarkdown: `📅 Per **${niceDate}** (${targetDate}) non risultano lezioni o impegni registrati nel tuo Calendario.`
+    };
+  }
+
+  const rows = dayEvents.map(
+    ev =>
+      `• **${ev.startTime || '09:00'} – ${ev.endTime || '10:00'}** — **${ev.title}** *(Materia: ${ev.subject})*${
+        ev.description ? ` — ${ev.description}` : ''
+      }`
+  );
+
+  return {
+    isCalendarQuery: true,
+    replyMarkdown: `📅 Ecco i tuoi impegni e le materie per **${niceDate}**:\n\n${rows.join('\n')}`
+  };
+}

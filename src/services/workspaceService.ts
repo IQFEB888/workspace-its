@@ -643,15 +643,23 @@ export class WorkspaceService {
     if (!auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const ref = doc(db, 'users', userId, 'calendar_events', event.id);
-      await setDoc(
-        ref,
-        {
-          ...event,
-          userId,
-          updatedAt: new Date().toISOString()
-        },
-        { merge: true }
-      );
+      const cleanPayload = {
+        id: String(event.id),
+        title: String(event.title || 'Evento'),
+        date: String(event.date || new Date().toISOString().slice(0, 10)),
+        startTime: String(event.startTime || '09:00'),
+        endTime: String(event.endTime || '10:00'),
+        category: event.category || 'lecture',
+        subject: String(event.subject || 'Database'),
+        description: String(event.description || ''),
+        completed: Boolean(event.completed),
+        googleEventId: event.googleEventId ? String(event.googleEventId) : '',
+        color: String(event.color || '#38bdf8'),
+        createdAt: String(event.createdAt || new Date().toISOString()),
+        userId,
+        updatedAt: typeof event.updatedAt === 'number' ? event.updatedAt : Date.now()
+      };
+      await setDoc(ref, cleanPayload, { merge: true });
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `users/${userId}/calendar_events/${event.id}`);
     }
@@ -675,6 +683,7 @@ export class WorkspaceService {
     const localChats = this.getLocalChats();
     const localKeys = this.getLocalApiKeys();
     const localPref = this.getLocalPreferences();
+    const localCalEvents = this.getLocalCalendarEvents();
 
     let pageCount = 0;
 
@@ -715,6 +724,11 @@ export class WorkspaceService {
     // 6. Keys
     if (localKeys.keys.length > 0) {
       await this.saveApiKeysToCloud(userId, localKeys.keys, localKeys.selectedIndex);
+    }
+
+    // 7. Calendar Events
+    for (const calEv of localCalEvents) {
+      await this.saveCalendarEventToCloud(userId, calEv);
     }
 
     return { subjectsCount: localSubs.length, pagesCount: pageCount };

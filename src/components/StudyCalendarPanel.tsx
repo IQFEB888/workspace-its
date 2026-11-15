@@ -84,7 +84,9 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
-  const [viewMode, setViewMode] = useState<'month' | 'agenda'>(compact ? 'agenda' : 'month');
+  const [viewMode, setViewMode] = useState<'day' | 'week' | 'month' | 'agenda'>(
+    compact ? 'agenda' : 'month'
+  );
   const [categoryFilter, setCategoryFilter] = useState<CalendarEventCategory | 'all'>('all');
   const [showAddForm, setShowAddForm] = useState(false);
   const [showSchoolSyncGuide, setShowSchoolSyncGuide] = useState(false);
@@ -152,6 +154,37 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
     return days;
   }, [currentMonthDate, todayStr]);
 
+  // Build 7-day week array (Monday -> Sunday) around selectedDate
+  const currentWeekDays = useMemo(() => {
+    const parts = selectedDate.split('-').map(Number);
+    const base =
+      parts.length === 3 && !isNaN(parts[0])
+        ? new Date(parts[0], parts[1] - 1, parts[2])
+        : new Date();
+    const mondayOffset = (base.getDay() + 6) % 7;
+    const monday = new Date(base.getFullYear(), base.getMonth(), base.getDate() - mondayOffset);
+
+    return Array.from({ length: 7 }, (_, idx) => {
+      const d = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + idx);
+      const dStr = toDateStr(d);
+      return {
+        dateStr: dStr,
+        dayNum: d.getDate(),
+        weekdayShort: WEEKDAYS_SHORT[idx],
+        monthShort: (MONTHS_IT[d.getMonth()] || '').slice(0, 3),
+        isToday: dStr === todayStr
+      };
+    });
+  }, [selectedDate, todayStr]);
+
+  // Hourly slots for Day view (07:00 to 21:00)
+  const dayHourSlots = useMemo(() => {
+    return Array.from({ length: 15 }, (_, idx) => {
+      const hour = idx + 7;
+      return `${String(hour).padStart(2, '0')}:00`;
+    });
+  }, []);
+
   const selectedDayEvents = useMemo(() => {
     return eventsByDate[selectedDate] || [];
   }, [eventsByDate, selectedDate]);
@@ -172,12 +205,35 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
     return { pendingHomework, upcomingExams, todayCount };
   }, [events, eventsByDate, todayStr]);
 
-  const handlePrevMonth = () => {
-    setCurrentMonthDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  const shiftSelectedDateByDays = (deltaDays: number) => {
+    const parts = selectedDate.split('-').map(Number);
+    const base =
+      parts.length === 3 && !isNaN(parts[0])
+        ? new Date(parts[0], parts[1] - 1, parts[2])
+        : new Date();
+    const next = new Date(base.getFullYear(), base.getMonth(), base.getDate() + deltaDays);
+    setSelectedDate(toDateStr(next));
+    setCurrentMonthDate(new Date(next.getFullYear(), next.getMonth(), 1));
   };
 
-  const handleNextMonth = () => {
-    setCurrentMonthDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+  const handlePrevPeriod = () => {
+    if (viewMode === 'day') {
+      shiftSelectedDateByDays(-1);
+    } else if (viewMode === 'week') {
+      shiftSelectedDateByDays(-7);
+    } else {
+      setCurrentMonthDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+    }
+  };
+
+  const handleNextPeriod = () => {
+    if (viewMode === 'day') {
+      shiftSelectedDateByDays(1);
+    } else if (viewMode === 'week') {
+      shiftSelectedDateByDays(7);
+    } else {
+      setCurrentMonthDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+    }
   };
 
   const handleGoToday = () => {
@@ -205,10 +261,26 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
       },
       pushToGoogle
     );
+    const parts = selectedDate.split('-').map(Number);
+    if (parts.length === 3 && !isNaN(parts[0])) {
+      setCurrentMonthDate(new Date(parts[0], parts[1] - 1, 1));
+    }
     setNewTitle('');
     setNewDesc('');
     setShowAddForm(false);
   };
+
+  const headerPeriodLabel = useMemo(() => {
+    if (viewMode === 'day') {
+      return formatReadableDateIt(selectedDate, todayStr);
+    }
+    if (viewMode === 'week' && currentWeekDays.length === 7) {
+      const first = currentWeekDays[0];
+      const last = currentWeekDays[6];
+      return `${first.dayNum} ${first.monthShort} – ${last.dayNum} ${last.monthShort} ${currentMonthDate.getFullYear()}`;
+    }
+    return `${MONTHS_IT[currentMonthDate.getMonth()]} ${currentMonthDate.getFullYear()}`;
+  }, [viewMode, selectedDate, todayStr, currentWeekDays, currentMonthDate]);
 
   return (
     <div className={`study-calendar-root ${compact ? 'is-compact' : 'is-full'}`}>
@@ -229,21 +301,19 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
             <button
               type="button"
               className="study-cal-icon-btn"
-              onClick={handlePrevMonth}
-              aria-label="Mese precedente"
-              title="Mese precedente"
+              onClick={handlePrevPeriod}
+              aria-label="Periodo precedente"
+              title="Precedente"
             >
               ‹
             </button>
-            <h3 className="study-cal-month-title">
-              {MONTHS_IT[currentMonthDate.getMonth()]} {currentMonthDate.getFullYear()}
-            </h3>
+            <h3 className="study-cal-month-title">{headerPeriodLabel}</h3>
             <button
               type="button"
               className="study-cal-icon-btn"
-              onClick={handleNextMonth}
-              aria-label="Mese successivo"
-              title="Mese successivo"
+              onClick={handleNextPeriod}
+              aria-label="Periodo successivo"
+              title="Successivo"
             >
               ›
             </button>
@@ -273,17 +343,35 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
           <div className="study-cal-segmented">
             <button
               type="button"
+              className={`study-cal-seg-btn ${viewMode === 'day' ? 'active' : ''}`}
+              onClick={() => setViewMode('day')}
+              title="Vista Giornaliera con fasce orarie"
+            >
+              Giorno
+            </button>
+            <button
+              type="button"
+              className={`study-cal-seg-btn ${viewMode === 'week' ? 'active' : ''}`}
+              onClick={() => setViewMode('week')}
+              title="Vista Settimanale (Lun – Dom)"
+            >
+              Settimana
+            </button>
+            <button
+              type="button"
               className={`study-cal-seg-btn ${viewMode === 'month' ? 'active' : ''}`}
               onClick={() => setViewMode('month')}
+              title="Griglia Mensile"
             >
-              Griglia Mese
+              Mese
             </button>
             <button
               type="button"
               className={`study-cal-seg-btn ${viewMode === 'agenda' ? 'active' : ''}`}
               onClick={() => setViewMode('agenda')}
+              title="Lista Agenda cronologica"
             >
-              Lista Agenda
+              Agenda
             </button>
           </div>
 
@@ -639,8 +727,159 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
         </form>
       )}
 
-      {/* Workspace Split Layout: Month Grid + Selected Day / Upcoming Sidebar */}
+      {/* Workspace Split Layout: Day / Week / Month Grid + Selected Day / Upcoming Sidebar */}
       <div className={`study-cal-workspace ${viewMode === 'agenda' || compact ? 'is-single-col' : ''}`}>
+        {viewMode === 'day' && (
+          <div className="study-cal-grid-wrap study-cal-day-view">
+            <div className="study-cal-day-view-header">
+              <div>
+                <span className="study-cal-day-view-badge">VISTA GIORNALIERA</span>
+                <h4 className="study-cal-day-view-title">
+                  {formatReadableDateIt(selectedDate, todayStr)} ({selectedDate})
+                </h4>
+              </div>
+              <button
+                type="button"
+                className="study-cal-primary-btn"
+                onClick={() => setShowAddForm(true)}
+              >
+                + Impegno in questa data
+              </button>
+            </div>
+
+            <div className="study-cal-day-timeline">
+              {dayHourSlots.map(slot => {
+                const slotHourPrefix = slot.slice(0, 2);
+                const slotEvents = selectedDayEvents.filter(ev =>
+                  (ev.startTime || '09:00').startsWith(slotHourPrefix)
+                );
+                return (
+                  <div key={slot} className="study-cal-hour-row">
+                    <div className="study-cal-hour-label">{slot}</div>
+                    <div
+                      className="study-cal-hour-content"
+                      onClick={() => {
+                        if (slotEvents.length === 0) {
+                          const hNum = parseInt(slotHourPrefix, 10);
+                          const nextH = String((hNum + 1) % 24).padStart(2, '0');
+                          setNewStartTime(`${slotHourPrefix}:00`);
+                          setNewEndTime(`${nextH}:00`);
+                          setShowAddForm(true);
+                        }
+                      }}
+                      title="Clicca su una fascia vuota per pianificare a quest'ora"
+                    >
+                      {slotEvents.length === 0 ? (
+                        <span className="study-cal-hour-empty-hint">+ Aggiungi alle {slot}</span>
+                      ) : (
+                        slotEvents.map(ev => {
+                          const meta = CATEGORY_META[ev.category] || CATEGORY_META.lecture;
+                          return (
+                            <div
+                              key={ev.id}
+                              className={`study-cal-hour-event-card ${ev.completed ? 'is-done' : ''}`}
+                              style={{
+                                borderLeft: `4px solid ${meta.color}`,
+                                background: meta.badgeBg
+                              }}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <div className="study-cal-hour-event-top">
+                                <strong>{ev.title}</strong>
+                                <span className="study-cal-hour-event-time">
+                                  {ev.startTime} – {ev.endTime}
+                                </span>
+                              </div>
+                              <div className="study-cal-hour-event-meta">
+                                <span>📚 {ev.subject}</span>
+                                <span>·</span>
+                                <span style={{ color: meta.color }}>{meta.label}</span>
+                                {ev.description && (
+                                  <>
+                                    <span>·</span>
+                                    <span>{ev.description}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {viewMode === 'week' && (
+          <div className="study-cal-grid-wrap study-cal-week-view">
+            <div className="study-cal-week-board">
+              {currentWeekDays.map(wDay => {
+                const dayEvs = eventsByDate[wDay.dateStr] || [];
+                const isSelected = wDay.dateStr === selectedDate;
+                return (
+                  <div
+                    key={wDay.dateStr}
+                    className={`study-cal-week-col ${wDay.isToday ? 'is-today' : ''} ${
+                      isSelected ? 'is-selected' : ''
+                    }`}
+                    onClick={() => setSelectedDate(wDay.dateStr)}
+                  >
+                    <div className="study-cal-week-col-head">
+                      <div>
+                        <span className="study-cal-week-dow">{wDay.weekdayShort}</span>
+                        <span className="study-cal-week-num">
+                          {wDay.dayNum} {wDay.monthShort}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="study-cal-week-add-btn"
+                        onClick={e => {
+                          e.stopPropagation();
+                          setSelectedDate(wDay.dateStr);
+                          setShowAddForm(true);
+                        }}
+                        title={`Aggiungi impegno per ${wDay.weekdayShort} ${wDay.dayNum}`}
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    <div className="study-cal-week-col-body">
+                      {dayEvs.length === 0 ? (
+                        <div className="study-cal-week-empty">Nessun impegno</div>
+                      ) : (
+                        dayEvs.map(ev => {
+                          const meta = CATEGORY_META[ev.category] || CATEGORY_META.lecture;
+                          return (
+                            <div
+                              key={ev.id}
+                              className={`study-cal-week-card ${ev.completed ? 'is-done' : ''}`}
+                              style={{
+                                borderLeft: `3px solid ${meta.color}`,
+                                background: meta.badgeBg
+                              }}
+                            >
+                              <div className="study-cal-week-card-time">
+                                {ev.startTime} – {ev.endTime}
+                              </div>
+                              <div className="study-cal-week-card-title">{ev.title}</div>
+                              <div className="study-cal-week-card-sub">{ev.subject}</div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {viewMode === 'month' && (
           <div className="study-cal-grid-wrap">
             <div className="study-cal-weekdays">

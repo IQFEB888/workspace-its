@@ -13,7 +13,10 @@ import {
   buildInteractiveTableHtml,
   sanitizeAndUpgradeNoteHtml,
   buildSvgElementString,
-  parseAiNoteEditIntent
+  parseAiNoteEditIntent,
+  parseCalendarChatCommand,
+  answerCalendarQueryLocally,
+  buildCalendarScheduleContextForChat
 } from './editorTools';
 import { executeSqlLocally, resetSqlDatabase } from './sqlEngine';
 import { parseIcsCalendarContent } from '../services/googleCalendarService';
@@ -197,7 +200,40 @@ test('parseIcsCalendarContent parses school iCal .ics events into CalendarEventI
   assert.equal(events[1].category, 'exam');
 });
 
+test('parseCalendarChatCommand parses Italian natural-language reminder/event requests and answerCalendarQueryLocally answers schedule questions', () => {
+  const refNow = new Date(2026, 10, 15, 10, 0, 0); // 2026-11-15
+  const cmd = parseCalendarChatCommand(
+    'aggiungi un promemoria per domani alle 15:30 per studiare Database SQL',
+    ['Database', 'Cloud', 'Sviluppo Web'],
+    refNow
+  );
+  assert.ok(cmd);
+  assert.equal(cmd.isAddCommand, true);
+  assert.equal(cmd.date, '2026-11-16');
+  assert.equal(cmd.startTime, '15:30');
+  assert.equal(cmd.endTime, '16:30');
+  assert.equal(cmd.subject, 'Database');
+  assert.ok(cmd.title.toLowerCase().includes('studiare database'));
 
+  const sampleSchedule = [
+    {
+      id: 'ev1',
+      title: 'Lezione Database Relazionali',
+      date: '2026-11-16',
+      startTime: '09:00',
+      endTime: '13:00',
+      category: 'lecture' as const,
+      subject: 'Database',
+      completed: false
+    }
+  ];
 
+  const reply = answerCalendarQueryLocally('che materie ho domani?', sampleSchedule, refNow);
+  assert.equal(reply.isCalendarQuery, true);
+  assert.ok(reply.replyMarkdown.includes('Lezione Database Relazionali'));
+  assert.ok(reply.replyMarkdown.includes('09:00'));
 
+  const ctx = buildCalendarScheduleContextForChat(sampleSchedule, refNow);
+  assert.ok(ctx.includes('Lezione Database Relazionali'));
+});
 

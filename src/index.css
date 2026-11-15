@@ -5249,3 +5249,222 @@ body.is-resizing-column object {
   border-color: rgba(244, 63, 94, 0.4);
   color: #fda4af;
 }
+
+/* 9. Calendar Day View (Vista Giornaliera) & Week View (Vista Settimanale) */
+.study-cal-day-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.study-cal-day-view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+.study-cal-day-view-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #38bdf8;
+  display: block;
+}
+.study-cal-day-view-title {
+  margin: 2px 0 0 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+.study-cal-day-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.study-cal-hour-row {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  gap: 8px;
+  align-items: stretch;
+  min-height: 44px;
+}
+.study-cal-hour-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  padding-top: 8px;
+  text-align: right;
+}
+.study-cal-hour-content {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.study-cal-hour-content:hover {
+  background: rgba(56, 189, 248, 0.06);
+  border-color: rgba(56, 189, 248, 0.28);
+}
+.study-cal-hour-empty-hint {
+  font-size: 0.7rem;
+  color: rgba(148, 163, 184, 0.45);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.study-cal-hour-content:hover .study-cal-hour-empty-hint {
+  opacity: 1;
+}
+.study-cal-hour-event-card {
+  padding: 7px 10px;
+  border-radius: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.study-cal-hour-event-card.is-done {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+.study-cal-hour-event-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: #f8fafc;
+}
+.study-cal-hour-event-time {
+  font-size: 0.7rem;
+  color: #cbd5e1;
+  font-variant-numeric: tabular-nums;
+}
+.study-cal-hour-event-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 0.7rem;
+  color: #cbd5e1;
+}
+
+/* Week View (7-Column Weekly Board) */
+.study-cal-week-board {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(115px, 1fr));
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.study-cal-week-col {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  padding: 8px;
+  min-height: 290px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.study-cal-week-col:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+.study-cal-week-col.is-today {
+  border-color: rgba(56, 189, 248, 0.45);
+  background: rgba(56, 189, 248, 0.05);
+}
+.study-cal-week-col.is-selected {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.35);
+}
+.study-cal-week-col-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.study-cal-week-dow {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.study-cal-week-num {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+.study-cal-week-add-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.study-cal-week-add-btn:hover {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #ffffff;
+}
+.study-cal-week-col-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+}
+.study-cal-week-empty {
+  font-size: 0.69rem;
+  color: rgba(148, 163, 184, 0.45);
+  padding: 8px 2px;
+}
+.study-cal-week-card {
+  padding: 6px 8px;
+  border-radius: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.study-cal-week-card.is-done {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+.study-cal-week-card-time {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #cbd5e1;
+  font-variant-numeric: tabular-nums;
+}
+.study-cal-week-card-title {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #f8fafc;
+  word-break: break-word;
+}
+.study-cal-week-card-sub {
+  font-size: 0.66rem;
+  color: #94a3b8;
+}
