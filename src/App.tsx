@@ -1093,9 +1093,13 @@ export default function App() {
     const el = notesAreaRef.current;
     if (!el) return;
     const top = Math.round(el.scrollTop);
+    const key = getNoteScrollStorageKey();
     try {
-      localStorage.setItem(getNoteScrollStorageKey(), String(top));
-      localStorage.setItem('ws_notes_scroll_last', String(top));
+      localStorage.setItem(key, String(top));
+      const rawMap = localStorage.getItem('ws_notes_scroll_map');
+      const mapObj = rawMap ? JSON.parse(rawMap) : {};
+      mapObj[key] = top;
+      localStorage.setItem('ws_notes_scroll_map', JSON.stringify(mapObj));
     } catch {
       // ignore storage quota errors
     }
@@ -1116,26 +1120,64 @@ export default function App() {
   const restoreNotesScrollPosition = useCallback(() => {
     const el = notesAreaRef.current;
     if (!el) return;
+    const key = getNoteScrollStorageKey();
     try {
-      const specificRaw = localStorage.getItem(getNoteScrollStorageKey());
-      const fallbackRaw = localStorage.getItem('ws_notes_scroll_last');
-      const savedTop = parseInt(specificRaw ?? fallbackRaw ?? '0', 10);
-      if (!isNaN(savedTop) && savedTop > 0) {
-        requestAnimationFrame(() => {
-          if (notesAreaRef.current) {
-            notesAreaRef.current.scrollTop = savedTop;
+      let savedTop = 0;
+      const specificRaw = localStorage.getItem(key);
+      if (specificRaw !== null) {
+        savedTop = parseInt(specificRaw, 10) || 0;
+      } else {
+        const rawMap = localStorage.getItem('ws_notes_scroll_map');
+        if (rawMap) {
+          const mapObj = JSON.parse(rawMap);
+          if (typeof mapObj[key] === 'number') {
+            savedTop = mapObj[key];
           }
-        });
-        setTimeout(() => {
-          if (notesAreaRef.current && Math.abs(notesAreaRef.current.scrollTop - savedTop) > 10) {
-            notesAreaRef.current.scrollTop = savedTop;
-          }
-        }, 80);
+        }
       }
+      const targetTop = Math.max(0, savedTop);
+      el.scrollTop = targetTop;
+      requestAnimationFrame(() => {
+        if (notesAreaRef.current) {
+          notesAreaRef.current.scrollTop = targetTop;
+        }
+      });
+      setTimeout(() => {
+        if (notesAreaRef.current && Math.abs(notesAreaRef.current.scrollTop - targetTop) > 4) {
+          notesAreaRef.current.scrollTop = targetTop;
+        }
+      }, 65);
     } catch {
       // ignore
     }
   }, [getNoteScrollStorageKey]);
+
+  // Dedicated useEffect to persist #notes-area scrollTop to localStorage on scroll
+  // and restore the exact scroll position whenever a page, subject, or tab is switched
+  useEffect(() => {
+    if (activeTab !== 'notes') return;
+    const el = notesAreaRef.current;
+    if (!el) return;
+
+    restoreNotesScrollPosition();
+
+    const onScrollListener = () => {
+      handleNotesScroll();
+    };
+    el.addEventListener('scroll', onScrollListener, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScrollListener);
+    };
+  }, [
+    activeTab,
+    activeSubject,
+    activePageId,
+    activeRoomId,
+    activeRoomPageId,
+    workspaceMode,
+    restoreNotesScrollPosition,
+    handleNotesScroll
+  ]);
 
   // Sync active page content into editor (handles both personal workspace and shared room modes)
   useEffect(() => {
@@ -6101,7 +6143,105 @@ REGOLE TASSATIVE:
                   </button>
                 </div>
 
-                {/* Minimal & Intuitive Rich Text Toolbar with Exact Pixel (px) Font Size, Code, Quote, Formula & Search */}
+                {/* Simplified Horizontal Drawing Toolbar when isDrawingMode is active, or Rich Text Toolbar otherwise */}
+                {isDrawingMode ? (
+                  <div className="editor-toolbar notes-drawing-bar">
+                    <button
+                      type="button"
+                      className={`drawing-tool-pill ${drawingTool === 'pen' ? 'active' : ''}`}
+                      onClick={() => setDrawingTool('pen')}
+                      title="Disegna a mano libera (Penna)"
+                    >
+                      ✏️ Penna
+                    </button>
+                    <button
+                      type="button"
+                      className={`drawing-tool-pill ${drawingTool === 'eraser' ? 'active' : ''}`}
+                      onClick={() => setDrawingTool('eraser')}
+                      title="Cancella singoli tratti toccandoli (Gomma)"
+                    >
+                      🧹 Gomma
+                    </button>
+
+                    <span className="divider"></span>
+
+                    {/* Compact Pen Color Swatches + Custom Color Picker */}
+                    <div className="toolbar-swatch-group" title="Colore Penna">
+                      {savedPenColors.map(c => (
+                        <div key={c} className="swatch-dot-wrap">
+                          <button
+                            type="button"
+                            className="swatch-dot-btn"
+                            style={{
+                              backgroundColor: c,
+                              outline: drawingColor === c ? '2px solid #ffffff' : 'none'
+                            }}
+                            onClick={() => {
+                              setDrawingColor(c);
+                              if (drawingTool === 'eraser') setDrawingTool('pen');
+                            }}
+                            title={`Colore ${c}`}
+                          />
+                          <button
+                            type="button"
+                            className="swatch-del-badge"
+                            onClick={e => {
+                              e.stopPropagation();
+                              handleUpdateSavedPenColors(removeColorFromPalette(savedPenColors, c));
+                            }}
+                            title="Rimuovi colore rapido"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                      <label
+                        className="color-wheel-label-btn"
+                        title="Ruota colori personalizzata"
+                      >
+                        <input
+                          type="color"
+                          value={drawingColor.startsWith('#') ? drawingColor : '#38bdf8'}
+                          onChange={e => {
+                            const hex = e.target.value;
+                            setDrawingColor(hex);
+                            if (drawingTool === 'eraser') setDrawingTool('pen');
+                            handleUpdateSavedPenColors(addColorToPalette(savedPenColors, hex));
+                          }}
+                        />
+                      </label>
+                    </div>
+
+                    <span className="divider"></span>
+
+                    <button
+                      type="button"
+                      className="drawing-tool-pill"
+                      onClick={handleUndoLastDrawing}
+                      title="Annulla ultimo tratto"
+                    >
+                      ↩️ Annulla
+                    </button>
+                    <button
+                      type="button"
+                      className="drawing-tool-pill danger"
+                      onClick={handleClearAllDrawings}
+                      title="Pulisci tutti i disegni nella pagina"
+                    >
+                      🗑️ Pulisci
+                    </button>
+
+                    <button
+                      type="button"
+                      className="drawing-tool-pill active"
+                      style={{ marginLeft: 'auto' }}
+                      onClick={() => setIsDrawingMode(false)}
+                      title="Torna alla scrittura testo (Esc)"
+                    >
+                      ✓ Chiudi Penna
+                    </button>
+                  </div>
+                ) : (
                 <div className="editor-toolbar">
                   <button
                     type="button"
@@ -6481,122 +6621,10 @@ REGOLE TASSATIVE:
                     </button>
                   </div>
                 </div>
-
-                {/* Floating Freehand Drawing Studio Bar (when ✏️ Penna is active) */}
-                {isDrawingMode && (
-                  <div className="notes-drawing-bar">
-                    <span style={{ fontSize: '0.76rem', fontWeight: 700, color: '#a5b4fc' }}>
-                      ✏️ Disegno su Appunti &amp; Foto:
-                    </span>
-                    {(
-                      [
-                        { id: 'pen', label: '✏️ Penna' },
-                        { id: 'highlighter', label: '🖍️ Evidenziatore' },
-                        { id: 'arrow', label: '↗️ Freccia' },
-                        { id: 'line', label: '📏 Linea' },
-                        { id: 'rect', label: '▭ Box' },
-                        { id: 'eraser', label: '🧹 Gomma Tratto' }
-                      ] as Array<{ id: DrawingToolType; label: string }>
-                    ).map(t => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        className={`drawing-tool-pill ${drawingTool === t.id ? 'active' : ''}`}
-                        onClick={() => setDrawingTool(t.id)}
-                      >
-                        {t.label}
-                      </button>
-                    ))}
-
-                    <span className="divider" style={{ height: '18px' }}></span>
-
-                    {/* Pen Color Swatches + Custom Color Wheel + Delete */}
-                    <div className="toolbar-swatch-group" title="Colore Penna / Freccia">
-                      {savedPenColors.map(c => (
-                        <div key={c} className="swatch-dot-wrap">
-                          <button
-                            type="button"
-                            className="swatch-dot-btn"
-                            style={{
-                              backgroundColor: c,
-                              outline: drawingColor === c ? '2px solid #ffffff' : 'none'
-                            }}
-                            onClick={() => setDrawingColor(c)}
-                            title={`Colore tratto ${c}`}
-                          />
-                          <button
-                            type="button"
-                            className="swatch-del-badge"
-                            onClick={e => {
-                              e.stopPropagation();
-                              handleUpdateSavedPenColors(removeColorFromPalette(savedPenColors, c));
-                            }}
-                            title="Elimina colore rapido penna"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                      <label
-                        className="color-wheel-label-btn"
-                        title="Scegli colore penna dalla ruota colori (salva nei rapidi)"
-                      >
-                        <input
-                          type="color"
-                          value={drawingColor.startsWith('#') ? drawingColor : '#38bdf8'}
-                          onChange={e => {
-                            const hex = e.target.value;
-                            setDrawingColor(hex);
-                            handleUpdateSavedPenColors(addColorToPalette(savedPenColors, hex));
-                          }}
-                        />
-                      </label>
-                    </div>
-
-                    {/* Stroke Widths */}
-                    {[2, 4, 7, 12].map(w => (
-                      <button
-                        key={w}
-                        type="button"
-                        className={`drawing-tool-pill ${drawingWidth === w ? 'active' : ''}`}
-                        onClick={() => setDrawingWidth(w)}
-                        title={`Spessore tratto ${w}px`}
-                      >
-                        {w}px
-                      </button>
-                    ))}
-
-                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                      <button
-                        type="button"
-                        className="drawing-tool-pill"
-                        onClick={handleUndoLastDrawing}
-                        title="Annulla ultimo tratto disegnato"
-                      >
-                        ↩️ Annulla Tratto
-                      </button>
-                      <button
-                        type="button"
-                        className="drawing-tool-pill danger"
-                        onClick={handleClearAllDrawings}
-                        title="Cancella tutti i disegni da questa pagina"
-                      >
-                        🗑️ Pulisci Tutto
-                      </button>
-                      <button
-                        type="button"
-                        className="drawing-tool-pill"
-                        onClick={() => setIsDrawingMode(false)}
-                        title="Torna alla modalità scrittura testo (Esc)"
-                      >
-                        ✓ Fine Disegno
-                      </button>
-                    </div>
-                  </div>
                 )}
 
-                {/* Floating Interactive Table Editing Bar (when cursor is inside a .note-table) */}
-                {activeTableCell && (
+                {/* Floating Interactive Table Editing Bar (when cursor is inside a .note-table and not drawing) */}
+                {activeTableCell && !isDrawingMode && (
                   <div className="note-table-floating-bar">
                     <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#38bdf8' }}>
                       📊 Gestione Tabella:
