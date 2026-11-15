@@ -6154,7 +6154,7 @@ REGOLE TASSATIVE:
 
                 {/* Simplified Horizontal Drawing Toolbar when isDrawingMode is active, or Rich Text Toolbar otherwise */}
                 {isDrawingMode ? (
-                  <div className="editor-toolbar notes-drawing-bar">
+                  <div key="toolbar-drawing" className="editor-toolbar notes-drawing-bar toolbar-slide-down">
                     <button
                       type="button"
                       className={`drawing-tool-pill ${drawingTool === 'pen' ? 'active' : ''}`}
@@ -6251,7 +6251,7 @@ REGOLE TASSATIVE:
                     </button>
                   </div>
                 ) : (
-                <div className="editor-toolbar">
+                <div key="toolbar-editor" className="editor-toolbar toolbar-slide-down">
                   <button
                     type="button"
                     onMouseDown={e => e.preventDefault()}

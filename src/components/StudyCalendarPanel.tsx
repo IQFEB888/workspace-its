@@ -87,6 +87,7 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
   const [viewMode, setViewMode] = useState<'month' | 'agenda'>(compact ? 'agenda' : 'month');
   const [categoryFilter, setCategoryFilter] = useState<CalendarEventCategory | 'all'>('all');
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showSchoolSyncGuide, setShowSchoolSyncGuide] = useState(false);
 
   // New event form state
   const [newTitle, setNewTitle] = useState('');
@@ -342,6 +343,15 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
             </>
           )}
 
+          <button
+            type="button"
+            className="study-cal-ghost-btn"
+            onClick={() => setShowSchoolSyncGuide(prev => !prev)}
+            title="Come sincronizzare automaticamente tutti gli eventi del Google Calendar scolastico sul tuo account Google personale"
+          >
+            🎓 {showSchoolSyncGuide ? 'Chiudi Guida Scuola' : 'Sincronizza Scuola → Personale'}
+          </button>
+
           {compact && onOpenFullCalendar && (
             <button
               type="button"
@@ -403,11 +413,66 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
             }}
           >
             {isGoogleCalendarConnected
-              ? `📅 Account Calendar: ${googleCalendarEmail || 'Personale collegato'}`
-              : '💡 Puoi collegare il tuo Gmail personale solo per il Calendario oppure importare un file .ics della scuola'}
+              ? `📅 Account Calendar: ${googleCalendarEmail || 'Personale collegato'} (legge anche calendari condivisi/scuola)`
+              : '💡 Clicca "🎓 Sincronizza Scuola → Personale" per unire il calendario scolastico al tuo Gmail personale'}
           </span>
         )}
       </div>
+
+      {/* Step-by-Step Guide: How to Sync School Google Calendar to Personal Gmail */}
+      {showSchoolSyncGuide && (
+        <div
+          className="toolbar-slide-down"
+          style={{
+            padding: '12px 14px',
+            background: 'rgba(14, 165, 233, 0.1)',
+            border: '1px solid rgba(56, 189, 248, 0.35)',
+            borderRadius: '10px',
+            fontSize: '0.76rem',
+            color: '#e2e8f0',
+            lineHeight: 1.55
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+            <strong style={{ color: '#38bdf8', fontSize: '0.82rem' }}>
+              🎓 Come sincronizzare il Google Calendar Scolastico col tuo Gmail Personale (in 1 minuto)
+            </strong>
+            <button
+              type="button"
+              className="study-cal-ghost-btn sm"
+              onClick={() => setShowSchoolSyncGuide(false)}
+            >
+              ✕ Chiudi
+            </button>
+          </div>
+          <p style={{ margin: '0 0 8px 0', color: '#cbd5e1' }}>
+            Workspace ITS legge automaticamente sia il calendario principale sia <strong>tutti i calendari secondari/condivisi</strong> presenti nel tuo Google Calendar personale. Ti basta collegare il calendario della scuola al tuo Gmail personale con uno di questi 2 metodi:
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px' }}>
+            <div style={{ background: 'rgba(0,0,0,0.28)', padding: '9px 11px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ fontWeight: 700, color: '#6ee7b7', marginBottom: '4px' }}>
+                ✅ Metodo 1: Condivisione diretta (Consigliato & Live)
+              </div>
+              <ol style={{ margin: 0, paddingLeft: '16px', color: '#cbd5e1' }}>
+                <li>Apri <a href="https://calendar.google.com" target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8' }}>calendar.google.com</a> entrando con l&apos;<strong>account della scuola</strong>.</li>
+                <li>A sinistra sotto <em>&quot;I miei calendari&quot;</em>, passa il mouse sul tuo nome → clicca i <strong>3 puntini ⋮</strong> → <strong>Impostazioni e condivisione</strong>.</li>
+                <li>Scorri fino a <strong>&quot;Condividi con persone specifiche&quot;</strong>, clicca <strong>&quot;+ Aggiungi persone e gruppi&quot;</strong> e inserisci la tua email <strong>@gmail.com personale</strong>.</li>
+                <li>Apri la tua Gmail personale, clicca <strong>&quot;Aggiungi questo calendario&quot;</strong> nell&apos;email ricevuta e poi premi <strong>🔗 Collega Calendar Personale / ↻ Sync</strong> qui sopra!</li>
+              </ol>
+            </div>
+            <div style={{ background: 'rgba(0,0,0,0.28)', padding: '9px 11px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ fontWeight: 700, color: '#fcd34d', marginBottom: '4px' }}>
+                🔑 Metodo 2: Link Segreto iCal o Esporta .ics (Se la scuola blocca la condivisione)
+              </div>
+              <ol style={{ margin: 0, paddingLeft: '16px', color: '#cbd5e1' }}>
+                <li>Sempre in <strong>Impostazioni e condivisione</strong> del calendario scolastico, scorri fino in fondo a <strong>&quot;Integra calendario&quot;</strong>.</li>
+                <li>Copia l&apos;<strong>&quot;Indirizzo segreto in formato iCal&quot;</strong> (oppure clicca <strong>&quot;Esporta calendario&quot;</strong> per scaricare il file <code>.ics</code>).</li>
+                <li>Nel tuo Google Calendar <strong>personale</strong>, clicca il <strong>+</strong> vicino ad <em>&quot;Altri calendari&quot;</em> → <strong>&quot;Da URL&quot;</strong> e incolla il link (oppure carica il file <code>.ics</code> qui con <strong>📥 Importa .ics</strong>).</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 1-Click Activation Banner if Google Calendar API needs to be enabled on project 455460787207 */}
       {calendarApiEnableUrl && (

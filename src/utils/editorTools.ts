@@ -592,7 +592,7 @@ export function compressImageFromBlob(
 // APP VERSION & PROGRAMMABLE KEYBOARD SHORTCUTS
 // ============================================================================
 
-export const APP_VERSION = 'v2.7.0';
+export const APP_VERSION = 'v3.0.0';
 
 export interface ShortcutDefinition {
   id:

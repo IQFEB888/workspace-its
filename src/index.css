@@ -5184,6 +5184,22 @@ body.is-resizing-column object {
   will-change: opacity, transform;
 }
 
+/* 7. Smooth Slide-Down Animation for Editor Toolbar & Drawing Toolbar */
+@keyframes toolbarSlideDown {
+  0% {
+    opacity: 0;
+    transform: translateY(-10px) scaleY(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+}
 
-
-
+.editor-toolbar,
+.notes-drawing-bar,
+.toolbar-slide-down {
+  animation: toolbarSlideDown 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: top center;
+  will-change: opacity, transform;
+}
