@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { User, onAuthStateChanged, signInWithPopup, signOut, GoogleAuthProvider } from 'firebase/auth';
 import { marked } from 'marked';
-import { auth } from './firebase';
+import { auth, calendarAuth } from './firebase';
 import {
   PageItem,
   MaterialItem,
@@ -62,7 +62,8 @@ import { executeCodeBlock } from './services/codeRunnerService';
 import {
   fetchGoogleCalendarEvents,
   createGoogleCalendarEvent,
-  deleteGoogleCalendarEvent
+  deleteGoogleCalendarEvent,
+  parseIcsCalendarContent
 } from './services/googleCalendarService';
 import { callGeminiWithRotation } from './services/geminiService';
 import { usePWAInstall } from './hooks/usePWAInstall';
@@ -140,6 +141,7 @@ export default function App() {
     WorkspaceService.getLocalCalendarEvents()
   );
   const [isSyncingGoogleCalendar, setIsSyncingGoogleCalendar] = useState<boolean>(false);
+  const [googleCalendarEmail, setGoogleCalendarEmail] = useState<string | null>(null);
   const [aiUndoHtmlSnapshot, setAiUndoHtmlSnapshot] = useState<string | null>(null);
   const [fontFamily, setFontFamily] = useState<string>('plus-jakarta');
   const [fontSize, setFontSize] = useState<number>(15);
@@ -846,18 +848,28 @@ export default function App() {
   // ==========================================
   // CUSTOM STUDY CALENDAR & GOOGLE CALENDAR SYNC HANDLERS
   // ==========================================
-  const handleAuthorizeGoogleCalendar = async (): Promise<string | null> => {
+  const handleAuthorizeGoogleCalendar = async (forceAccountSelect = false): Promise<string | null> => {
     try {
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/drive.file');
       provider.addScope('https://www.googleapis.com/auth/calendar.events');
       provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
-      provider.setCustomParameters({ prompt: 'consent' });
-      const result = await signInWithPopup(auth, provider);
+      provider.setCustomParameters({
+        prompt: forceAccountSelect ? 'select_account consent' : 'select_account'
+      });
+      // Use isolated calendarAuth so selecting a personal @gmail.com account for Calendar
+      // NEVER logs out or switches the primary Workspace ITS user session!
+      const result = await signInWithPopup(calendarAuth, provider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (credential?.accessToken) {
+        const calEmail = result.user?.email || null;
         setGoogleOAuthAccessToken(credential.accessToken);
-        showToast('📅 Google Calendar collegato con successo!');
+        setGoogleCalendarEmail(calEmail);
+        showToast(
+          calEmail
+            ? `📅 Google Calendar collegato all'account personale (${calEmail})!`
+            : '📅 Google Calendar collegato con successo!'
+        );
         return credential.accessToken;
       }
       showToast('Token Google Calendar non ricevuto.', 'error');
@@ -868,18 +880,13 @@ export default function App() {
     }
   };
 
-  const handleSyncGoogleCalendar = async () => {
-    let token = googleOAuthAccessToken;
-    if (!token) {
-      token = await handleAuthorizeGoogleCalendar();
-      if (!token) return;
-    }
+  const handleSyncGoogleCalendarWithToken = async (tokenToUse: string) => {
     setIsSyncingGoogleCalendar(true);
     try {
       const now = new Date();
       const minDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const maxDate = new Date(now.getFullYear(), now.getMonth() + 4, 0);
-      const gEvents = await fetchGoogleCalendarEvents(token, minDate.toISOString(), maxDate.toISOString());
+      const gEvents = await fetchGoogleCalendarEvents(tokenToUse, minDate.toISOString(), maxDate.toISOString());
 
       setCalendarEvents(prev => {
         const localOnly = prev.filter(e => !e.googleEventId);
@@ -906,13 +913,52 @@ export default function App() {
         }
         return nextList;
       });
-      showToast(`📅 Sincronizzati ${gEvents.length} impegni/lezioni da Google Calendar!`);
+      showToast(`📅 Sincronizzati ${gEvents.length} impegni/lezioni dal Google Calendar personale!`);
     } catch (err: any) {
       showToast(`Errore sync Google Calendar: ${err.message || 'Riprova riautorizzando Google.'}`, 'error');
       setGoogleOAuthAccessToken(null);
     } finally {
       setIsSyncingGoogleCalendar(false);
     }
+  };
+
+  const handleSyncGoogleCalendar = async () => {
+    let token = googleOAuthAccessToken;
+    if (!token) {
+      token = await handleAuthorizeGoogleCalendar(false);
+      if (!token) return;
+    }
+    await handleSyncGoogleCalendarWithToken(token);
+  };
+
+  const handleSwitchGoogleCalendarAccount = async () => {
+    const token = await handleAuthorizeGoogleCalendar(true);
+    if (token) {
+      await handleSyncGoogleCalendarWithToken(token);
+    }
+  };
+
+  const handleImportIcsCalendarFile = async (icsContent: string, fileName: string) => {
+    const imported = parseIcsCalendarContent(icsContent, activeSubject || 'Generale');
+    if (imported.length === 0) {
+      showToast(`Nessun evento trovato nel file "${fileName}". Verifica che sia un file .ics valido.`, 'error');
+      return;
+    }
+    setCalendarEvents(prev => {
+      const existingIds = new Set(prev.map(e => e.id));
+      const newOnes = imported.filter(e => !existingIds.has(e.id));
+      const nextList = [...prev, ...newOnes].sort((a, b) =>
+        (a.date + (a.startTime || '')).localeCompare(b.date + (b.startTime || ''))
+      );
+      WorkspaceService.saveLocalCalendarEvents(nextList);
+      if (currentUser) {
+        newOnes.forEach(ev => {
+          WorkspaceService.saveCalendarEventToCloud(currentUser.uid, ev).catch(() => {});
+        });
+      }
+      return nextList;
+    });
+    showToast(`📥 Importati ${imported.length} impegni/lezioni da "${fileName}"!`);
   };
 
   const handleAddCalendarEvent = async (
@@ -6947,8 +6993,11 @@ REGOLE TASSATIVE:
                 onToggleComplete={handleToggleCalendarComplete}
                 onDeleteEvent={handleDeleteCalendarEvent}
                 isGoogleCalendarConnected={!!googleOAuthAccessToken}
+                googleCalendarEmail={googleCalendarEmail}
                 isSyncingGoogle={isSyncingGoogleCalendar}
                 onSyncGoogleCalendar={handleSyncGoogleCalendar}
+                onSwitchGoogleCalendarAccount={handleSwitchGoogleCalendarAccount}
+                onImportIcsFile={handleImportIcsCalendarFile}
                 onBackToNotes={() => setActiveTab('notes')}
               />
             ) : (

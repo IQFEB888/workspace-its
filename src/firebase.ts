@@ -1,12 +1,30 @@
 /**
  * Firebase Client Initialization & Error Handling for Workspace ITS
  */
-import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { initializeApp, getApps } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, initializeAuth, inMemoryPersistence, browserPopupRedirectResolver } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
+
+// Secondary isolated Firebase App exclusively for Google Calendar OAuth token acquisition.
+// This allows the user to pick their personal @gmail.com account for Calendar events
+// without signing out or switching their primary Workspace ITS account!
+const calendarOAuthApp =
+  getApps().find(a => a.name === 'CalendarOAuthClient') ||
+  initializeApp(firebaseConfig, 'CalendarOAuthClient');
+
+export const calendarAuth = (() => {
+  try {
+    return initializeAuth(calendarOAuthApp, {
+      persistence: inMemoryPersistence,
+      popupRedirectResolver: browserPopupRedirectResolver
+    });
+  } catch {
+    return getAuth(calendarOAuthApp);
+  }
+})();
 
 // Connect to workspace-its-10786 database
 export const db = (firebaseConfig as any).firestoreDatabaseId

@@ -8,6 +8,7 @@ interface StudyCalendarPanelProps {
   activeSubject: string;
   isSyncingGoogle?: boolean;
   isGoogleCalendarConnected?: boolean;
+  googleCalendarEmail?: string | null;
   onAddEvent: (
     event: Omit<CalendarEventItem, 'id'>,
     alsoPushToGoogle: boolean
@@ -15,6 +16,8 @@ interface StudyCalendarPanelProps {
   onToggleComplete: (eventId: string) => void;
   onDeleteEvent: (event: CalendarEventItem) => void;
   onSyncGoogleCalendar: () => Promise<void> | void;
+  onSwitchGoogleCalendarAccount?: () => Promise<void> | void;
+  onImportIcsFile?: (icsContent: string, fileName: string) => Promise<void> | void;
   onOpenFullCalendar?: () => void;
   onBackToNotes?: () => void;
   compact?: boolean;
@@ -59,15 +62,19 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
   activeSubject,
   isSyncingGoogle = false,
   isGoogleCalendarConnected = false,
+  googleCalendarEmail = null,
   onAddEvent,
   onToggleComplete,
   onDeleteEvent,
   onSyncGoogleCalendar,
+  onSwitchGoogleCalendarAccount,
+  onImportIcsFile,
   onOpenFullCalendar,
   onBackToNotes,
   compact = false
 }) => {
   const todayStr = useMemo(() => toDateStr(new Date()), []);
+  const icsInputRef = React.useRef<HTMLInputElement | null>(null);
   const [currentMonthDate, setCurrentMonthDate] = useState<Date>(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -274,14 +281,62 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
             className={`study-cal-sync-btn ${isGoogleCalendarConnected ? 'is-linked' : ''}`}
             onClick={onSyncGoogleCalendar}
             disabled={isSyncingGoogle}
-            title="Sincronizza con il tuo Google Calendar"
+            title={
+              isGoogleCalendarConnected
+                ? `Sincronizza eventi da ${googleCalendarEmail || 'Google Calendar Personale'} (senza cambiare l'account dell'app)`
+                : 'Collega il tuo Google Calendar personale per leggere gli eventi senza scollegare il tuo account principale'
+            }
           >
             {isSyncingGoogle
               ? 'Sincronizzazione...'
               : isGoogleCalendarConnected
-              ? 'Sync Google'
-              : 'Google Calendar'}
+              ? `↻ Sync (${googleCalendarEmail ? googleCalendarEmail.split('@')[0] : 'Google'})`
+              : '🔗 Collega Calendar Personale'}
           </button>
+
+          {onSwitchGoogleCalendarAccount && (
+            <button
+              type="button"
+              className="study-cal-ghost-btn"
+              onClick={onSwitchGoogleCalendarAccount}
+              disabled={isSyncingGoogle}
+              title="Scegli un altro account Google (es. il tuo Gmail personale) solo per leggere gli eventi di Google Calendar"
+            >
+              👤 {isGoogleCalendarConnected ? 'Cambia Account' : 'Scegli Account'}
+            </button>
+          )}
+
+          {onImportIcsFile && (
+            <>
+              <input
+                ref={icsInputRef}
+                type="file"
+                accept=".ics,text/calendar"
+                style={{ display: 'none' }}
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = ev => {
+                    const content = String(ev.target?.result || '');
+                    if (content) {
+                      onImportIcsFile(content, file.name);
+                    }
+                  };
+                  reader.readAsText(file);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                className="study-cal-ghost-btn"
+                onClick={() => icsInputRef.current?.click()}
+                title="Importa un file .ics (iCal) esportato dal calendario della scuola o dal portale ITS"
+              >
+                📥 Importa .ics
+              </button>
+            </>
+          )}
 
           {compact && onOpenFullCalendar && (
             <button
@@ -304,7 +359,7 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
         </div>
       </div>
 
-      {/* Category Filter Strip */}
+      {/* Category Filter Strip + Connected Personal Calendar Account Info */}
       <div className="study-cal-filter-row">
         <button
           type="button"
@@ -331,6 +386,23 @@ export const StudyCalendarPanel: React.FC<StudyCalendarPanelProps> = ({
             </button>
           );
         })}
+
+        {!compact && (
+          <span
+            style={{
+              marginLeft: 'auto',
+              fontSize: '0.72rem',
+              color: isGoogleCalendarConnected ? '#6ee7b7' : 'var(--text-secondary)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            {isGoogleCalendarConnected
+              ? `📅 Account Calendar: ${googleCalendarEmail || 'Personale collegato'}`
+              : '💡 Puoi collegare il tuo Gmail personale solo per il Calendario oppure importare un file .ics della scuola'}
+          </span>
+        )}
       </div>
 
       {/* Collapsible Add Event / Homework Form */}

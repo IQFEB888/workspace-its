@@ -16,6 +16,7 @@ import {
   parseAiNoteEditIntent
 } from './editorTools';
 import { executeSqlLocally, resetSqlDatabase } from './sqlEngine';
+import { parseIcsCalendarContent } from '../services/googleCalendarService';
 
 test('evaluateMathExpression evaluates direct arithmetic, functions, and named formulas', () => {
   assert.equal(evaluateMathExpression('125 * 4'), '500');
@@ -165,6 +166,37 @@ test('executeSqlLocally creates tables, inserts rows, updates, deletes, and sele
   assert.ok(res.stdout.includes('Sviluppo Web'));
   assert.ok(!res.stdout.includes('Reti Cloud'));
 });
+
+test('parseIcsCalendarContent parses school iCal .ics events into CalendarEventItem list', () => {
+  const sampleIcs = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'BEGIN:VEVENT',
+    'UID:evt-101@its.edu',
+    'DTSTART:20261118T090000',
+    'DTEND:20261118T130000',
+    'SUMMARY:Lezione Architettura Cloud & Docker',
+    'DESCRIPTION:Laboratorio pratico container',
+    'END:VEVENT',
+    'BEGIN:VEVENT',
+    'UID:evt-102@its.edu',
+    'DTSTART:20261120T140000',
+    'DTEND:20261120T160000',
+    'SUMMARY:Esame Parziale Database SQL',
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+
+  const events = parseIcsCalendarContent(sampleIcs, 'Cloud');
+  assert.equal(events.length, 2);
+  assert.equal(events[0].title, 'Lezione Architettura Cloud & Docker');
+  assert.equal(events[0].date, '2026-11-18');
+  assert.equal(events[0].startTime, '09:00');
+  assert.equal(events[0].endTime, '13:00');
+  assert.equal(events[0].category, 'lecture');
+  assert.equal(events[1].category, 'exam');
+});
+
 
 
 

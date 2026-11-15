@@ -53,7 +53,8 @@ export const CATEGORY_META: Record<
 };
 
 /**
- * Fetches Google Calendar events from the user's primary calendar within a date window.
+ * Fetches Google Calendar events from the user's primary calendar AND any shared/subscribed
+ * secondary calendars (e.g. a school calendar shared with the user's personal Gmail) within a date window.
  */
 export async function fetchGoogleCalendarEvents(
   accessToken: string,
@@ -69,22 +70,68 @@ export async function fetchGoogleCalendarEvents(
     maxResults: '250'
   });
 
-  const res = await fetch(
-    `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`
+  // Discover all calendars in the connected personal account (primary + any shared school calendars)
+  let calendarIds: string[] = ['primary'];
+  try {
+    const listRes = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (listRes.ok) {
+      const listData = await listRes.json();
+      if (Array.isArray(listData.items) && listData.items.length > 0) {
+        const discovered = listData.items
+          .filter((cal: any) => cal && cal.id && !String(cal.id).includes('#contacts@group'))
+          .map((cal: any) => String(cal.id));
+        if (discovered.length > 0) {
+          calendarIds = discovered.slice(0, 8);
+        }
       }
     }
-  );
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Errore Google Calendar (${res.status}): ${errText}`);
+  } catch {
+    calendarIds = ['primary'];
   }
 
-  const data = await res.json();
-  const items: GoogleCalendarRawEvent[] = Array.isArray(data.items) ? data.items : [];
+  let primaryError: Error | null = null;
+  const allRawItems: GoogleCalendarRawEvent[] = [];
+  const seenEventIds = new Set<string>();
+
+  await Promise.all(
+    calendarIds.map(async calId => {
+      try {
+        const res = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events?${params.toString()}`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`
+            }
+          }
+        );
+        if (!res.ok) {
+          if (calId === 'primary' || calendarIds.length === 1) {
+            const errText = await res.text();
+            primaryError = new Error(`Errore Google Calendar (${res.status}): ${errText}`);
+          }
+          return;
+        }
+        const data = await res.json();
+        const items: GoogleCalendarRawEvent[] = Array.isArray(data.items) ? data.items : [];
+        items.forEach(it => {
+          if (it && it.id && !seenEventIds.has(it.id)) {
+            seenEventIds.add(it.id);
+            allRawItems.push(it);
+          }
+        });
+      } catch (e: any) {
+        if (calId === 'primary') primaryError = e;
+      }
+    })
+  );
+
+  if (primaryError && allRawItems.length === 0) {
+    throw primaryError;
+  }
+
+  const items = allRawItems;
 
   return items.map(item => {
     const startRaw = item.start?.dateTime || item.start?.date || '';
@@ -197,3 +244,102 @@ export async function deleteGoogleCalendarEvent(
     throw new Error(`Impossibile eliminare evento da Google Calendar (${res.status})`);
   }
 }
+
+/**
+ * Parses an iCal / .ics file (e.g. exported from a school Google Calendar or ITS portal)
+ * into CalendarEventItem objects so school events can be imported even when the school domain blocks OAuth.
+ */
+export function parseIcsCalendarContent(
+  icsText: string,
+  defaultSubject = 'Generale'
+): CalendarEventItem[] {
+  if (!icsText || !icsText.includes('BEGIN:VEVENT')) return [];
+
+  // Unfold multi-line RFC 5545 lines (CRLF + space/tab)
+  const unfolded = icsText.replace(/\r?\n[ \t]/g, '');
+  const blocks = unfolded.split('BEGIN:VEVENT').slice(1);
+  const parsedEvents: CalendarEventItem[] = [];
+
+  const parseIcsDateTime = (rawVal: string): { date: string; time: string } | null => {
+    const clean = rawVal.trim().replace(/^.*:/, '');
+    const match = clean.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?/);
+    if (!match) return null;
+    const [, yyyy, mm, dd, hh, min, , isUtc] = match;
+    if (!hh || !min) {
+      return { date: `${yyyy}-${mm}-${dd}`, time: '09:00' };
+    }
+    if (isUtc === 'Z') {
+      const dt = new Date(Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min)));
+      if (!isNaN(dt.getTime())) {
+        const lY = dt.getFullYear();
+        const lM = String(dt.getMonth() + 1).padStart(2, '0');
+        const lD = String(dt.getDate()).padStart(2, '0');
+        const lH = String(dt.getHours()).padStart(2, '0');
+        const lMin = String(dt.getMinutes()).padStart(2, '0');
+        return { date: `${lY}-${lM}-${lD}`, time: `${lH}:${lMin}` };
+      }
+    }
+    return { date: `${yyyy}-${mm}-${dd}`, time: `${hh}:${min}` };
+  };
+
+  const unescapeIcsText = (str: string): string =>
+    str
+      .replace(/\\n/gi, '\n')
+      .replace(/\\,/g, ',')
+      .replace(/\\;/g, ';')
+      .replace(/\\\\/g, '\\')
+      .trim();
+
+  blocks.forEach((rawBlock, idx) => {
+    const endIdx = rawBlock.indexOf('END:VEVENT');
+    const body = endIdx !== -1 ? rawBlock.slice(0, endIdx) : rawBlock;
+    const lines = body.split(/\r?\n/);
+
+    let uid = '';
+    let summary = '';
+    let description = '';
+    let dtStartRaw = '';
+    let dtEndRaw = '';
+
+    for (const line of lines) {
+      const upper = line.toUpperCase();
+      if (upper.startsWith('UID:') || upper.startsWith('UID;')) {
+        uid = line.slice(line.indexOf(':') + 1).trim();
+      } else if (upper.startsWith('SUMMARY:') || upper.startsWith('SUMMARY;')) {
+        summary = unescapeIcsText(line.slice(line.indexOf(':') + 1));
+      } else if (upper.startsWith('DESCRIPTION:') || upper.startsWith('DESCRIPTION;')) {
+        description = unescapeIcsText(line.slice(line.indexOf(':') + 1));
+      } else if (upper.startsWith('DTSTART:') || upper.startsWith('DTSTART;')) {
+        dtStartRaw = line;
+      } else if (upper.startsWith('DTEND:') || upper.startsWith('DTEND;')) {
+        dtEndRaw = line;
+      }
+    }
+
+    const startParsed = parseIcsDateTime(dtStartRaw);
+    if (!startParsed) return;
+    const endParsed = parseIcsDateTime(dtEndRaw) || {
+      date: startParsed.date,
+      time: '10:00'
+    };
+
+    const title = summary || 'Lezione / Evento';
+    const category = inferCategoryFromSummary(title, description);
+
+    parsedEvents.push({
+      id: `ics_${uid || `${Date.now()}_${idx}`}`,
+      title,
+      date: startParsed.date,
+      startTime: startParsed.time,
+      endTime: endParsed.time,
+      category,
+      subject: defaultSubject,
+      description,
+      completed: false,
+      color: CATEGORY_META[category].color
+    });
+  });
+
+  return parsedEvents;
+}
+
