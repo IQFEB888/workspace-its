@@ -2113,34 +2113,74 @@ export default function App() {
     }
   };
 
-  // PWA Install Button Handler
+  // PWA Install & Desktop Direct Download Handler
   const handleInstallAppClick = async () => {
-    if (isInstallable) {
-      const outcome = await promptInstall();
-      if (outcome === 'accepted') {
-        showToast('🎉 Workspace ITS installata sul tuo dispositivo!');
-      }
+    // 1. Try native browser PWA install prompt first (Chrome / Edge / Brave / Opera)
+    const outcome = await promptInstall();
+    if (outcome === 'accepted') {
+      showToast('🎉 Workspace ITS installata sul tuo PC / dispositivo!');
+      return;
+    }
+    if (outcome === 'dismissed') {
       return;
     }
 
-    const isInIframe = window.self !== window.top;
-    const confirmed = await openCustomDialog({
-      title: '💻 Scarica App su Desktop / Dispositivo',
-      description: isInIframe
-        ? `Per installare <b>Workspace ITS</b> sul Desktop come applicazione nativa, apri prima il sito in una scheda dedicata del browser (Chrome o Edge) e premi il pulsante <b>"Scarica App"</b> o l'icona di installazione nella barra degli indirizzi.<br/><br/>Una volta installata, il pulsante scomparirà automaticamente!`
-        : `Puoi installare <b>Workspace ITS</b> direttamente dal tuo browser:<br/><br/>• <b>Su PC (Chrome / Edge):</b> clicca sull'icona <b>Installa App (⊕)</b> a destra nella barra degli indirizzi.<br/>• <b>Su iPhone / iPad (Safari):</b> premi <b>Condividi</b> e seleziona <b>Aggiungi alla schermata Home</b>.<br/><br/>Una volta scaricata, il tasto scomparirà automaticamente.`,
-      confirmText: isInIframe ? '↗ Apri in Scheda Dedicata' : 'Ho capito'
-    });
+    // 2. Check if user is on a mobile/tablet device vs Desktop PC
+    const ua = navigator.userAgent || '';
+    const isMobileOrTablet = /Android|iPhone|iPad|iPod/i.test(ua);
 
-    if (confirmed && isInIframe) {
-      const a = document.createElement('a');
-      a.href = window.location.href;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+    if (!isMobileOrTablet) {
+      // On Desktop PC (e.g. Opera GX, Firefox, or inside an iframe where beforeinstallprompt is blocked):
+      // Directly download the Desktop App Launcher (.bat / .url) so the button works immediately without showing instructions!
+      const rawUrl = window.location.href.split('#')[0];
+      const appUrl = rawUrl.replace(/[?&]autostart=1/g, '');
+      const iconUrl = new URL('./pwa-192x192.png', window.location.href).href;
+      const isWindows = /Win/i.test(navigator.platform || ua);
+
+      if (isWindows) {
+        // Download native Windows Internet Shortcut (.url) that launches Workspace ITS directly from Desktop
+        const shortcutContent = [
+          '[InternetShortcut]',
+          `URL=${appUrl}`,
+          `IconFile=${iconUrl}`,
+          'IconIndex=0',
+          'HotKey=0',
+          'IDList='
+        ].join('\r\n');
+        const blob = new Blob([shortcutContent], { type: 'application/internet-shortcut' });
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = 'Workspace ITS.url';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+      } else {
+        // macOS / Linux Desktop: download .webloc / standalone HTML launcher
+        const desktopHtml = `<!doctype html><html><head><meta charset="utf-8"><title>Workspace ITS</title><meta http-equiv="refresh" content="0;url=${appUrl}"><script>window.location.replace(${JSON.stringify(appUrl)});</script></head><body style="background:#070709;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">Apertura di Workspace ITS...</body></html>`;
+        const blob = new Blob([desktopHtml], { type: 'text/html;charset=utf-8' });
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = 'Workspace ITS.html';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+      }
+
+      showToast('💻 Collegamento Desktop "Workspace ITS" scaricato sul tuo PC!');
+      return;
     }
+
+    // Mobile fallback (iOS Safari / Android)
+    await openCustomDialog({
+      title: '📱 Installa Workspace ITS su Telefono / Tablet',
+      description:
+        `• <b>Su iPhone / iPad (Safari):</b> premi il tasto <b>Condividi</b> e seleziona <b>Aggiungi alla schermata Home</b>.<br/>• <b>Su Android (Chrome):</b> apri il menu <b>⋮</b> in alto a destra e tocca <b>Installa app</b>.`,
+      confirmText: 'Ho capito'
+    });
   };
 
   // Record current selection in notes editor so toolbar pixel input can resize selected text

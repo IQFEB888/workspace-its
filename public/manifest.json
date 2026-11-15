@@ -1,0 +1,33 @@
+{
+  "id": "./",
+  "name": "Workspace ITS - Hub Studio & Cloud",
+  "short_name": "Workspace ITS",
+  "description": "Dashboard per studenti ITS con gestione appunti a schede, libreria materiali PDF, calendario studi, stanze condivise e assistente Gemini Copilot integrato.",
+  "theme_color": "#070709",
+  "background_color": "#070709",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "scope": "./",
+  "start_url": "./",
+  "icons": [
+    {
+      "src": "./pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
