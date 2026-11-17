@@ -5468,3 +5468,308 @@ body.is-resizing-column object {
   font-size: 0.66rem;
   color: #94a3b8;
 }
+
+/* ============================================================================
+   10. MODERN BROWSER LATERAL TAB SLIDE & GLOBAL FLUID ANIMATION SYSTEM (v3.6.0)
+   ============================================================================ */
+
+/* Directional Lateral Slide for #notes-area when switching note tabs or subjects */
+@keyframes noteSlideFromRight {
+  0% {
+    opacity: 0.12;
+    transform: translate3d(34px, 0, 0) scale(0.992);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes noteSlideFromLeft {
+  0% {
+    opacity: 0.12;
+    transform: translate3d(-34px, 0, 0) scale(0.992);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+#notes-area.note-slide-from-right {
+  animation: noteSlideFromRight 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+#notes-area.note-slide-from-left {
+  animation: noteSlideFromLeft 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.notes-surface-stage {
+  overflow-x: hidden;
+}
+
+/* Modern Browser Tab Pill Entrance, Hover Lift & Sliding Active Indicator Bar */
+@keyframes vscodeTabAppear {
+  0% {
+    opacity: 0;
+    transform: translate3d(-12px, 4px, 0) scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.vscode-tab {
+  position: relative;
+  overflow: hidden;
+  animation: vscodeTabAppear 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
+  transition:
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.22s ease,
+    border-color 0.22s ease,
+    color 0.2s ease,
+    box-shadow 0.22s ease;
+}
+
+.vscode-tab::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 2.5px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-primary, #6366f1), var(--accent-secondary, #38bdf8));
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
+  opacity: 0;
+}
+
+.vscode-tab:hover {
+  transform: translateY(-1px);
+}
+
+.vscode-tab:active {
+  transform: translateY(0) scale(0.97);
+}
+
+.vscode-tab.active {
+  transform: translateY(-1px);
+  box-shadow:
+    0 6px 16px -4px rgba(0, 0, 0, 0.45),
+    0 0 14px rgba(99, 102, 241, 0.22);
+}
+
+.vscode-tab.active::after {
+  transform: scaleX(1);
+  opacity: 1;
+}
+
+.add-tab-btn {
+  transition:
+    transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.add-tab-btn:hover {
+  transform: scale(1.08) rotate(90deg);
+}
+
+.add-tab-btn:active {
+  transform: scale(0.94) rotate(90deg);
+}
+
+/* Main Workspace Tab Views (Appunti / Calendario / Materiali) Lateral Entrance */
+@keyframes workspaceTabLateralIn {
+  0% {
+    opacity: 0;
+    transform: translate3d(20px, 4px, 0) scale(0.994);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.tab-panel-transition {
+  animation: workspaceTabLateralIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+/* Interactive Note Boxes (Code, Formula, Quote, Table) Smooth Entrance & Micro-Lift */
+@keyframes noteBoxAppear {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.note-code-block,
+.note-formula-box,
+.note-quote-block,
+.note-table-wrapper {
+  animation: noteBoxAppear 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  transition:
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.22s ease,
+    border-color 0.22s ease;
+}
+
+.note-code-block:hover,
+.note-formula-box:hover,
+.note-quote-block:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 10px 26px -6px rgba(0, 0, 0, 0.5);
+}
+
+/* Chat Messages Directional Spring Entrance */
+@keyframes chatBubbleUserSlideIn {
+  0% {
+    opacity: 0;
+    transform: translate3d(18px, 8px, 0) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes chatBubbleAiSlideIn {
+  0% {
+    opacity: 0;
+    transform: translate3d(-18px, 8px, 0) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.chat-msg.user {
+  animation: chatBubbleUserSlideIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.chat-msg.ai {
+  animation: chatBubbleAiSlideIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Modals, Floating Toolbars & Banners Smooth Spring Entrance */
+@keyframes modalBackdropFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalCardSpringIn {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.modal-overlay {
+  animation: modalBackdropFadeIn 0.2s ease-out both;
+}
+
+.modal-box,
+.modal-content {
+  animation: modalCardSpringIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.notes-find-bar,
+.ai-undo-banner,
+.note-table-floating-bar,
+.note-image-floating-bar {
+  animation: toolbarSlideDown 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Calendar Views (Day, Week, Month, Agenda) & Cards Smooth Transitions */
+.study-cal-day-view,
+.study-cal-week-board,
+.study-cal-month-card,
+.study-cal-agenda-card {
+  animation: workspaceTabLateralIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.study-cal-ev-item,
+.study-cal-week-card,
+.study-cal-hour-event-card,
+.material-card {
+  transition:
+    transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.2s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.study-cal-ev-item:hover,
+.study-cal-week-card:hover,
+.study-cal-hour-event-card:hover,
+.material-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px -6px rgba(0, 0, 0, 0.45);
+}
+
+/* Sidebar Subjects & Interactive Buttons Micro-Interactions */
+.subject-btn,
+.tab-btn,
+.widget-mini-btn,
+.chat-chip {
+  transition:
+    transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.subject-btn:hover {
+  transform: translateX(3px);
+}
+
+.subject-btn.active {
+  transform: translateX(4px);
+}
+
+.tab-btn:active,
+.widget-mini-btn:active,
+.chat-chip:active {
+  transform: scale(0.96);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #notes-area.note-slide-from-right,
+  #notes-area.note-slide-from-left,
+  .vscode-tab,
+  .tab-panel-transition,
+  .note-code-block,
+  .note-formula-box,
+  .note-quote-block,
+  .note-table-wrapper,
+  .chat-msg.user,
+  .chat-msg.ai,
+  .modal-overlay,
+  .modal-box,
+  .modal-content,
+  .study-cal-day-view,
+  .study-cal-week-board,
+  .study-cal-month-card,
+  .study-cal-agenda-card {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+

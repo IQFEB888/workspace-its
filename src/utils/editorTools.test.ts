@@ -18,7 +18,8 @@ import {
   answerCalendarQueryLocally,
   buildCalendarScheduleContextForChat,
   convertAiMarkdownToNoteHtml,
-  applyTargetedBoxReplacement
+  applyTargetedBoxReplacement,
+  computeTabSlideDirection
 } from './editorTools';
 import { executeSqlLocally, resetSqlDatabase } from './sqlEngine';
 import { parseIcsCalendarContent } from '../services/googleCalendarService';
@@ -308,5 +309,15 @@ test('parseCalendarChatCommand parses Italian natural-language reminder/event re
   const ctx = buildCalendarScheduleContextForChat(sampleSchedule, refNow);
   assert.ok(ctx.includes('Lezione Database Relazionali'));
 });
+
+test('computeTabSlideDirection returns lateral slide direction based on tab index order', () => {
+  const tabs = [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }];
+  assert.equal(computeTabSlideDirection(tabs, 'p1', 'p2'), 'from-right');
+  assert.equal(computeTabSlideDirection(tabs, 'p1', 'p3'), 'from-right');
+  assert.equal(computeTabSlideDirection(tabs, 'p3', 'p1'), 'from-left');
+  assert.equal(computeTabSlideDirection(tabs, 'p2', 'p1'), 'from-left');
+  assert.equal(computeTabSlideDirection(tabs, 'p2', 'p2'), null);
+});
+
 
 

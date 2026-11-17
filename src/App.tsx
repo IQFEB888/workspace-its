@@ -61,7 +61,8 @@ import {
   normalizeCodeLanguageId,
   parseCalendarChatCommand,
   buildCalendarScheduleContextForChat,
-  answerCalendarQueryLocally
+  answerCalendarQueryLocally,
+  computeTabSlideDirection
 } from './utils/editorTools';
 import { uploadNoteToDrive } from './services/googleDriveService';
 import { executeCodeBlock } from './services/codeRunnerService';
@@ -274,6 +275,7 @@ export default function App() {
   const [driveLink, setDriveLink] = useState<string>('');
   const [pages, setPages] = useState<Record<string, PageItem[]>>(DEFAULT_PAGES);
   const [activePageId, setActivePageId] = useState<string>('');
+  const [noteSlideClass, setNoteSlideClass] = useState<'note-slide-from-right' | 'note-slide-from-left' | ''>('');
   const [materials, setMaterials] = useState<Record<string, MaterialItem[]>>({});
   const [mobileTab, setMobileTab] = useState<'notes' | 'materials' | 'chat' | 'tools'>('notes');
 
@@ -1746,8 +1748,47 @@ export default function App() {
     });
   };
 
+  // Trigger directional lateral slide animation on #notes-area (like modern browser tab switches)
+  const triggerNoteSlideAnimation = useCallback((dir: 'from-right' | 'from-left' | null) => {
+    if (!dir) return;
+    const cls = dir === 'from-right' ? 'note-slide-from-right' : 'note-slide-from-left';
+    setNoteSlideClass(cls);
+    const el = notesAreaRef.current;
+    if (el) {
+      el.classList.remove('note-slide-from-right', 'note-slide-from-left');
+      // Force reflow so consecutive same-direction tab switches replay smoothly
+      void el.offsetWidth;
+      el.classList.add(cls);
+    }
+  }, []);
+
+  const handleSelectPersonalPageTab = useCallback(
+    (nextPageId: string) => {
+      if (nextPageId === activePageId) return;
+      const subPages = pages[activeSubject] || [];
+      const dir = computeTabSlideDirection(subPages, activePageId, nextPageId);
+      triggerNoteSlideAnimation(dir);
+      setActivePageId(nextPageId);
+    },
+    [activePageId, pages, activeSubject, triggerNoteSlideAnimation]
+  );
+
+  const handleSelectSharedRoomPageTab = useCallback(
+    (nextPageId: string) => {
+      if (nextPageId === activeRoomPageId) return;
+      const dir = computeTabSlideDirection(activeRoomPages, activeRoomPageId, nextPageId);
+      triggerNoteSlideAnimation(dir);
+      setActiveRoomPageId(nextPageId);
+    },
+    [activeRoomPageId, activeRoomPages, triggerNoteSlideAnimation]
+  );
+
   // Subject change
   const handleSelectSubject = (newSubject: string) => {
+    if (newSubject !== activeSubject) {
+      const dir = computeTabSlideDirection(subjects, activeSubject, newSubject);
+      triggerNoteSlideAnimation(dir || 'from-right');
+    }
     setActiveSubject(newSubject);
     WorkspaceService.saveLocalPreferences({ activeSubject: newSubject });
     if (currentUser) {
@@ -1986,6 +2027,7 @@ export default function App() {
         [activeSubject]: [...currentSubPages, newPage]
       };
       setPages(updated);
+      triggerNoteSlideAnimation('from-right');
       setActivePageId(newPage.id);
       WorkspaceService.saveLocalPages(updated);
       WorkspaceService.saveLocalPreferences({ activePageId: newPage.id });
@@ -2020,6 +2062,7 @@ export default function App() {
       WorkspaceService.saveLocalPages(updated);
 
       if (activePageId === pageId) {
+        triggerNoteSlideAnimation('from-left');
         setActivePageId(filtered[0]?.id || '');
       }
 
@@ -2181,6 +2224,7 @@ export default function App() {
       };
 
       await WorkspaceService.saveRoomPage(activeRoomId, newPage);
+      triggerNoteSlideAnimation('from-right');
       setActiveRoomPageId(newPage.id);
       showToast(`Scheda "${pageName.trim()}" aggiunta alla stanza!`);
     }
@@ -2205,6 +2249,7 @@ export default function App() {
       await WorkspaceService.deleteRoomPage(activeRoomId, pageId);
       const remaining = activeRoomPages.filter(p => p.id !== pageId);
       if (activeRoomPageId === pageId) {
+        triggerNoteSlideAnimation('from-left');
         setActiveRoomPageId(remaining[0]?.id || '');
       }
       showToast('Scheda condivisa eliminata.');
@@ -6565,7 +6610,7 @@ REGOLE TASSATIVE:
                         <div
                           key={page.id}
                           className={`vscode-tab ${page.id === activeRoomPageId ? 'active' : ''}`}
-                          onClick={() => setActiveRoomPageId(page.id)}
+                          onClick={() => handleSelectSharedRoomPageTab(page.id)}
                           onContextMenu={e => {
                             e.preventDefault();
                             handleRenameRoomPage(page.id);
@@ -6587,7 +6632,7 @@ REGOLE TASSATIVE:
                         <div
                           key={page.id}
                           className={`vscode-tab ${page.id === activePageId ? 'active' : ''}`}
-                          onClick={() => setActivePageId(page.id)}
+                          onClick={() => handleSelectPersonalPageTab(page.id)}
                           onContextMenu={e => {
                             e.preventDefault();
                             handleRenamePage(page.id);
@@ -7418,7 +7463,8 @@ REGOLE TASSATIVE:
                   <div
                     id="notes-area"
                     ref={notesAreaRef}
-                    className={`font-${fontFamily} ${isDrawingMode ? 'drawing-mode-active' : ''} ${
+                    data-slide-dir={noteSlideClass || undefined}
+                    className={`font-${fontFamily} ${noteSlideClass} ${isDrawingMode ? 'drawing-mode-active' : ''} ${
                       isDrawingMode && drawingTool === 'eraser' ? 'eraser-active' : ''
                     }`}
                     style={{ fontSize: `${fontSize}px` }}

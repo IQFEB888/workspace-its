@@ -592,7 +592,7 @@ export function compressImageFromBlob(
 // APP VERSION & PROGRAMMABLE KEYBOARD SHORTCUTS
 // ============================================================================
 
-export const APP_VERSION = 'v3.5.2';
+export const APP_VERSION = 'v3.6.0';
 
 export interface ShortcutDefinition {
   id:
@@ -1682,3 +1682,23 @@ export function answerCalendarQueryLocally(
     replyMarkdown: `📅 Ecco i tuoi impegni e le materie per **${niceDate}**:\n\n${rows.join('\n')}`
   };
 }
+
+/**
+ * Determines the directional lateral slide animation class when switching between
+ * browser-like note tabs or ordered items:
+ * - Selecting a tab to the right (nextIdx > prevIdx) slides the incoming page in from the right ('from-right').
+ * - Selecting a tab to the left (nextIdx < prevIdx) slides the incoming page in from the left ('from-left').
+ * - Selecting the same tab returns null.
+ */
+export function computeTabSlideDirection(
+  items: Array<{ id: string }>,
+  prevId: string,
+  nextId: string
+): 'from-right' | 'from-left' | null {
+  if (!prevId || !nextId || prevId === nextId) return null;
+  const prevIdx = items.findIndex(item => item.id === prevId);
+  const nextIdx = items.findIndex(item => item.id === nextId);
+  if (prevIdx === -1 || nextIdx === -1) return 'from-right';
+  return nextIdx > prevIdx ? 'from-right' : 'from-left';
+}
+
