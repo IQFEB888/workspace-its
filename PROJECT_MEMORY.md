@@ -6,11 +6,11 @@
 
 ## 1. Informazioni Generali & Versione
 - **Nome Applicazione**: `Workspace ITS`
-- **Versione Attuale**: `v3.4.0` (`APP_VERSION` in `src/utils/editorTools.ts`, mostrata nel badge fisso in basso a sinistra `.app-version-badge`).
+- **Versione Attuale**: `v3.5.0` (`APP_VERSION` in `src/utils/editorTools.ts`, mostrata nel badge fisso in basso a sinistra `.app-version-badge`).
 - **REGOLA OBBLIGATORIA DI VERSIONING**: **Ad ogni singola modifica al codice, incrementare sempre `APP_VERSION` in `src/utils/editorTools.ts`** (e aggiornare `PROJECT_MEMORY.md`), così che l'utente possa verificare immediatamente dal badge in basso a sinistra di avere l'ultima versione su tutti i dispositivi.
 - **PWA & Routing**:
-  - Configurata con `vite.config.ts` (`base: './'`), `public/manifest.json` (`start_url: './'`, `scope: './'`), `public/sw.js` e cattura anticipata di `beforeinstallprompt` in `index.html` (`window.__deferredPwaPrompt`) per funzionare sia su AI Studio sia su GitHub Pages (`https://iqfeb888.github.io/...`) senza errori 404.
-  - Hook `src/hooks/usePWAInstall.ts` + `handleInstallAppClick`: su PC attiva immediatamente il prompt di installazione nativo del browser (se supportato da Chrome/Edge) oppure scarica il launcher standalone **`Workspace ITS Desktop.html`** (evitando file `.url` che Opera/Chromium convertono in testo `[InternetShortcut]`).
+  - Configurata con `vite.config.ts` (`base: './'`, `manifest: false` per evitare doppi manifest), `public/manifest.json` (`start_url: './'`, `scope: './'`), `public/sw.js` e cattura anticipata di `beforeinstallprompt` in `index.html` (`window.__deferredPwaPrompt`) per funzionare sia su AI Studio sia su GitHub Pages (`https://iqfeb888.github.io/...`) senza errori 404.
+  - Hook `src/hooks/usePWAInstall.ts` + `handleInstallAppClick`: su PC attiva immediatamente il prompt di installazione nativo in alto del browser (`promptInstall()`). Se il browser blocca l'evento automatico (come Opera GX/Opera di default o quando l'app è già installata), mostra il modale guida con le istruzioni per l'icona nella barra indirizzi o la scelta facoltativa di scaricare il Launcher Desktop.
 
 ---
 
@@ -30,15 +30,18 @@ L'editor `#notes-area` in `src/App.tsx` (supportato da `src/utils/editorTools.ts
    - Un `useEffect` dedicato salva `scrollTop` in `localStorage` per ogni materia e scheda (`ws_notes_scroll_personal_...` e `ws_notes_scroll_map`) e ripristina la posizione esatta sia al cambio scheda/materia/tab sia al ricaricamento della pagina (`F5`).
 2. **Incolla Intelligente Testo vs Screenshot (`Ctrl+V`)**:
    - Sia negli appunti (`handleNotesPaste`) sia nella Chat AI (`handleChatPaste`), se gli appunti di sistema contengono `text/plain` non vuoto viene sempre incollato il testo copiato senza mai ri-allegare un vecchio screenshot.
-3. **Box di Codice Interattive (`💻 Codice`) & Motore SQL Relazionale Locale**:
+3. **Box di Codice Interattive (`💻 Codice`), Interprete Bash Locale & Motore SQL Relazionale**:
    - Esecuzione diretta (`▶ Esegui`) senza chiave API per:
+     - **Bash / Shell (`runBashLocally` + Wandbox `/bin/bash` via `cpython-3.12.7`)**: interprete Bash locale istantaneo (cicli `for (( i=0; i<n; i++ ))`, `for x in ...`, `while`, `if`, aritmetica `$(( ... ))`, variabili) + fallback Wandbox reale e normalizzazione modelli Gemini (`normalizeGeminiModelName` -> `gemini-2.5-flash`) per evitare qualsiasi errore di modello deprecato.
      - **SQL (`src/utils/sqlEngine.ts`)**: motore relazionale persistente in `localStorage` che supporta `CREATE TABLE`, `DROP TABLE`, `ALTER TABLE`, `TRUNCATE`, `INSERT INTO`, `UPDATE`, `DELETE`, `SHOW TABLES`, `DESCRIBE` e `SELECT` con `JOIN`, `WHERE`, `GROUP BY`, `ORDER BY`, `LIMIT` e output tabellare ASCII.
-     - **JavaScript / TypeScript, HTML/CSS, JSON** (locali nel browser) e **Python, C/C++, Java, PHP, Bash** (tramite Wandbox API keyless).
-4. **Foto Ridimensionabili dai Bordi (8 Maniglie) & Disegni Modificabili dopo `Esc`**:
+     - **JavaScript / TypeScript, HTML/CSS, JSON** (locali nel browser) e **Python, C/C++, Java, PHP** (tramite Wandbox API keyless).
+4. **Conversione Automatica Chat AI -> Box Codice / Formule / Citazioni & Modifica In-Place nella Box**:
+   - Premendo `➕ Aggiungi` in fondo alla chat o `➕ Appunti` sotto ogni singola risposta di Gemini (`convertAiMarkdownToNoteHtml`), i blocchi ` ```linguaggio ... ``` ` diventano automaticamente **Box Codice interattive** (`.note-code-block` con `▶ Esegui`, `📋 Copia`, selettore linguaggio), le formule `$$ ... $$` diventano **Box Formula live** (`.note-formula-box`) e le citazioni `> ...` diventano **Box Citazione** (`.note-quote-block`).
+   - Scrivendo in chat comandi come *"nel blocco di codice dove faccio il ciclo per calcolare fibonacci sistemalo e sostituiscilo già nella box anche solo se è una parte"* (oppure *"nella formula ... sostituiscila nella box"* o *"nella citazione ... correggila nella box"*), l'AI individua la box corrispondente negli appunti e aggiorna direttamente il codice/formula/citazione **dentro la box esistente** (`applyTargetedBoxReplacement`).
+5. **Foto Ridimensionabili dai Bordi (8 Maniglie) & Disegni Modificabili dopo `Esc`**:
    - Cliccando una foto o un tratto disegnato (anche dopo aver premuto `Esc`), compare la cornice `.note-object-selection-frame` con 8 maniglie trascinabili (`nw, n, ne, e, se, s, sw, w`), trascinamento libero col mouse e pulsante `🗑️ Elimina` (oltre ai tasti `Canc` / `Backspace`).
-5. **Barra Orizzontale Semplificata per il Disegno (`isDrawingMode`), Collasso Barra Strumenti & Animazione Slide-Down**:
+6. **Barra Orizzontale Semplificata per il Disegno (`isDrawingMode`), Collasso Barra Strumenti & Animazione Slide-Down**:
    - Rimosso il vecchio tasto `⛶ Massimizza Spazio` e sostituito con il controllo di collasso della barra strumenti degli appunti (`isEditorToolbarCollapsed`, persistito in `localStorage`) tramite i pulsanti in alto a destra (`🛠️ ▲ Nascondi Strumenti` / `🛠️ ▼ Strumenti`, `▲` nella barra delle schede e `▲ Nascondi` a destra nella barra strumenti).
-   - Quando `isDrawingMode` è attivo, la barra superiore dell'editor viene sostituita da un'unica barra orizzontale minimale con **✏️ Penna**, **🧹 Gomma**, colori rapidi, **↩️ Annulla**, **🗑️ Pulisci** e **✓ Chiudi Penna**, evitando qualsiasi doppia barra sovrapposta.
    - Sia `.editor-toolbar` sia `.notes-drawing-bar` utilizzano l'animazione `@keyframes toolbarSlideDown` (`toolbar-slide-down`) per comparire con una transizione fluida dall'alto verso il basso.
 
 ---
@@ -53,3 +56,4 @@ L'editor `#notes-area` in `src/App.tsx` (supportato da `src/utils/editorTools.ts
 - **Comandi Vocali/Testuali Calendario nella Chat AI (`parseCalendarChatCommand` & `buildCalendarScheduleContextForChat`)**:
   - Scrivendo in chat frasi come *"aggiungi un promemoria per domani alle 15:30 per studiare Database"* l'evento viene creato automaticamente nel Calendario (e su Google Calendar personale se collegato).
   - Scrivendo domande come *"che materie ho domani?"* o *"che impegni ho questa settimana?"*, la Chat AI ha visibilità completa sul calendario (e risponde anche senza API key tramite `answerCalendarQueryLocally`).
+

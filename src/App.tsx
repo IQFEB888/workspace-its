@@ -56,6 +56,9 @@ import {
   computeContextMenuPosition,
   compressImageFromBlob,
   parseAiNoteEditIntent,
+  convertAiMarkdownToNoteHtml,
+  applyTargetedBoxReplacement,
+  normalizeCodeLanguageId,
   parseCalendarChatCommand,
   buildCalendarScheduleContextForChat,
   answerCalendarQueryLocally
@@ -69,7 +72,7 @@ import {
   parseIcsCalendarContent,
   CATEGORY_META
 } from './services/googleCalendarService';
-import { callGeminiWithRotation } from './services/geminiService';
+import { callGeminiWithRotation, normalizeGeminiModelName } from './services/geminiService';
 import { usePWAInstall } from './hooks/usePWAInstall';
 import {
   FullWeatherData,
@@ -2192,12 +2195,12 @@ export default function App() {
     }
   };
 
-  // PWA Install & Desktop Direct Download Handler
+  // PWA Install & Desktop Direct Install Handler
   const handleInstallAppClick = async () => {
-    // 1. Try native browser PWA install prompt first (Chrome / Edge / Brave / Opera)
+    // 1. Try native browser top popup PWA install prompt first (Chrome / Edge / Brave / Opera with PWA enabled)
     const outcome = await promptInstall();
     if (outcome === 'accepted') {
-      showToast('🎉 Workspace ITS installata sul tuo PC / dispositivo!');
+      showToast('🎉 Workspace ITS installata direttamente sul tuo Desktop!');
       return;
     }
     if (outcome === 'dismissed') {
@@ -2207,10 +2210,26 @@ export default function App() {
     // 2. Check if user is on a mobile/tablet device vs Desktop PC
     const ua = navigator.userAgent || '';
     const isMobileOrTablet = /Android|iPhone|iPad|iPod/i.test(ua);
+    const isOpera = /OPR\/|Opera/i.test(ua);
 
     if (!isMobileOrTablet) {
-      // On Desktop PC (e.g. Opera / Opera GX / Firefox, where .url files get blocked or opened as raw [InternetShortcut] text):
-      // Download a self-contained HTML Desktop App Launcher ("Workspace ITS Desktop.html") that opens cleanly in any browser on double-click!
+      const wantFallbackFile = await openCustomDialog({
+        title: '💻 Installa l\'App direttamente sul Desktop',
+        description: isOpera
+          ? `Stai usando <b>Opera / Opera GX</b>, che di default disabilita l'avviso automatico in alto per installare le Web-App sul Desktop (a differenza di Chrome, Edge e Brave).<br/><br/>` +
+            `<b>Come metterla sul Desktop come vera App senza scaricare file:</b><br/>` +
+            `1️⃣ Guarda all'estrema destra della <b>barra degli indirizzi in alto</b>: se vedi l'icona <b>📥 Installa</b> (schermo con freccia), cliccala per aggiungerla subito al Desktop.<br/>` +
+            `2️⃣ In alternativa, aprila su <b>Chrome / Edge / Brave</b> e premi <b>💻 Scarica App</b>: comparirà subito il popup in alto che la installa sul Desktop!<br/><br/>` +
+            `<i>Vuoi comunque scaricare ora il collegamento rapido Desktop (.html) per Opera?</i>`
+          : `Il browser non ha mostrato il popup automatico in alto perché <b>Workspace ITS risulta già installata</b> sul PC oppure il prompt è stato chiuso in precedenza.<br/><br/>` +
+            `• Guarda a destra nella <b>barra degli indirizzi in alto</b> e clicca l'icona <b>📥 Apri / Installa l'app Workspace ITS</b> (oppure menu <b>⋮ → Salva e condividi → Installa Workspace ITS</b>) per metterla direttamente sul Desktop senza scaricare file.<br/><br/>` +
+            `<i>Oppure premi il pulsante qui sotto se desideri scaricare il file Launcher per il Desktop:</i>`,
+        confirmText: '💾 Scarica Launcher Desktop',
+        cancelText: 'Chiudi'
+      });
+
+      if (!wantFallbackFile) return;
+
       const rawUrl = window.location.href.split('#')[0];
       const appUrl = rawUrl.replace(/[?&]autostart=1/g, '');
       const iconUrl = new URL('./pwa-192x192.png', window.location.href).href;
@@ -2285,7 +2304,7 @@ export default function App() {
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(blobUrl), 2500);
 
-      showToast('💻 App Launcher "Workspace ITS Desktop.html" scaricato! Aprilo con doppio clic dal PC.');
+      showToast('💻 App Launcher "Workspace ITS Desktop.html" scaricato!');
       return;
     }
 
@@ -4631,13 +4650,13 @@ export default function App() {
       return;
     }
 
-    // Check if the user asked in chat to directly highlight or edit the notes (general or topic-specific)
+    // Check if the user asked in chat to directly highlight or edit the notes (including targeted Code Box, Formula Box, or Quote Box edits!)
     if (!customPrompt && !isAnalysis && !attachedFile && userText) {
       const editIntent = parseAiNoteEditIntent(userText);
-      if (editIntent.isDirectNoteEdit) {
+      if (editIntent.isDirectNoteEdit && editIntent.mode !== 'none') {
         setChatInput('');
         await handleAiHighlightOrEditNotes({
-          mode: editIntent.mode === 'edit' ? 'edit' : 'highlight',
+          mode: editIntent.mode,
           instruction: userText,
           targetTopic: editIntent.targetTopic
         });
@@ -4748,75 +4767,43 @@ export default function App() {
         }
       ];
 
-      let success = false;
-      let lastErrorMessage = '';
+      try {
+        const aiText = await callGeminiWithRotation(
+          orderedKeys,
+          normalizeGeminiModelName(selectedModel),
+          systemContext,
+          promptContents
+        );
+        setLastAIResponse(aiText);
 
-      for (let i = 0; i < orderedKeys.length; i++) {
-        const currentKey = orderedKeys[i];
-        try {
-          const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${currentKey}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                systemInstruction: { parts: [{ text: systemContext }] },
-                contents: promptContents
-              })
-            }
-          );
-          const data = await response.json();
-          if (data.error) {
-            const errMsg = data.error.message || '';
-            if (errMsg.includes('high demand') || data.error.status === 'UNAVAILABLE' || data.error.code === 503) {
-              lastErrorMessage = 'Traffico elevato sui server Gemini. Riprova tra poco.';
-              break;
-            }
-            if (data.error.code === 429 || data.error.status === 'RESOURCE_EXHAUSTED' || errMsg.includes('quota')) {
-              continue;
-            }
-            throw new Error(errMsg || 'Errore durante la richiesta AI.');
-          }
+        const aiMsgId = 'ai_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+        const sharedAiMsg: SharedChatMessage = {
+          id: aiMsgId,
+          role: 'model',
+          senderId: 'gemini',
+          senderName: 'Gemini Copilot ✦',
+          parts: [{ text: aiText }],
+          rawText: aiText,
+          timestamp: Date.now()
+        };
 
-          if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
-            const aiText = data.candidates[0].content.parts[0].text;
-            setLastAIResponse(aiText);
-
-            const aiMsgId = 'ai_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
-            const sharedAiMsg: SharedChatMessage = {
-              id: aiMsgId,
-              role: 'model',
-              senderId: 'gemini',
-              senderName: 'Gemini Copilot ✦',
-              parts: [{ text: aiText }],
-              rawText: aiText,
-              timestamp: Date.now()
-            };
-
-            // Broadcast AI response to the room for all students to see!
-            await WorkspaceService.sendRoomMessage(activeRoomId, sharedAiMsg);
-            setAttachedFile(null);
-            if (fileInputRef.current) fileInputRef.current.value = '';
-            success = true;
-            break;
-          }
-        } catch (err: any) {
-          lastErrorMessage = err.message || 'Errore di connessione.';
-        }
-      }
-
-      setIsAILoading(false);
-      if (!success) {
+        await WorkspaceService.sendRoomMessage(activeRoomId, sharedAiMsg);
+        setAttachedFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      } catch (err: any) {
+        const lastErrorMessage = err?.message || 'Impossibile completare la richiesta AI.';
         const errorMsgId = 'err_' + Date.now();
         await WorkspaceService.sendRoomMessage(activeRoomId, {
           id: errorMsgId,
           role: 'model',
           senderId: 'system',
           senderName: 'Avviso di Sistema',
-          parts: [{ text: `⚠️ **Attenzione:** ${lastErrorMessage || 'Impossibile completare la richiesta AI.'}` }],
+          parts: [{ text: `⚠️ **Attenzione:** ${lastErrorMessage}` }],
           rawText: lastErrorMessage,
           timestamp: Date.now()
         });
+      } finally {
+        setIsAILoading(false);
       }
       return;
     }
@@ -4842,84 +4829,45 @@ export default function App() {
       systemContext += `\n\n[FONTE COLLEGATA DALL'UTENTE]: "${chatSelectedMaterial.name}" (${chatSelectedMaterial.category}). Rispondi in modo esaustivo facendo riferimento e spiegando accuratamente i contenuti di questo materiale.`;
     }
 
-    let success = false;
-    let lastErrorMessage = '';
+    try {
+      const aiText = await callGeminiWithRotation(
+        orderedKeys,
+        normalizeGeminiModelName(selectedModel),
+        systemContext,
+        nextChats.map(m => ({
+          role: m.role === 'ai' ? 'model' : m.role,
+          parts: m.parts
+        }))
+      );
+      setLastAIResponse(aiText);
 
-    for (let i = 0; i < orderedKeys.length; i++) {
-      const currentKey = orderedKeys[i];
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${currentKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              systemInstruction: { parts: [{ text: systemContext }] },
-              contents: nextChats.map(m => ({
-                role: m.role === 'ai' ? 'model' : m.role,
-                parts: m.parts
-              }))
-            })
-          }
-        );
+      const newAIMsg: ChatMessage = {
+        role: 'model',
+        parts: [{ text: aiText }],
+        rawText: aiText,
+        timestamp: Date.now()
+      };
 
-        const data = await response.json();
+      const finalChatList = [...nextChats, newAIMsg];
+      setChats(prev => {
+        const updated = { ...prev, [activeSubject]: finalChatList };
+        WorkspaceService.saveLocalChats(updated);
+        return updated;
+      });
 
-        if (data.error) {
-          const errMsg = data.error.message || '';
-          if (errMsg.includes('high demand') || data.error.status === 'UNAVAILABLE' || data.error.code === 503) {
-            lastErrorMessage = 'Traffico elevato sui server Gemini. Riprova tra poco.';
-            break;
-          }
-          if (data.error.code === 429 || data.error.status === 'RESOURCE_EXHAUSTED' || errMsg.includes('quota')) {
-            console.warn(`Chiave #${i + 1} quota esaurita. Tento chiave successiva...`);
-            lastErrorMessage = 'Quota esaurita per la chiave attiva. Testo le chiavi di riserva...';
-            continue;
-          } else {
-            throw new Error(errMsg || 'Errore durante la richiesta AI.');
-          }
-        }
+      setAttachedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
 
-        if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
-          const aiText = data.candidates[0].content.parts[0].text;
-          setLastAIResponse(aiText);
-
-          const newAIMsg: ChatMessage = {
-            role: 'model',
-            parts: [{ text: aiText }],
-            rawText: aiText,
-            timestamp: Date.now()
-          };
-
-          const finalChatList = [...nextChats, newAIMsg];
-          setChats(prev => {
-            const updated = { ...prev, [activeSubject]: finalChatList };
-            WorkspaceService.saveLocalChats(updated);
-            return updated;
-          });
-
-          setAttachedFile(null);
-          if (fileInputRef.current) fileInputRef.current.value = '';
-          success = true;
-
-          if (currentUser) {
-            WorkspaceService.saveChatToCloud(currentUser.uid, activeSubject, finalChatList).catch(err => {
-              console.warn('Background chat cloud sync error:', err);
-            });
-          }
-          break;
-        }
-      } catch (err: any) {
-        lastErrorMessage = err.message || 'Errore di connessione.';
+      if (currentUser) {
+        WorkspaceService.saveChatToCloud(currentUser.uid, activeSubject, finalChatList).catch(err => {
+          console.warn('Background chat cloud sync error:', err);
+        });
       }
-    }
-
-    setIsAILoading(false);
-
-    if (!success) {
+    } catch (err: any) {
+      const lastErrorMessage = err?.message || 'Impossibile completare la richiesta. Verificare le API keys.';
       const errorAIMsg: ChatMessage = {
         role: 'model',
-        parts: [{ text: `⚠️ **Attenzione:** ${lastErrorMessage || 'Impossibile completare la richiesta. Verificare le API keys.'}` }],
+        parts: [{ text: `⚠️ **Attenzione:** ${lastErrorMessage}` }],
         rawText: lastErrorMessage,
         timestamp: Date.now()
       };
@@ -4927,12 +4875,14 @@ export default function App() {
         ...prev,
         [activeSubject]: [...nextChats, errorAIMsg]
       }));
+    } finally {
+      setIsAILoading(false);
     }
   };
 
-  // Direct AI Highlighting & In-Place Note Editing (Whole note, Specific Topic, or Right-Click Selection)
+  // Direct AI Highlighting & In-Place Note Editing (Whole note, Specific Topic, Code Box, Formula Box, Quote Box, or Right-Click Selection)
   const handleAiHighlightOrEditNotes = async (options: {
-    mode: 'highlight' | 'edit';
+    mode: 'highlight' | 'edit' | 'edit_code_box' | 'edit_formula_box' | 'edit_quote_box';
     instruction: string;
     targetTopic?: string | null;
     onlySelection?: boolean;
@@ -4982,7 +4932,7 @@ REGOLE TASSATIVE:
 
         const rawOut = await callGeminiWithRotation(
           orderedKeys,
-          selectedModel,
+          normalizeGeminiModelName(selectedModel),
           sysPrompt,
           [{ role: 'user', parts: [{ text: selectedHtml }] }]
         );
@@ -5008,7 +4958,167 @@ REGOLE TASSATIVE:
         return;
       }
 
-      // Case B: Full Note or Specific Topic Section Highlight/Edit from Chat or Button
+      // Case B: Targeted In-Place Edit inside a Code Box, Formula Box, or Quote Box!
+      if (
+        options.mode === 'edit_code_box' ||
+        options.mode === 'edit_formula_box' ||
+        options.mode === 'edit_quote_box'
+      ) {
+        const boxType =
+          options.mode === 'edit_code_box'
+            ? 'code'
+            : options.mode === 'edit_formula_box'
+            ? 'formula'
+            : 'quote';
+
+        // Collect all existing boxes of this type from the DOM
+        const codeEls = Array.from(notesAreaRef.current.querySelectorAll('.note-code-block'));
+        const formulaEls = Array.from(notesAreaRef.current.querySelectorAll('.note-formula-box'));
+        const quoteEls = Array.from(notesAreaRef.current.querySelectorAll('blockquote'));
+
+        const boxesSummary: string[] = [];
+        if (boxType === 'code') {
+          codeEls.forEach((el, idx) => {
+            const id = el.getAttribute('id') || `code_${idx}`;
+            const lang = el.getAttribute('data-lang') || 'javascript';
+            let raw = '';
+            try {
+              raw = decodeURIComponent(el.getAttribute('data-raw') || '');
+            } catch {
+              raw = el.querySelector('.note-code-content')?.textContent || '';
+            }
+            boxesSummary.push(`BLOCCO CODICE #${idx + 1} [id="${id}", lang="${lang}"]:\n${raw}`);
+          });
+        } else if (boxType === 'formula') {
+          formulaEls.forEach((el, idx) => {
+            const id = el.getAttribute('id') || `formula_${idx}`;
+            const expr = el.getAttribute('data-formula') || el.querySelector('.note-formula-input')?.textContent || '';
+            boxesSummary.push(`BOX FORMULA #${idx + 1} [id="${id}"]: ${expr}`);
+          });
+        } else {
+          quoteEls.forEach((el, idx) => {
+            boxesSummary.push(`CITAZIONE #${idx + 1}: ${el.innerHTML}`);
+          });
+        }
+
+        showToast(
+          boxType === 'code'
+            ? '💻 Correzione e sostituzione nella Box Codice in corso...'
+            : boxType === 'formula'
+            ? '∑ Correzione e sostituzione nella Box Formula in corso...'
+            : '💬 Correzione e sostituzione nella Citazione in corso...'
+        );
+
+        const sysPrompt = `Sei l'assistente tecnico ITS che modifica direttamente i blocchi interattivi negli appunti dello studente.
+Richiesta dello studente: "${options.instruction}"
+
+Elenco dei blocchi attualmente presenti negli appunti:
+${boxesSummary.length > 0 ? boxesSummary.join('\n\n---\n\n') : '(Nessun blocco di questo tipo ancora presente negli appunti)'}
+
+REGOLE TASSATIVE:
+1. Individua il blocco a cui si riferisce lo studente (es. quello che contiene il ciclo/funzione/formula/citazione citata come "${options.targetTopic || ''}").
+2. Se lo studente chiede di sistemare/correggere/sostituire SOLO UNA PARTE del blocco (es. solo il ciclo per calcolare Fibonacci dentro un blocco più grande), MANTIENI INTATTO tutto il resto del codice/testo del blocco e sostituisci al suo interno solo la parte richiesta, restituendo il contenuto completo aggiornato del blocco in "newContent".
+3. Restituisci ESCLUSIVAMENTE un oggetto JSON valido (senza \`\`\`json) con questa struttura esatta:
+{
+  "targetBlockId": "id_del_blocco_scelto_oppure_vuoto",
+  "newLang": "javascript | python | sql | bash | cpp | java | html | php | json",
+  "newContent": "codice_o_formula_o_citazione_aggiornata_da_mettere_nella_box",
+  "summary": "Breve conferma in italiano di cosa hai sistemato e sostituito nella box"
+}`;
+
+        const rawJsonOut = await callGeminiWithRotation(
+          orderedKeys,
+          normalizeGeminiModelName(selectedModel),
+          sysPrompt,
+          [{ role: 'user', parts: [{ text: options.instruction }] }]
+        );
+
+        let targetBlockId = '';
+        let newLang = '';
+        let newContent = '';
+        let summaryText = '';
+
+        try {
+          const cleanedJson = rawJsonOut
+            .replace(/^```(?:json)?\s*/i, '')
+            .replace(/\s*```$/i, '')
+            .trim();
+          const parsed = JSON.parse(cleanedJson);
+          targetBlockId = parsed.targetBlockId || '';
+          newLang = parsed.newLang || '';
+          newContent = parsed.newContent || '';
+          summaryText = parsed.summary || '';
+        } catch {
+          // Fallback if model returned fenced code instead of JSON
+          const fenceMatch = rawJsonOut.match(/```([a-zA-Z0-9_+#-]*)\n([\s\S]*?)```/);
+          if (fenceMatch) {
+            newLang = fenceMatch[1] || '';
+            newContent = fenceMatch[2].trim();
+          } else {
+            newContent = rawJsonOut.trim();
+          }
+        }
+
+        if (newContent && notesAreaRef.current) {
+          const rep = applyTargetedBoxReplacement(notesAreaRef.current.innerHTML, {
+            boxType,
+            targetBlockId,
+            targetTopic: options.targetTopic,
+            newContent,
+            newLang
+          });
+
+          if (rep.matched) {
+            notesAreaRef.current.innerHTML = rep.updatedHtml;
+          } else {
+            // If no box existed yet, insert a brand new interactive box at the end of the notes!
+            const newBoxHtml =
+              boxType === 'code'
+                ? buildHighlightedCodeBlockHtml(newContent, normalizeCodeLanguageId(newLang))
+                : boxType === 'formula'
+                ? `<p>${buildInteractiveFormulaBoxHtml(newContent)}</p>`
+                : `<blockquote class="note-quote-block">${newContent}</blockquote><p><br></p>`;
+            notesAreaRef.current.innerHTML += (notesAreaRef.current.innerHTML ? '<br>' : '') + newBoxHtml;
+          }
+
+          handleEditorInput();
+          setActiveTab('notes');
+
+          const confirmText =
+            summaryText ||
+            (boxType === 'code'
+              ? `💻 Ho sistemato e sostituito il codice direttamente nella **Box Codice** degli appunti! *(Puoi premere "▶ Esegui" nella box o "↩️ Annulla Modifica AI" se vuoi ripristinare).*`
+              : boxType === 'formula'
+              ? `∑ Ho aggiornato e ricalcolato la **Box Formula** direttamente negli appunti!`
+              : `💬 Ho aggiornato la **Citazione** direttamente negli appunti!`);
+
+          const userChatMsg: ChatMessage = {
+            role: 'user',
+            parts: [{ text: options.instruction }],
+            rawText: options.instruction,
+            timestamp: Date.now()
+          };
+          const aiChatMsg: ChatMessage = {
+            role: 'model',
+            parts: [{ text: confirmText }],
+            rawText: confirmText,
+            timestamp: Date.now() + 1
+          };
+          setChats(prev => {
+            const nextSubChats = [...(prev[activeSubject] || []), userChatMsg, aiChatMsg];
+            const updated = { ...prev, [activeSubject]: nextSubChats };
+            WorkspaceService.saveLocalChats(updated);
+            if (currentUser) {
+              WorkspaceService.saveChatToCloud(currentUser.uid, activeSubject, nextSubChats).catch(() => {});
+            }
+            return updated;
+          });
+          showToast('✨ Box aggiornata direttamente negli appunti!');
+        }
+        return;
+      }
+
+      // Case C: Full Note or Specific Topic Section Highlight/Edit from Chat or Button
       const topicClause = options.targetTopic
         ? `ATTENZIONE — FOCUS SU SEZIONE SPECIFICA: Lo studente ha chiesto di intervenire SOLO sulla parte dove si parla di: "${options.targetTopic}". Individua i paragrafi o le sezioni che trattano "${options.targetTopic}" e applica le evidenziazioni <mark> SOLO in quella parte, lasciando invariato tutto il resto della pagina!`
         : `Applica l'intervento sui concetti chiave più importanti di tutta la nota.`;
@@ -5038,7 +5148,7 @@ REGOLE TASSATIVE:
 
       const rawOut = await callGeminiWithRotation(
         orderedKeys,
-        selectedModel,
+        normalizeGeminiModelName(selectedModel),
         sysPrompt,
         [{ role: 'user', parts: [{ text: currentFullHtml }] }]
       );
@@ -5115,19 +5225,36 @@ REGOLE TASSATIVE:
     handleSendAIChat(prompt, true);
   };
 
-  // Append Last AI Response to Active Note
-  const handleAppendLastResponse = () => {
-    if (!lastAIResponse) {
-      showToast('Nessuna risposta AI recente da aggiungere.', 'error');
+  // Insert any AI Markdown Response into Active Note (automatically converting ```code```, $$formula$$, and > quotes into interactive boxes!)
+  const handleInsertAiMessageToNotes = (markdownText: string) => {
+    if (!markdownText || !markdownText.trim()) {
+      showToast('Nessun contenuto AI da aggiungere.', 'error');
       return;
     }
     setActiveTab('notes');
     if (notesAreaRef.current) {
-      const parsedHtml = marked.parse(lastAIResponse) as string;
-      notesAreaRef.current.innerHTML += (notesAreaRef.current.innerHTML ? '<br><br>' : '') + parsedHtml;
+      setAiUndoHtmlSnapshot(notesAreaRef.current.innerHTML);
+      const richHtml = convertAiMarkdownToNoteHtml(markdownText, md => marked.parse(md) as string);
+      notesAreaRef.current.innerHTML += (notesAreaRef.current.innerHTML ? '<br>' : '') + richHtml;
       handleEditorInput();
-      showToast('Risposta AI aggiunta agli appunti!');
+      showToast('✨ Contenuto AI aggiunto agli appunti con Box Codice / Formule / Citazioni interattive!');
     }
+  };
+
+  // Append Last AI Response to Active Note
+  const handleAppendLastResponse = () => {
+    const fallbackLast =
+      lastAIResponse ||
+      (chats[activeSubject] || [])
+        .slice()
+        .reverse()
+        .find(m => m.role === 'model' || m.role === 'ai')?.rawText ||
+      '';
+    if (!fallbackLast) {
+      showToast('Nessuna risposta AI recente da aggiungere.', 'error');
+      return;
+    }
+    handleInsertAiMessageToNotes(fallbackLast);
   };
 
   // Clear Chat History for Subject
@@ -7592,13 +7719,24 @@ REGOLE TASSATIVE:
                               __html: marked.parse(text) as string
                             }}
                           />
-                          <button
-                            className="msg-action-btn"
-                            title="Copia risposta"
-                            onClick={() => handleCopyAiMessage(text)}
-                          >
-                            📋
-                          </button>
+                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end', marginTop: '6px' }}>
+                            <button
+                              className="msg-action-btn"
+                              style={{ position: 'static', opacity: 0.9 }}
+                              title="Inserisci negli Appunti (con Box Codice / Formule / Citazioni interattive)"
+                              onClick={() => handleInsertAiMessageToNotes(text)}
+                            >
+                              ➕ Appunti
+                            </button>
+                            <button
+                              className="msg-action-btn"
+                              style={{ position: 'static', opacity: 0.9 }}
+                              title="Copia risposta"
+                              onClick={() => handleCopyAiMessage(text)}
+                            >
+                              📋
+                            </button>
+                          </div>
                         </div>
                       );
                     } else {
@@ -7629,7 +7767,7 @@ REGOLE TASSATIVE:
                 )
               ) : currentSubChats.length === 0 ? (
                 <div className="chat-msg ai">
-                  Chiedi qualcosa, scrivi <b>"evidenzia le cose chiave"</b> (o una parte specifica es. <i>"evidenzia la parte sulle select"</i>), incolla uno screenshot (<b>Ctrl+V</b>) o premi <b>🖍️ Evidenzia Chiave</b>!
+                  Chiedi qualcosa, scrivi <b>"evidenzia le cose chiave"</b>, chiedi di generare codice/formule o scrivi <i>"nel blocco di codice dove faccio fibonacci sistemalo e sostituiscilo nella box"</i>!
                 </div>
               ) : (
                 currentSubChats.map((msg, index) => {
@@ -7644,13 +7782,24 @@ REGOLE TASSATIVE:
                             __html: marked.parse(text) as string
                           }}
                         />
-                        <button
-                          className="msg-action-btn"
-                          title="Copia risposta"
-                          onClick={() => handleCopyAiMessage(text)}
-                        >
-                          📋
-                        </button>
+                        <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end', marginTop: '6px' }}>
+                          <button
+                            className="msg-action-btn"
+                            style={{ position: 'static', opacity: 0.9 }}
+                            title="Inserisci negli Appunti (con Box Codice / Formule / Citazioni interattive)"
+                            onClick={() => handleInsertAiMessageToNotes(text)}
+                          >
+                            ➕ Appunti
+                          </button>
+                          <button
+                            className="msg-action-btn"
+                            style={{ position: 'static', opacity: 0.9 }}
+                            title="Copia risposta"
+                            onClick={() => handleCopyAiMessage(text)}
+                          >
+                            📋
+                          </button>
+                        </div>
                       </div>
                     );
                   } else {

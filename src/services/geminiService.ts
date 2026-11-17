@@ -1,10 +1,37 @@
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
-const MODEL_FALLBACKS = [
+export const MODEL_FALLBACKS = [
   'gemini-2.5-flash',
+  'gemini-2.5-pro',
   'gemini-2.5-flash-lite',
-  'gemini-2.0-flash',
 ];
+
+/**
+ * Maps deprecated or internal alias model IDs (e.g. gemini-1.5-flash, gemini-2.0-flash, gemini-3.8-flash)
+ * to valid public v1beta Gemini models so requests never fail with 404 Model Not Found / Deprecated.
+ */
+export function normalizeGeminiModelName(rawModel?: string | null): string {
+  const m = (rawModel || '').trim().toLowerCase();
+  if (!m) return 'gemini-2.5-flash';
+
+  // Never allow deprecated 1.0 / 1.5 / 2.0 models
+  if (
+    m.includes('1.5') ||
+    m.includes('2.0') ||
+    m === 'gemini-pro' ||
+    m === 'gemini-flash' ||
+    m === 'gemini-3.8-flash' ||
+    m === 'gemini-3.6-flash'
+  ) {
+    return 'gemini-2.5-flash';
+  }
+
+  if (m === 'gemini-3.8-pro') {
+    return 'gemini-2.5-pro';
+  }
+
+  return rawModel!.trim();
+}
 
 /**
  * Calls the Gemini API with automatic API key rotation and model fallback.
@@ -38,7 +65,8 @@ export async function callGeminiWithRotation(
     contentsPayload = [{ role: 'user', parts: [{ text: String(arg3 || '') }] }];
   }
 
-  const candidateModels = Array.from(new Set([selectedModel || 'gemini-2.5-flash', ...MODEL_FALLBACKS]));
+  const normalizedPrimary = normalizeGeminiModelName(selectedModel);
+  const candidateModels = Array.from(new Set([normalizedPrimary, ...MODEL_FALLBACKS]));
   let lastError: Error | null = null;
 
   for (const model of candidateModels) {

@@ -592,7 +592,7 @@ export function compressImageFromBlob(
 // APP VERSION & PROGRAMMABLE KEYBOARD SHORTCUTS
 // ============================================================================
 
-export const APP_VERSION = 'v3.4.0';
+export const APP_VERSION = 'v3.5.0';
 
 export interface ShortcutDefinition {
   id:
@@ -884,13 +884,258 @@ export function sanitizeAndUpgradeNoteHtml(rawHtml: string): { cleanedHtml: stri
 }
 
 /**
+ * Maps markdown fenced code language tags (e.g. "py", "js", "ts", "sh", "c++") to valid CODE_LANGUAGES IDs.
+ */
+export function normalizeCodeLanguageId(rawLang?: string | null): string {
+  const l = (rawLang || '').trim().toLowerCase();
+  if (!l) return 'javascript';
+  if (l === 'js' || l === 'javascript' || l === 'ts' || l === 'typescript' || l === 'jsx' || l === 'tsx' || l === 'node') {
+    return 'javascript';
+  }
+  if (l === 'py' || l === 'python' || l === 'python3') return 'python';
+  if (l === 'sql' || l === 'mysql' || l === 'postgresql' || l === 'postgres' || l === 'sqlite' || l === 'plsql') {
+    return 'sql';
+  }
+  if (l === 'sh' || l === 'bash' || l === 'shell' || l === 'zsh' || l === 'console' || l === 'terminal') {
+    return 'bash';
+  }
+  if (l === 'c' || l === 'cpp' || l === 'c++' || l === 'cc' || l === 'cxx' || l === 'csharp' || l === 'cs') {
+    return 'cpp';
+  }
+  if (l === 'java' || l === 'kotlin') return 'java';
+  if (l === 'html' || l === 'css' || l === 'xml' || l === 'svg') return 'html';
+  if (l === 'php') return 'php';
+  if (l === 'json' || l === 'yaml' || l === 'yml') return 'json';
+  return 'javascript';
+}
+
+/**
+ * Converts AI markdown responses (containing ```lang code blocks, $$ formulas, and > quotes)
+ * into rich, interactive Workspace ITS note HTML where:
+ * - Every ```code``` block becomes an interactive `.note-code-block` box (with ▶ Esegui, 📋 Copia, language selector, syntax highlighting)
+ * - Every ```formula / ```math or $$...$$ block becomes an interactive `.note-formula-box` live calculator
+ * - Every > blockquote becomes a styled `.note-quote-block`
+ */
+export function convertAiMarkdownToNoteHtml(
+  markdownText: string,
+  markdownRenderer?: (md: string) => string
+): string {
+  if (!markdownText || typeof markdownText !== 'string') return '';
+
+  const placeholders: Array<{ token: string; html: string }> = [];
+  let working = markdownText.replace(/\r\n/g, '\n');
+
+  // 1. Extract fenced code blocks ```lang ... ```
+  working = working.replace(/```([a-zA-Z0-9_+#-]*)\n([\s\S]*?)```/g, (_match, rawLang, rawCode) => {
+    const langLower = (rawLang || '').trim().toLowerCase();
+    const trimmedCode = (rawCode || '').replace(/\n$/, '');
+    const token = `@@WS_BOX_PLACEHOLDER_${placeholders.length}@@`;
+
+    if (langLower === 'formula' || langLower === 'math' || langLower === 'calcolo' || langLower === 'latex') {
+      const lines = trimmedCode
+        .split('\n')
+        .map((l: string) => l.trim())
+        .filter(Boolean);
+      const boxes = lines.map((expr: string) => buildInteractiveFormulaBoxHtml(expr)).join('<br>');
+      placeholders.push({ token, html: `<p>${boxes}</p>` });
+    } else {
+      const langId = normalizeCodeLanguageId(langLower);
+      placeholders.push({
+        token,
+        html: buildHighlightedCodeBlockHtml(trimmedCode, langId)
+      });
+    }
+    return `\n\n${token}\n\n`;
+  });
+
+  // 2. Extract block or inline math formulas $$ ... $$
+  working = working.replace(/\$\$([^$\n]+)\$\$/g, (_match, expr) => {
+    const token = `@@WS_BOX_PLACEHOLDER_${placeholders.length}@@`;
+    placeholders.push({
+      token,
+      html: buildInteractiveFormulaBoxHtml(expr.trim())
+    });
+    return token;
+  });
+
+  // 3. Extract markdown blockquotes (> ...) into styled `.note-quote-block`
+  working = working.replace(/(?:^|\n)((?:>\s?.+(?:\n|$))+)/g, (_match, quoteBlock) => {
+    const cleanedQuote = quoteBlock
+      .split('\n')
+      .map((line: string) => line.replace(/^>\s?/, '').trim())
+      .filter(Boolean)
+      .join('<br>');
+    if (!cleanedQuote) return _match;
+    const token = `@@WS_BOX_PLACEHOLDER_${placeholders.length}@@`;
+    placeholders.push({
+      token,
+      html: `<blockquote class="note-quote-block">${cleanedQuote}</blockquote><p><br></p>`
+    });
+    return `\n\n${token}\n\n`;
+  });
+
+  // 4. Render remaining markdown
+  let html = '';
+  if (markdownRenderer) {
+    html = markdownRenderer(working);
+  } else {
+    html = working
+      .split(/\n{2,}/)
+      .map(p => p.trim())
+      .filter(Boolean)
+      .map(p => (p.startsWith('@@WS_BOX_PLACEHOLDER_') ? p : `<p>${p.replace(/\n/g, '<br>')}</p>`))
+      .join('');
+  }
+
+  // 5. Restore interactive box HTML placeholders (unwrap <p> around block-level placeholders if present)
+  for (const { token, html: boxHtml } of placeholders) {
+    const wrappedInP = new RegExp(`<p>\\s*${token}\\s*<\\/p>`, 'g');
+    if (wrappedInP.test(html)) {
+      html = html.replace(wrappedInP, boxHtml);
+    } else {
+      html = html.split(token).join(boxHtml);
+    }
+  }
+
+  return html;
+}
+
+/**
+ * Surgically updates an existing `.note-code-block`, `.note-formula-box`, or `blockquote` inside `noteHtml`
+ * matching `targetBlockId` or `targetTopic` (or the most relevant box if only one exists).
+ * Supports replacing either a partial snippet inside a code box (`partialOldSnippet` -> `newContent`)
+ * or the entire box content!
+ */
+export function applyTargetedBoxReplacement(
+  noteHtml: string,
+  options: {
+    boxType: 'code' | 'formula' | 'quote';
+    targetTopic?: string | null;
+    targetBlockId?: string | null;
+    partialOldSnippet?: string | null;
+    newContent: string;
+    newLang?: string | null;
+  }
+): { updatedHtml: string; matched: boolean; matchedId?: string } {
+  if (!noteHtml || typeof noteHtml !== 'string') {
+    return { updatedHtml: noteHtml || '', matched: false };
+  }
+
+  const topicLower = (options.targetTopic || '').trim().toLowerCase();
+  const topicWords = topicLower
+    .split(/\s+/)
+    .map(w => w.replace(/[^a-z0-9_]/gi, ''))
+    .filter(w => w.length >= 3 && !['blocco', 'codice', 'ciclo', 'funzione', 'parte', 'dove', 'faccio', 'calcolare', 'formula', 'citazione', 'nella', 'box'].includes(w));
+
+  if (options.boxType === 'code') {
+    const codeBlockRegex =
+      /<div[^>]*class="[^"]*note-code-block[^"]*"[^>]*id="([^"]+)"[^>]*data-lang="([^"]+)"[^>]*data-raw="([^"]*)"[^>]*>[\s\S]*?<\/div><\/div>/gi;
+    const matches: Array<{ fullMatch: string; id: string; lang: string; rawCode: string }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = codeBlockRegex.exec(noteHtml)) !== null) {
+      let decoded = '';
+      try {
+        decoded = decodeURIComponent(m[3] || '');
+      } catch {
+        decoded = m[3] || '';
+      }
+      matches.push({
+        fullMatch: m[0],
+        id: m[1],
+        lang: m[2] || 'javascript',
+        rawCode: decoded
+      });
+    }
+
+    if (matches.length === 0) {
+      return { updatedHtml: noteHtml, matched: false };
+    }
+
+    // Choose target block by explicit ID, by topic keyword match in rawCode, or fallback to last/first code block
+    let target = matches.find(b => options.targetBlockId && b.id === options.targetBlockId);
+    if (!target && topicWords.length > 0) {
+      target = matches.find(b => {
+        const lowerCode = b.rawCode.toLowerCase();
+        return topicWords.some(w => lowerCode.includes(w));
+      });
+    }
+    if (!target) {
+      target = matches[matches.length - 1];
+    }
+
+    let finalCode = options.newContent;
+    if (options.partialOldSnippet && target.rawCode.includes(options.partialOldSnippet)) {
+      finalCode = target.rawCode.replace(options.partialOldSnippet, options.newContent);
+    }
+
+    const finalLang = options.newLang ? normalizeCodeLanguageId(options.newLang) : target.lang;
+    const replacementBlock = buildHighlightedCodeBlockHtml(finalCode, finalLang, target.id).replace(/<p><br><\/p>$/, '');
+    const updatedHtml = noteHtml.replace(target.fullMatch, replacementBlock);
+    return { updatedHtml, matched: true, matchedId: target.id };
+  }
+
+  if (options.boxType === 'formula') {
+    const formulaRegex =
+      /<span[^>]*class="[^"]*note-formula-box[^"]*"[^>]*id="([^"]+)"[^>]*data-formula="([^"]*)"[^>]*>[\s\S]*?<\/button><\/span>/gi;
+    const matches: Array<{ fullMatch: string; id: string; expr: string }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = formulaRegex.exec(noteHtml)) !== null) {
+      matches.push({
+        fullMatch: m[0],
+        id: m[1],
+        expr: m[2] || ''
+      });
+    }
+    if (matches.length === 0) {
+      return { updatedHtml: noteHtml, matched: false };
+    }
+    let target = matches.find(b => options.targetBlockId && b.id === options.targetBlockId);
+    if (!target && topicWords.length > 0) {
+      target = matches.find(b => topicWords.some(w => b.expr.toLowerCase().includes(w)));
+    }
+    if (!target) target = matches[matches.length - 1];
+
+    const replacementSpan = buildInteractiveFormulaBoxHtml(options.newContent, target.id).replace(/&nbsp;$/, '');
+    const updatedHtml = noteHtml.replace(target.fullMatch, replacementSpan);
+    return { updatedHtml, matched: true, matchedId: target.id };
+  }
+
+  if (options.boxType === 'quote') {
+    const quoteRegex = /<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi;
+    const matches: Array<{ fullMatch: string; inner: string }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = quoteRegex.exec(noteHtml)) !== null) {
+      matches.push({ fullMatch: m[0], inner: m[1] });
+    }
+    if (matches.length === 0) {
+      return { updatedHtml: noteHtml, matched: false };
+    }
+    let target = matches[matches.length - 1];
+    if (topicWords.length > 0) {
+      const found = matches.find(q => topicWords.some(w => q.inner.toLowerCase().includes(w)));
+      if (found) target = found;
+    }
+    let finalQuote = options.newContent;
+    if (options.partialOldSnippet && target.inner.includes(options.partialOldSnippet)) {
+      finalQuote = target.inner.replace(options.partialOldSnippet, options.newContent);
+    }
+    const replacementQuote = `<blockquote class="note-quote-block">${finalQuote}</blockquote>`;
+    const updatedHtml = noteHtml.replace(target.fullMatch, replacementQuote);
+    return { updatedHtml, matched: true };
+  }
+
+  return { updatedHtml: noteHtml, matched: false };
+}
+
+/**
  * Detects whether a chat prompt is asking the AI to highlight key concepts or directly
- * modify/edit the user's current notes in `#notes-area`, and extracts any specific
- * topic/section mentioned (e.g. "evidenzia le parti importanti della parte dove parlo delle select").
+ * modify/edit the user's current notes in `#notes-area` (including targeted edits inside a
+ * `.note-code-block`, `.note-formula-box`, or `blockquote`), and extracts any specific
+ * topic/section mentioned (e.g. "nel blocco di codice dove faccio il ciclo per calcolare fibonacci sistemalo e sostituiscilo gia nella box").
  */
 export function parseAiNoteEditIntent(userMessage: string): {
   isDirectNoteEdit: boolean;
-  mode: 'highlight' | 'edit' | 'none';
+  mode: 'highlight' | 'edit' | 'edit_code_box' | 'edit_formula_box' | 'edit_quote_box' | 'none';
   targetTopic: string | null;
 } {
   if (!userMessage || typeof userMessage !== 'string') {
@@ -899,13 +1144,54 @@ export function parseAiNoteEditIntent(userMessage: string): {
   const text = userMessage.trim();
   const lower = text.toLowerCase();
 
-  // Check for highlight keywords
+  // 1. Check for targeted Code Box / Formula Box / Quote Box edit & replace commands
+  const hasBoxEditVerb =
+    /\b(sistema\w*|sostituisci\w*|correggi\w*|modifica\w*|aggiorna\w*|aggiusta\w*|cambia\w*|ottimizza\w*|riscrivi\w*|metti\s+a\s+posto|fixa\w*)\b/i.test(
+      lower
+    );
+  const mentionsCodeBox =
+    /\b(blocco\s+(?:di\s+)?codice|box\s+(?:di\s+)?codice|nella\s+box|nel\s+codice|blocco\s+python|blocco\s+javascript|blocco\s+sql|blocco\s+bash|blocco\s+c\+\+|blocco\s+java|ciclo\s+per|funzione\s+per)\b/i.test(
+      lower
+    );
+  const mentionsFormulaBox =
+    /\b(blocco\s+formula|box\s+formula|nella\s+formula|la\s+formula\s+dove|formula\s+nella\s+box)\b/i.test(lower);
+  const mentionsQuoteBox =
+    /\b(blocco\s+citazione|box\s+citazione|nella\s+citazione|la\s+citazione\s+dove)\b/i.test(lower);
+
+  if (hasBoxEditVerb && (mentionsCodeBox || mentionsFormulaBox || mentionsQuoteBox)) {
+    let targetTopic: string | null = null;
+    const boxTopicMatch =
+      text.match(
+        /(?:dove\s+(?:faccio|c'è|calcolo|parlo\s+di|scrivo|ho\s+scritto)|per\s+calcolare|che\s+calcola|riguardo\s+a|sulla\s+parte\s+di)\s+([^.,;!?]+?)(?:\s+(?:sistem\w*|sostituisc\w*|corregg\w*|modific\w*|aggiorn\w*|e\s+sostituisc\w*)|$)/i
+      ) ||
+      text.match(/(?:ciclo|funzione|query|formula|citazione)\s+(?:per|di|su)\s+([^.,;!?]+?)(?:\s+(?:sistem\w*|sostituisc\w*|corregg\w*)|$)/i);
+
+    if (boxTopicMatch && boxTopicMatch[1]) {
+      targetTopic = boxTopicMatch[1].trim();
+    } else {
+      targetTopic = text;
+    }
+
+    const mode = mentionsFormulaBox
+      ? 'edit_formula_box'
+      : mentionsQuoteBox
+      ? 'edit_quote_box'
+      : 'edit_code_box';
+
+    return {
+      isDirectNoteEdit: true,
+      mode,
+      targetTopic
+    };
+  }
+
+  // 2. Check for highlight keywords
   const hasHighlightVerb =
     /\b(evidenzia\w*|sottolinea\w*|colora\w*|metti in evidenza|marca\w*)\b/i.test(lower);
 
-  // Check for direct note edit keywords
+  // 3. Check for direct note edit keywords
   const hasNoteEditPhrase =
-    /\b(modifica\s+gli\s+appunti|aggiorna\s+gli\s+appunti|riscrivi\s+gli\s+appunti|formatta\s+gli\s+appunti|negli\s+appunti\s+evidenzia|negli\s+appunti\s+modifica| correggi\s+gli\s+appunti|aggiungi\s+negli\s+appunti|inserisci\s+negli\s+appunti)\b/i.test(
+    /\b(modifica\s+gli\s+appunti|aggiorna\s+gli\s+appunti|riscrivi\s+gli\s+appunti|formatta\s+gli\s+appunti|negli\s+appunti\s+evidenzia|negli\s+appunti\s+modifica|correggi\s+gli\s+appunti|aggiungi\s+negli\s+appunti|inserisci\s+negli\s+appunti)\b/i.test(
       lower
     );
 

@@ -1,4 +1,4 @@
-import { callGeminiWithRotation } from './geminiService';
+import { callGeminiWithRotation, normalizeGeminiModelName } from './geminiService';
 import { executeSqlLocally, formatAsciiTable } from '../utils/sqlEngine';
 
 export interface CodeExecutionResult {
@@ -15,7 +15,8 @@ const WANDBOX_COMPILERS: Record<string, string> = {
   cpp: 'gcc-13.2.0',
   java: 'openjdk-22+36',
   php: 'php-8.3.12',
-  bash: 'bash'
+  // On Wandbox, real GNU /bin/bash runs inside the Linux container via cpython-3.12.7 subprocess
+  bash: 'cpython-3.12.7'
 };
 
 function formatConsoleArg(arg: unknown): string {
@@ -74,6 +75,358 @@ function runJavaScriptInBrowser(rawCode: string): CodeExecutionResult {
 }
 
 /**
+ * Lightweight, fast local Bash / Shell interpreter for common educational scripts
+ * (variables, arithmetic $((...)), C-style for ((...)), for..in..do..done, while..do..done, if..then..fi, echo, printf, seq).
+ * Returns null if the script uses advanced external Linux commands so it can run on the Linux sandbox.
+ */
+export function runBashLocally(rawCode: string): CodeExecutionResult | null {
+  const start = performance.now();
+  // If script uses advanced Linux pipes/tools not emulated locally, let Wandbox GNU Bash handle it
+  if (/\b(awk|sed|curl|wget|grep|find|xargs|tar|gzip|chmod|chown|ps|kill|apt|yum|git|docker|ssh|scp)\b/.test(rawCode)) {
+    return null;
+  }
+
+  const vars: Record<string, string | number> = {};
+  const outLines: string[] = [];
+  let currentLineBuf = '';
+
+  const evalArith = (exprStr: string): number => {
+    const expanded = exprStr.replace(/\$\{?([a-zA-Z_][a-zA-Z0-9_]*)\}?|\b([a-zA-Z_][a-zA-Z0-9_]*)\b/g, (_m, v1, v2) => {
+      const name = v1 || v2;
+      const val = vars[name];
+      return val !== undefined && !isNaN(Number(val)) ? String(Number(val)) : '0';
+    });
+    if (!/^[0-9+\-*/%()<>=!&|\s?:]+$/.test(expanded)) return 0;
+    try {
+      // eslint-disable-next-line no-new-func
+      const res = new Function(`return (${expanded});`)();
+      return typeof res === 'boolean' ? (res ? 1 : 0) : Math.trunc(Number(res) || 0);
+    } catch {
+      return 0;
+    }
+  };
+
+  const expandString = (str: string): string => {
+    let s = str;
+    // Expand $(( ... ))
+    s = s.replace(/\$\(\(([\s\S]*?)\)\)/g, (_m, expr) => String(evalArith(expr)));
+    // Expand $(seq a b)
+    s = s.replace(/\$\(\s*seq\s+(-?\d+)\s+(-?\d+)(?:\s+(-?\d+))?\s*\)/g, (_m, a, b, c) => {
+      const startN = Number(a);
+      const stepN = c !== undefined ? Number(b) : 1;
+      const endN = c !== undefined ? Number(c) : Number(b);
+      const list: number[] = [];
+      if (stepN > 0) {
+        for (let i = startN; i <= endN && list.length < 500; i += stepN) list.push(i);
+      } else if (stepN < 0) {
+        for (let i = startN; i >= endN && list.length < 500; i += stepN) list.push(i);
+      }
+      return list.join(' ');
+    });
+    // Expand ${var} and $var
+    s = s.replace(/\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}|\$([a-zA-Z_][a-zA-Z0-9_]*)/g, (_m, v1, v2) => {
+      const name = v1 || v2;
+      return vars[name] !== undefined ? String(vars[name]) : '';
+    });
+    return s;
+  };
+
+  const evalCondition = (condRaw: string): boolean => {
+    const c = condRaw.trim();
+    const arithMatch = c.match(/^\(\(([\s\S]*)\)\)$/);
+    if (arithMatch) {
+      return evalArith(arithMatch[1]) !== 0;
+    }
+    const bracketMatch = c.match(/^\[{1,2}\s*([\s\S]*?)\s*\]{1,2}$/);
+    const inner = bracketMatch ? bracketMatch[1].trim() : c;
+    const expanded = expandString(inner);
+
+    const numCmp = expanded.match(/^(-?\d+)\s+(-eq|-ne|-lt|-le|-gt|-ge|==|!=|<=|>=|<|>)\s+(-?\d+)$/);
+    if (numCmp) {
+      const a = Number(numCmp[1]);
+      const op = numCmp[2];
+      const b = Number(numCmp[3]);
+      if (op === '-eq' || op === '==') return a === b;
+      if (op === '-ne' || op === '!=') return a !== b;
+      if (op === '-lt' || op === '<') return a < b;
+      if (op === '-le' || op === '<=') return a <= b;
+      if (op === '-gt' || op === '>') return a > b;
+      if (op === '-ge' || op === '>=') return a >= b;
+    }
+    const strCmp = expanded.match(/^"?([^"=!]*)"?\s*(=|==|!=)\s*"?([^"=!]*)"?$/);
+    if (strCmp) {
+      return strCmp[2] === '!=' ? strCmp[1].trim() !== strCmp[3].trim() : strCmp[1].trim() === strCmp[3].trim();
+    }
+    return Boolean(expanded);
+  };
+
+  // Normalize semicolons before `do` / `then` into newlines so block parsing is clean
+  const rawLines = rawCode
+    .replace(/\r\n/g, '\n')
+    .replace(/;\s*(do|then)\b/g, '\n$1')
+    .split('\n')
+    .map(l => l.replace(/#.*$/, '').trim())
+    .filter(l => l.length > 0 && !l.startsWith('!'));
+
+  let stepCount = 0;
+  const MAX_STEPS = 2500;
+
+  const execBlock = (lines: string[]): boolean => {
+    let i = 0;
+    while (i < lines.length) {
+      if (++stepCount > MAX_STEPS) return false;
+      const line = lines[i];
+
+      // 1. C-style for loop: for (( i=0; i<10; i++ ))
+      const cForMatch = line.match(/^for\s+\(\(\s*([^;]+);\s*([^;]+);\s*([^)]+)\)\)\s*$/);
+      if (cForMatch) {
+        let depth = 0;
+        let endIdx = -1;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (/^(for|while|until)\b/.test(lines[j])) depth++;
+          if (lines[j] === 'done') {
+            if (depth === 0) {
+              endIdx = j;
+              break;
+            }
+            depth--;
+          }
+        }
+        if (endIdx === -1) return false;
+        const body = lines.slice(i + 1, endIdx).filter(l => l !== 'do');
+
+        // Init
+        const initParts = cForMatch[1].split(',').map(s => s.trim());
+        for (const p of initParts) {
+          const m = p.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$/);
+          if (m) vars[m[1]] = evalArith(m[2]);
+        }
+
+        while (evalArith(cForMatch[2]) !== 0) {
+          if (++stepCount > MAX_STEPS) return false;
+          if (!execBlock(body)) return false;
+          const incParts = cForMatch[3].split(',').map(s => s.trim());
+          for (const inc of incParts) {
+            const pp = inc.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*(\+\+|--)$/) || inc.match(/^(\+\+|--)([a-zA-Z_][a-zA-Z0-9_]*)$/);
+            if (pp) {
+              const vName = pp[1] === '++' || pp[1] === '--' ? pp[2] : pp[1];
+              const op = pp[1] === '++' || pp[2] === '++' ? 1 : -1;
+              vars[vName] = Number(vars[vName] || 0) + op;
+            } else {
+              const plusEq = inc.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*([+\-*/])=\s*(.+)$/);
+              if (plusEq) {
+                const cur = Number(vars[plusEq[1]] || 0);
+                const rhs = evalArith(plusEq[3]);
+                vars[plusEq[1]] =
+                  plusEq[2] === '+' ? cur + rhs : plusEq[2] === '-' ? cur - rhs : plusEq[2] === '*' ? cur * rhs : Math.trunc(cur / (rhs || 1));
+              } else {
+                const assign = inc.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$/);
+                if (assign) vars[assign[1]] = evalArith(assign[2]);
+              }
+            }
+          }
+        }
+        i = endIdx + 1;
+        continue;
+      }
+
+      // 2. Standard `for var in ...` loop
+      const forInMatch = line.match(/^for\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+in\s+(.+)$/);
+      if (forInMatch) {
+        let depth = 0;
+        let endIdx = -1;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (/^(for|while|until)\b/.test(lines[j])) depth++;
+          if (lines[j] === 'done') {
+            if (depth === 0) {
+              endIdx = j;
+              break;
+            }
+            depth--;
+          }
+        }
+        if (endIdx === -1) return false;
+        const body = lines.slice(i + 1, endIdx).filter(l => l !== 'do');
+        const varName = forInMatch[1];
+        const rawItems = forInMatch[2].trim();
+        let items: string[] = [];
+        const braceRange = rawItems.match(/^\{(-?\d+)\.\.(-?\d+)(?:\.\.(-?\d+))?\}$/);
+        if (braceRange) {
+          const s = Number(braceRange[1]);
+          const e = Number(braceRange[2]);
+          const step = braceRange[3] ? Number(braceRange[3]) : s <= e ? 1 : -1;
+          if (step > 0) {
+            for (let k = s; k <= e && items.length < 500; k += step) items.push(String(k));
+          } else if (step < 0) {
+            for (let k = s; k >= e && items.length < 500; k += step) items.push(String(k));
+          }
+        } else {
+          items = expandString(rawItems).split(/\s+/).filter(Boolean);
+        }
+
+        for (const item of items) {
+          vars[varName] = item.replace(/^["']|["']$/g, '');
+          if (!execBlock(body)) return false;
+        }
+        i = endIdx + 1;
+        continue;
+      }
+
+      // 3. `while ...` loop
+      const whileMatch = line.match(/^while\s+(.+)$/);
+      if (whileMatch) {
+        let depth = 0;
+        let endIdx = -1;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (/^(for|while|until)\b/.test(lines[j])) depth++;
+          if (lines[j] === 'done') {
+            if (depth === 0) {
+              endIdx = j;
+              break;
+            }
+            depth--;
+          }
+        }
+        if (endIdx === -1) return false;
+        const body = lines.slice(i + 1, endIdx).filter(l => l !== 'do');
+        while (evalCondition(whileMatch[1])) {
+          if (++stepCount > MAX_STEPS) return false;
+          if (!execBlock(body)) return false;
+        }
+        i = endIdx + 1;
+        continue;
+      }
+
+      // 4. `if ...` block
+      const ifMatch = line.match(/^if\s+(.+)$/);
+      if (ifMatch) {
+        let depth = 0;
+        let endIdx = -1;
+        let elseIdx = -1;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (/^if\b/.test(lines[j])) depth++;
+          if (lines[j] === 'else' && depth === 0 && elseIdx === -1) elseIdx = j;
+          if (lines[j] === 'fi') {
+            if (depth === 0) {
+              endIdx = j;
+              break;
+            }
+            depth--;
+          }
+        }
+        if (endIdx === -1) return false;
+        if (evalCondition(ifMatch[1])) {
+          const thenBody = lines.slice(i + 1, elseIdx !== -1 ? elseIdx : endIdx).filter(l => l !== 'then');
+          if (!execBlock(thenBody)) return false;
+        } else if (elseIdx !== -1) {
+          const elseBody = lines.slice(elseIdx + 1, endIdx).filter(l => l !== 'then');
+          if (!execBlock(elseBody)) return false;
+        }
+        i = endIdx + 1;
+        continue;
+      }
+
+      if (line === 'do' || line === 'then' || line === 'done' || line === 'fi') {
+        i++;
+        continue;
+      }
+
+      // 5. Multiple assignments or statements separated by `;` on the same line
+      if (line.includes(';') && !/^echo\b|^printf\b/.test(line)) {
+        const subStmts = line.split(';').map(s => s.trim()).filter(Boolean);
+        if (subStmts.length > 1) {
+          if (!execBlock(subStmts)) return false;
+          i++;
+          continue;
+        }
+      }
+
+      // 6. Variable assignment: `a=0` or `local a=0` or `export a=0`
+      const assignMatch = line.match(/^(?:local\s+|export\s+|readonly\s+)?([a-zA-Z_][a-zA-Z0-9_]*)=([\s\S]*)$/);
+      if (assignMatch) {
+        const vName = assignMatch[1];
+        let rhs = assignMatch[2].trim();
+        if ((rhs.startsWith('"') && rhs.endsWith('"')) || (rhs.startsWith("'") && rhs.endsWith("'"))) {
+          rhs = rhs.slice(1, -1);
+        }
+        vars[vName] = expandString(rhs);
+        i++;
+        continue;
+      }
+
+      // 7. Standalone arithmetic `(( i++ ))` or `(( a = a + b ))`
+      const standaloneArith = line.match(/^\(\(\s*([\s\S]+?)\s*\)\)$/);
+      if (standaloneArith) {
+        const inner = standaloneArith[1];
+        const pp = inner.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*(\+\+|--)$/) || inner.match(/^(\+\+|--)([a-zA-Z_][a-zA-Z0-9_]*)$/);
+        if (pp) {
+          const vName = pp[1] === '++' || pp[1] === '--' ? pp[2] : pp[1];
+          const op = pp[1] === '++' || pp[2] === '++' ? 1 : -1;
+          vars[vName] = Number(vars[vName] || 0) + op;
+        } else {
+          const eq = inner.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$/);
+          if (eq) vars[eq[1]] = evalArith(eq[2]);
+        }
+        i++;
+        continue;
+      }
+
+      // 8. `echo` command
+      const echoMatch = line.match(/^echo(?:\s+(-[neE]+))?(?:\s+(.*))?$/);
+      if (echoMatch) {
+        const flags = echoMatch[1] || '';
+        let arg = (echoMatch[2] || '').trim();
+        if ((arg.startsWith('"') && arg.endsWith('"')) || (arg.startsWith("'") && arg.endsWith("'"))) {
+          arg = arg.slice(1, -1);
+        }
+        let expanded = expandString(arg);
+        if (flags.includes('e')) {
+          expanded = expanded.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+        }
+        if (flags.includes('n')) {
+          currentLineBuf += expanded;
+        } else {
+          outLines.push(currentLineBuf + expanded);
+          currentLineBuf = '';
+        }
+        i++;
+        continue;
+      }
+
+      // 9. `printf` command
+      const printfMatch = line.match(/^printf\s+(.+)$/);
+      if (printfMatch) {
+        const expanded = expandString(printfMatch[1].replace(/^["']|["']$/g, '')).replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+        if (expanded.endsWith('\n')) {
+          outLines.push(currentLineBuf + expanded.slice(0, -1));
+          currentLineBuf = '';
+        } else {
+          currentLineBuf += expanded;
+        }
+        i++;
+        continue;
+      }
+
+      // Unknown command -> return null so Wandbox Linux container executes it
+      return null;
+    }
+    return true;
+  };
+
+  const ok = execBlock(rawLines);
+  if (!ok) return null;
+  if (currentLineBuf) outLines.push(currentLineBuf);
+
+  const durationMs = Math.max(1, Math.round(performance.now() - start));
+  return {
+    stdout: outLines.join('\n') || '(Script Bash eseguito con successo senza output)',
+    stderr: '',
+    durationMs,
+    engineLabel: 'Bash Shell Engine (Locale • Zero Key)'
+  };
+}
+
+/**
  * Executes Python, C/C++, Java, PHP, or Bash via the free keyless Wandbox public compiler API.
  */
 async function runWithWandbox(rawCode: string, lang: string): Promise<CodeExecutionResult | null> {
@@ -82,8 +435,16 @@ async function runWithWandbox(rawCode: string, lang: string): Promise<CodeExecut
 
   let codeToCompile = rawCode;
 
-  // Wrap partial C++ or Java snippets if they lack main()
-  if (lang === 'cpp' && !/\bmain\s*\(/.test(rawCode)) {
+  // Wrap partial C++ or Java snippets if they lack main(), and run Bash inside Linux /bin/bash
+  if (lang === 'bash') {
+    codeToCompile = [
+      'import subprocess, sys',
+      `script = ${JSON.stringify(rawCode)}`,
+      'res = subprocess.run(["/bin/bash", "-c", script], capture_output=True, text=True)',
+      'if res.stdout: sys.stdout.write(res.stdout)',
+      'if res.stderr: sys.stderr.write(res.stderr)'
+    ].join('\n');
+  } else if (lang === 'cpp' && !/\bmain\s*\(/.test(rawCode)) {
     codeToCompile = `#include <iostream>\n#include <vector>\n#include <string>\n#include <cmath>\nusing namespace std;\nint main() {\n${rawCode}\nreturn 0;\n}`;
   } else if (lang === 'java' && !/\bclass\s+/.test(rawCode)) {
     codeToCompile = `import java.util.*;\npublic class Main {\n  public static void main(String[] args) {\n${rawCode}\n  }\n}`;
@@ -119,7 +480,7 @@ async function runWithWandbox(rawCode: string, lang: string): Promise<CodeExecut
       stdout: stdout || (!stderr ? '(Esecuzione completata senza output)' : ''),
       stderr,
       durationMs,
-      engineLabel: `Cloud Sandbox (${compiler} • Zero Key)`
+      engineLabel: lang === 'bash' ? 'Linux GNU Bash Sandbox (Zero Key)' : `Cloud Sandbox (${compiler} • Zero Key)`
     };
   } catch {
     return null;
@@ -154,9 +515,10 @@ async function runWithGeminiSimulator(
       : `Agisci come un interprete/compilatore ${lang.toUpperCase()} reale. Esegui il seguente codice (se mancano variabili di contesto come liste o input di esempio, inizializzale con valori sensati) e restituisci ESCLUSIVAMENTE l'output esatto che comparirebbe nel terminale (stdout/stderr), senza blocchi markdown \`\`\` e senza commenti discorsivi.\n\nCodice:\n${rawCode}`;
 
   try {
+    const safeModel = normalizeGeminiModelName(selectedModel);
     const output = await callGeminiWithRotation(
       apiKeys,
-      selectedModel || 'gemini-2.5-flash',
+      safeModel,
       [{ role: 'user', parts: [{ text: prompt }] }],
       'Restituisci solo l output puro da terminale, senza markdown ``` e senza introduzioni.'
     );
@@ -219,6 +581,13 @@ export async function executeCodeBlock(
       }
     }
     return jsRes;
+  }
+
+  if (effectiveLang === 'bash') {
+    const localBash = runBashLocally(code);
+    if (localBash) {
+      return localBash;
+    }
   }
 
   if (lang === 'html') {

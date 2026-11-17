@@ -16,10 +16,13 @@ import {
   parseAiNoteEditIntent,
   parseCalendarChatCommand,
   answerCalendarQueryLocally,
-  buildCalendarScheduleContextForChat
+  buildCalendarScheduleContextForChat,
+  convertAiMarkdownToNoteHtml,
+  applyTargetedBoxReplacement
 } from './editorTools';
 import { executeSqlLocally, resetSqlDatabase } from './sqlEngine';
 import { parseIcsCalendarContent } from '../services/googleCalendarService';
+import { runBashLocally } from '../services/codeRunnerService';
 
 test('evaluateMathExpression evaluates direct arithmetic, functions, and named formulas', () => {
   assert.equal(evaluateMathExpression('125 * 4'), '500');
@@ -132,7 +135,7 @@ test('buildInteractiveTableHtml and buildSvgElementString generate valid HTML/SV
   assert.ok(arrowSvg.includes('data-draw-item="true"'));
 });
 
-test('parseAiNoteEditIntent detects general and topic-specific highlight/edit commands', () => {
+test('parseAiNoteEditIntent detects general, topic-specific, and box-specific edit commands', () => {
   const general = parseAiNoteEditIntent('evidenzia le robe chiave negli appunti');
   assert.equal(general.isDirectNoteEdit, true);
   assert.equal(general.mode, 'highlight');
@@ -143,8 +146,77 @@ test('parseAiNoteEditIntent detects general and topic-specific highlight/edit co
   assert.equal(topicSpecific.mode, 'highlight');
   assert.equal(topicSpecific.targetTopic, 'select');
 
+  const codeBoxEdit = parseAiNoteEditIntent(
+    'nel blocco di codice dove faccio il ciclo per calcolare fibonacci sistemalo e sostituiscilo gia nella box'
+  );
+  assert.equal(codeBoxEdit.isDirectNoteEdit, true);
+  assert.equal(codeBoxEdit.mode, 'edit_code_box');
+  assert.ok(codeBoxEdit.targetTopic?.includes('fibonacci'));
+
+  const formulaBoxEdit = parseAiNoteEditIntent('nella formula dell iva correggi 1.20 con 1.22 e sostituiscila nella box');
+  assert.equal(formulaBoxEdit.isDirectNoteEdit, true);
+  assert.equal(formulaBoxEdit.mode, 'edit_formula_box');
+
+  const quoteBoxEdit = parseAiNoteEditIntent('nella citazione di Turing correggi il testo e sostituiscilo nella citazione');
+  assert.equal(quoteBoxEdit.isDirectNoteEdit, true);
+  assert.equal(quoteBoxEdit.mode, 'edit_quote_box');
+
   const normalQuestion = parseAiNoteEditIntent('spiegami cos e una inner join in sql');
   assert.equal(normalQuestion.isDirectNoteEdit, false);
+});
+
+test('convertAiMarkdownToNoteHtml converts fenced code, formulas, and blockquotes into interactive boxes and applyTargetedBoxReplacement updates in-place', () => {
+  const md = [
+    'Ecco lo script per Fibonacci in Bash:',
+    '```bash',
+    'a=0',
+    'b=1',
+    'for (( i=0; i<5; i++ )); do',
+    '  echo $a',
+    '  fn=$((a + b))',
+    '  a=$b',
+    '  b=$fn',
+    'done',
+    '```',
+    '$$ 125 * 4 $$',
+    '> La semplicità è la massima sofisticazione.'
+  ].join('\n');
+
+  const html = convertAiMarkdownToNoteHtml(md);
+  assert.ok(html.includes('class="note-code-block"'));
+  assert.ok(html.includes('data-lang="bash"'));
+  assert.ok(html.includes('class="note-formula-box"'));
+  assert.ok(html.includes('= 500'));
+  assert.ok(html.includes('note-quote-block'));
+
+  // Test partial replacement inside existing code box in html
+  const replaced = applyTargetedBoxReplacement(html, {
+    boxType: 'code',
+    targetTopic: 'fibonacci',
+    partialOldSnippet: 'for (( i=0; i<5; i++ )); do',
+    newContent: 'for (( i=0; i<8; i++ )); do'
+  });
+  assert.equal(replaced.matched, true);
+  assert.ok(decodeURIComponent(replaced.updatedHtml).includes('i<8'));
+  assert.ok(decodeURIComponent(replaced.updatedHtml).includes('fn=$((a + b))'));
+});
+
+test('runBashLocally executes Bash Fibonacci loop and arithmetic locally without Gemini errors', () => {
+  const script = [
+    'a=0',
+    'b=1',
+    'for (( i=0; i<6; i++ )); do',
+    '  echo $a',
+    '  fn=$((a + b))',
+    '  a=$b',
+    '  b=$fn',
+    'done'
+  ].join('\n');
+
+  const res = runBashLocally(script);
+  assert.ok(res);
+  assert.equal(res.stderr, '');
+  assert.deepEqual(res.stdout.trim().split('\n'), ['0', '1', '1', '2', '3', '5']);
 });
 
 test('executeSqlLocally creates tables, inserts rows, updates, deletes, and selects formatted results', () => {
@@ -236,4 +308,5 @@ test('parseCalendarChatCommand parses Italian natural-language reminder/event re
   const ctx = buildCalendarScheduleContextForChat(sampleSchedule, refNow);
   assert.ok(ctx.includes('Lezione Database Relazionali'));
 });
+
 
