@@ -3,7 +3,7 @@
  */
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, initializeAuth, inMemoryPersistence, browserPopupRedirectResolver } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer, disableNetwork } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Primary Firebase configuration for Workspace ITS Firestore database & main user session
@@ -72,7 +72,39 @@ export interface FirestoreErrorInfo {
   };
 }
 
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+let cloudQuotaExhausted = false;
+
+export function isCloudQuotaExhausted(): boolean {
+  return cloudQuotaExhausted;
+}
+
+export function isQuotaError(error: unknown): boolean {
+  if (!error) return false;
+  const code = (error as { code?: string })?.code || '';
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    code === 'resource-exhausted' ||
+    msg.includes('resource-exhausted') ||
+    msg.includes('Quota exceeded')
+  );
+}
+
+export function markCloudQuotaExhausted(): void {
+  if (cloudQuotaExhausted) return;
+  cloudQuotaExhausted = true;
+  // Immediately pause Firestore network transport so the SDK stops background retry backoff loops
+  disableNetwork(db).catch(() => {});
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('ws-firestore-quota-exceeded'));
+  }
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): void {
+  if (isQuotaError(error)) {
+    markCloudQuotaExhausted();
+    return;
+  }
+
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -95,12 +127,18 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 // Validate connection on boot as mandated by skill
 export async function testConnection() {
+  if (cloudQuotaExhausted) return;
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
+    if (isQuotaError(error)) {
+      markCloudQuotaExhausted();
+      return;
+    }
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.warn("Please check your Firebase configuration or network connection.");
     }
   }
 }
 testConnection();
+

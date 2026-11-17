@@ -242,8 +242,8 @@ export const FONT_SIZES = [
 
 export const GEMINI_MODELS = [
   { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Istantaneo & Consigliato)' },
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Veloce)' },
-  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (Ragionamento avanzato)' }
+  { id: 'gemini-3.8-pro', name: 'Gemini 3.8 Pro (Ragionamento Avanzato)' },
+  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash (Veloce & Leggero)' }
 ];
 
 export const WIDGET_CATALOG: Array<{

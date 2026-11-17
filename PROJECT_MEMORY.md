@@ -6,7 +6,7 @@
 
 ## 1. Informazioni Generali & Versione
 - **Nome Applicazione**: `Workspace ITS`
-- **Versione Attuale**: `v3.5.0` (`APP_VERSION` in `src/utils/editorTools.ts`, mostrata nel badge fisso in basso a sinistra `.app-version-badge`).
+- **Versione Attuale**: `v3.5.2` (`APP_VERSION` in `src/utils/editorTools.ts`, mostrata nel badge fisso in basso a sinistra `.app-version-badge`).
 - **REGOLA OBBLIGATORIA DI VERSIONING**: **Ad ogni singola modifica al codice, incrementare sempre `APP_VERSION` in `src/utils/editorTools.ts`** (e aggiornare `PROJECT_MEMORY.md`), così che l'utente possa verificare immediatamente dal badge in basso a sinistra di avere l'ultima versione su tutti i dispositivi.
 - **PWA & Routing**:
   - Configurata con `vite.config.ts` (`base: './'`, `manifest: false` per evitare doppi manifest), `public/manifest.json` (`start_url: './'`, `scope: './'`), `public/sw.js` e cattura anticipata di `beforeinstallprompt` in `index.html` (`window.__deferredPwaPrompt`) per funzionare sia su AI Studio sia su GitHub Pages (`https://iqfeb888.github.io/...`) senza errori 404.
@@ -14,8 +14,10 @@
 
 ---
 
-## 2. Autenticazione, Approvazione Utenti & Regole Super Admin
+## 2. Autenticazione, Approvazione Utenti, Regole Super Admin & Protezione Quota Firestore
 - **Database Firestore Principale**: `ai-studio-workspaceits-3bed4683-d225-4e08-9dfa-deedfa0b0a7d` sul progetto `workspace-its-10786` (`primaryFirestoreConfig` in `src/firebase.ts`).
+- **Circuit Breaker Quota Firestore (`isCloudQuotaExhausted` / `markCloudQuotaExhausted` in `src/firebase.ts`)**:
+  - Se il piano gratuito giornaliero di Firestore supera la quota (`resource-exhausted` / `Quota exceeded.`), l'app disattiva immediatamente la rete Firestore (`disableNetwork(db)`) per bloccare i tentativi ripetuti di backoff, scollega i listener `onSnapshot` e passa in automatico alla **Modalità Locale (`localStorage`)** senza lanciare eccezioni bloccanti né disconnettere l'utente.
 - **Super Admin (Unico Amministratore)**:
   - Email: `beccalli.fabio4@gmail.com` (`SUPER_ADMIN_EMAILS` in `src/services/workspaceService.ts` e `isAdmin()` in `firestore.rules`).
   - Qualsiasi altro account (inclusi altri account con lo stesso nome) **NON** è amministratore e richiede l'approvazione manuale del Super Admin.
@@ -52,8 +54,9 @@ L'editor `#notes-area` in `src/App.tsx` (supportato da `src/utils/editorTools.ts
   - **📊 Settimana (`'week'`)**: bacheca settimanale a 7 colonne (`Lun`–`Dom`) con card degli impegni e pulsante `+` su ogni giorno.
   - **🗓️ Mese (`'month'`)** e **📋 Agenda (`'agenda'`)**.
 - **Propagazione Firestore & Listener Cloud (`users/{uid}/calendar_events`)**:
-  - `saveCalendarEventToCloud` sanitizza tutti i campi (evitando `googleEventId: undefined` che bloccava `setDoc` in Firestore) e il listener `onCalendarEvents` unisce gli eventi locali e cloud senza mai sovrascrivere gli eventi appena creati.
+  - `saveCalendarEventToCloud` sanitizza tutti i campi e il listener `onCalendarEvents` preserva `updatedAt` e traccia gli ID già sincronizzati (`syncedCalendarIdsRef`) evitando qualsiasi loop di riscrittura verso Firestore.
 - **Comandi Vocali/Testuali Calendario nella Chat AI (`parseCalendarChatCommand` & `buildCalendarScheduleContextForChat`)**:
   - Scrivendo in chat frasi come *"aggiungi un promemoria per domani alle 15:30 per studiare Database"* l'evento viene creato automaticamente nel Calendario (e su Google Calendar personale se collegato).
   - Scrivendo domande come *"che materie ho domani?"* o *"che impegni ho questa settimana?"*, la Chat AI ha visibilità completa sul calendario (e risponde anche senza API key tramite `answerCalendarQueryLocally`).
+
 

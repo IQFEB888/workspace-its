@@ -523,7 +523,13 @@ export default function App() {
     setIsImmersion(false);
     setIsSidebarCollapsed(localPref.isSidebarCollapsed);
     setIsChatCollapsed(localPref.isChatCollapsed);
-    setSelectedModel(localPref.selectedModel);
+    const validUiModels = ['gemini-3.8-flash', 'gemini-3.8-pro', 'gemini-3.6-flash'];
+    const initialModel = validUiModels.includes(localPref.selectedModel)
+      ? localPref.selectedModel
+      : localPref.selectedModel?.includes('pro')
+      ? 'gemini-3.8-pro'
+      : 'gemini-3.8-flash';
+    setSelectedModel(initialModel);
     if (localPref.fontFamily) setFontFamily(localPref.fontFamily);
     if (localPref.fontSize) {
       setFontSize(localPref.fontSize);
@@ -657,6 +663,26 @@ export default function App() {
     root.style.setProperty('--chat-split-pct', `${chatSplitRatio}%`);
   }, [accentColor, panelTheme, panelOpacity, leftColumnWidth, rightColumnWidth, widgetColumnWidth, chatSplitRatio]);
 
+  const syncedCalendarIdsRef = useRef<Set<string>>(new Set());
+
+  // Listen for Firestore Quota Exhausted circuit breaker to switch cleanly to Local Mode without crashing
+  useEffect(() => {
+    const onQuotaExceeded = () => {
+      if (activeListenersCleanupRef.current) {
+        activeListenersCleanupRef.current();
+        activeListenersCleanupRef.current = null;
+      }
+      setCloudSyncActive(false);
+      setIsApproved(true);
+      showToast(
+        '☁️ Quota giornaliera gratuita di Firestore raggiunta: i tuoi appunti e il calendario continuano a salvarsi in automatico in locale sul dispositivo (la quota cloud si azzera domani).',
+        'info'
+      );
+    };
+    window.addEventListener('ws-firestore-quota-exceeded', onQuotaExceeded);
+    return () => window.removeEventListener('ws-firestore-quota-exceeded', onQuotaExceeded);
+  }, [showToast]);
+
   // Firebase Auth State Listener & Cloud Sync Setup
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async user => {
@@ -723,14 +749,8 @@ export default function App() {
           if (approved) handleUnlock();
         });
 
-        const autoCheckInterval = setInterval(async () => {
-          const approved = await WorkspaceService.checkUserApproval(targetUser.uid, targetUser.email, targetUser.displayName);
-          if (approved) handleUnlock();
-        }, 2500);
-
         activeListenersCleanupRef.current = () => {
           unsubApproval();
-          clearInterval(autoCheckInterval);
         };
       };
 
@@ -757,17 +777,23 @@ export default function App() {
           });
         }
 
-        // Auto-sync local notes to Cloud Firestore in background without annoying popups
-        const hasCloudData = await WorkspaceService.checkHasCloudData(targetUser.uid);
-        const localPages = WorkspaceService.getLocalPages();
-        const hasLocalData = Object.keys(localPages).some(sub => (localPages[sub] || []).length > 0);
+        // Auto-sync local notes to Cloud Firestore once per user if not yet migrated
+        const migratedKey = `ws_cloud_migrated_${targetUser.uid}`;
+        if (!localStorage.getItem(migratedKey)) {
+          const hasCloudData = await WorkspaceService.checkHasCloudData(targetUser.uid);
+          const localPages = WorkspaceService.getLocalPages();
+          const hasLocalData = Object.keys(localPages).some(sub => (localPages[sub] || []).length > 0);
 
-        if (!hasCloudData && hasLocalData) {
-          WorkspaceService.migrateLocalDataToCloud(targetUser.uid).then(result => {
-            if (result.pagesCount > 0) {
-              console.log(`Appunti auto-sincronizzati su Cloud Firestore (${result.pagesCount} pagine).`);
-            }
-          }).catch(() => {});
+          if (!hasCloudData && hasLocalData) {
+            WorkspaceService.migrateLocalDataToCloud(targetUser.uid).then(result => {
+              localStorage.setItem(migratedKey, 'true');
+              if (result.pagesCount > 0) {
+                console.log(`Appunti auto-sincronizzati su Cloud Firestore (${result.pagesCount} pagine).`);
+              }
+            }).catch(() => {});
+          } else if (hasCloudData) {
+            localStorage.setItem(migratedKey, 'true');
+          }
         }
 
         // Subscribe to Realtime Firestore updates
@@ -776,7 +802,15 @@ export default function App() {
             if (pref.bgIndex !== undefined) setBgIndex(pref.bgIndex);
             if (pref.isSidebarCollapsed !== undefined) setIsSidebarCollapsed(pref.isSidebarCollapsed);
             if (pref.isChatCollapsed !== undefined) setIsChatCollapsed(pref.isChatCollapsed);
-            if (pref.selectedModel !== undefined) setSelectedModel(pref.selectedModel);
+            if (pref.selectedModel !== undefined) {
+              const allowed = ['gemini-3.8-flash', 'gemini-3.8-pro', 'gemini-3.6-flash'];
+              const nextModel = allowed.includes(pref.selectedModel)
+                ? pref.selectedModel
+                : pref.selectedModel?.includes('pro')
+                ? 'gemini-3.8-pro'
+                : 'gemini-3.8-flash';
+              setSelectedModel(nextModel);
+            }
             if (pref.fontFamily !== undefined) setFontFamily(pref.fontFamily);
             if (pref.fontSize !== undefined) {
               setFontSize(pref.fontSize);
@@ -834,6 +868,7 @@ export default function App() {
               cloudEvs.forEach(ev => {
                 if (ev && ev.id && !deletedCalendarIdsRef.current.has(ev.id)) {
                   cloudById.set(ev.id, ev);
+                  syncedCalendarIdsRef.current.add(ev.id);
                 }
               });
 
@@ -843,10 +878,12 @@ export default function App() {
                 const existingCloud = cloudById.get(localEv.id);
                 if (!existingCloud) {
                   cloudById.set(localEv.id, localEv);
-                  unsyncedLocals.push(localEv);
+                  if (!syncedCalendarIdsRef.current.has(localEv.id)) {
+                    syncedCalendarIdsRef.current.add(localEv.id);
+                    unsyncedLocals.push(localEv);
+                  }
                 } else if ((localEv.updatedAt || 0) > (existingCloud.updatedAt || 0)) {
                   cloudById.set(localEv.id, localEv);
-                  unsyncedLocals.push(localEv);
                 }
               });
 

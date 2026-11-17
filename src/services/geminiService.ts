@@ -1,5 +1,11 @@
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
+export const CHAT_MODEL_OPTIONS = [
+  'gemini-3.8-flash',
+  'gemini-3.8-pro',
+  'gemini-3.6-flash',
+] as const;
+
 export const MODEL_FALLBACKS = [
   'gemini-2.5-flash',
   'gemini-2.5-pro',
@@ -7,27 +13,28 @@ export const MODEL_FALLBACKS = [
 ];
 
 /**
- * Maps deprecated or internal alias model IDs (e.g. gemini-1.5-flash, gemini-2.0-flash, gemini-3.8-flash)
- * to valid public v1beta Gemini models so requests never fail with 404 Model Not Found / Deprecated.
+ * Resolves the UI model choice ('gemini-3.8-flash', 'gemini-3.8-pro', 'gemini-3.6-flash')
+ * or any legacy stored value into the active Gemini API endpoint model while keeping
+ * the 3 chat models distinct and preventing deprecated 1.5/2.0 errors on Bash execution.
  */
 export function normalizeGeminiModelName(rawModel?: string | null): string {
   const m = (rawModel || '').trim().toLowerCase();
   if (!m) return 'gemini-2.5-flash';
 
-  // Never allow deprecated 1.0 / 1.5 / 2.0 models
+  if (m === 'gemini-3.8-pro') {
+    return 'gemini-2.5-pro';
+  }
+  if (m === 'gemini-3.6-flash') {
+    return 'gemini-2.5-flash-lite';
+  }
   if (
+    m === 'gemini-3.8-flash' ||
     m.includes('1.5') ||
     m.includes('2.0') ||
     m === 'gemini-pro' ||
-    m === 'gemini-flash' ||
-    m === 'gemini-3.8-flash' ||
-    m === 'gemini-3.6-flash'
+    m === 'gemini-flash'
   ) {
     return 'gemini-2.5-flash';
-  }
-
-  if (m === 'gemini-3.8-pro') {
-    return 'gemini-2.5-pro';
   }
 
   return rawModel!.trim();

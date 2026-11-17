@@ -17,7 +17,7 @@ import {
   orderBy,
   Unsubscribe
 } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from '../firebase';
+import { db, auth, handleFirestoreError, OperationType, isCloudQuotaExhausted, isQuotaError, markCloudQuotaExhausted } from '../firebase';
 import {
   PageItem,
   MaterialItem,
@@ -52,6 +52,8 @@ export const DEFAULT_PAGES: Record<string, PageItem[]> = {
 };
 
 export class WorkspaceService {
+  private static upgradedPageIds = new Set<string>();
+
   private static localGet<T>(key: string, fallback: T): T {
     try {
       const item = localStorage.getItem(key);
@@ -243,6 +245,9 @@ export class WorkspaceService {
       onCalendarEvents?: (events: CalendarEventItem[]) => void;
     }
   ): () => void {
+    if (isCloudQuotaExhausted()) {
+      return () => {};
+    }
     const unsubs: Unsubscribe[] = [];
 
     // 1. User Root Document (Profile & Preferences)
@@ -327,14 +332,22 @@ export class WorkspaceService {
             if (!pagesBySubject[sub]) pagesBySubject[sub] = [];
             const rawContent = d.content || '';
             const { cleanedHtml, changed } = sanitizeAndUpgradeNoteHtml(rawContent);
+            const pageId = d.id || docSnap.id;
             const pageItem: PageItem = {
-              id: d.id || docSnap.id,
+              id: pageId,
               name: d.name || 'Pagina',
               content: cleanedHtml,
               order: d.order || 0
             };
             pagesBySubject[sub].push(pageItem);
-            if (changed && auth.currentUser && auth.currentUser.uid === userId) {
+            if (
+              changed &&
+              !this.upgradedPageIds.has(pageId) &&
+              auth.currentUser &&
+              auth.currentUser.uid === userId &&
+              !isCloudQuotaExhausted()
+            ) {
+              this.upgradedPageIds.add(pageId);
               this.savePageToCloud(userId, sub, pageItem).catch(() => {});
             }
           });
@@ -445,7 +458,9 @@ export class WorkspaceService {
               description: d.description || '',
               completed: !!d.completed,
               googleEventId: d.googleEventId || '',
-              color: d.color || '#38bdf8'
+              color: d.color || '#38bdf8',
+              createdAt: d.createdAt || '',
+              updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : Date.now()
             });
           });
           items.sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
@@ -465,7 +480,7 @@ export class WorkspaceService {
 
   // Cloud Write Methods
   static async saveUserPreferencesToCloud(userId: string, pref: Partial<UserPreferences>): Promise<void> {
-    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    if (isCloudQuotaExhausted() || !auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const userDocRef = doc(db, 'users', userId);
       const payload: Record<string, any> = {
@@ -510,7 +525,7 @@ export class WorkspaceService {
   }
 
   static async saveSubjectToCloud(userId: string, subject: SubjectItem): Promise<void> {
-    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    if (isCloudQuotaExhausted() || !auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const subjectDocRef = doc(db, 'users', userId, 'subjects', subject.id);
       await setDoc(subjectDocRef, {
@@ -526,7 +541,7 @@ export class WorkspaceService {
   }
 
   static async deleteSubjectFromCloud(userId: string, subjectId: string): Promise<void> {
-    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    if (isCloudQuotaExhausted() || !auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const subjectDocRef = doc(db, 'users', userId, 'subjects', subjectId);
       await deleteDoc(subjectDocRef);
@@ -536,7 +551,7 @@ export class WorkspaceService {
   }
 
   static async savePageToCloud(userId: string, subjectId: string, page: PageItem): Promise<void> {
-    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    if (isCloudQuotaExhausted() || !auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const pageDocRef = doc(db, 'users', userId, 'pages', page.id);
       await setDoc(pageDocRef, {
@@ -554,7 +569,7 @@ export class WorkspaceService {
   }
 
   static async deletePageFromCloud(userId: string, pageId: string): Promise<void> {
-    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    if (isCloudQuotaExhausted() || !auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const pageDocRef = doc(db, 'users', userId, 'pages', pageId);
       await deleteDoc(pageDocRef);
@@ -564,7 +579,7 @@ export class WorkspaceService {
   }
 
   static async saveMaterialToCloud(userId: string, subjectId: string, material: MaterialItem): Promise<void> {
-    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    if (isCloudQuotaExhausted() || !auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const matIdStr = String(material.id);
       const matDocRef = doc(db, 'users', userId, 'materials', matIdStr);
@@ -590,7 +605,7 @@ export class WorkspaceService {
   }
 
   static async deleteMaterialFromCloud(userId: string, materialId: string | number): Promise<void> {
-    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    if (isCloudQuotaExhausted() || !auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const matIdStr = String(materialId);
       const matDocRef = doc(db, 'users', userId, 'materials', matIdStr);
@@ -601,7 +616,7 @@ export class WorkspaceService {
   }
 
   static async saveChatToCloud(userId: string, subjectId: string, messages: ChatMessage[]): Promise<void> {
-    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    if (isCloudQuotaExhausted() || !auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const chatDocRef = doc(db, 'users', userId, 'chats', subjectId);
       // Clean up messages to ensure serializable data and bounds
@@ -625,7 +640,7 @@ export class WorkspaceService {
   }
 
   static async saveApiKeysToCloud(userId: string, keys: string[], selectedIndex: number): Promise<void> {
-    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    if (isCloudQuotaExhausted() || !auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const keysDocRef = doc(db, 'users', userId, 'settings', 'keys');
       await setDoc(keysDocRef, {
@@ -640,7 +655,7 @@ export class WorkspaceService {
   }
 
   static async saveCalendarEventToCloud(userId: string, event: CalendarEventItem): Promise<void> {
-    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    if (isCloudQuotaExhausted() || !auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const ref = doc(db, 'users', userId, 'calendar_events', event.id);
       const cleanPayload = {
@@ -666,7 +681,7 @@ export class WorkspaceService {
   }
 
   static async deleteCalendarEventFromCloud(userId: string, eventId: string): Promise<void> {
-    if (!auth.currentUser || auth.currentUser.uid !== userId) return;
+    if (isCloudQuotaExhausted() || !auth.currentUser || auth.currentUser.uid !== userId) return;
     try {
       const ref = doc(db, 'users', userId, 'calendar_events', eventId);
       await deleteDoc(ref);
@@ -677,6 +692,9 @@ export class WorkspaceService {
 
   // Migrate all existing local data to Firestore for a user
   static async migrateLocalDataToCloud(userId: string): Promise<{ subjectsCount: number; pagesCount: number }> {
+    if (isCloudQuotaExhausted()) {
+      return { subjectsCount: 0, pagesCount: 0 };
+    }
     const localSubs = this.getLocalSubjects();
     const localPages = this.getLocalPages();
     const localMaterials = this.getLocalMaterials();
@@ -736,11 +754,13 @@ export class WorkspaceService {
 
   // Check if cloud has data already
   static async checkHasCloudData(userId: string): Promise<boolean> {
+    if (isCloudQuotaExhausted()) return true;
     try {
       const pagesSnap = await getDocs(collection(db, 'users', userId, 'pages'));
       return !pagesSnap.empty;
     } catch (e) {
-      return false;
+      if (isQuotaError(e)) markCloudQuotaExhausted();
+      return true;
     }
   }
 
@@ -756,13 +776,22 @@ export class WorkspaceService {
 
   static async checkUserApproval(userId: string, email?: string | null, displayName?: string | null): Promise<boolean> {
     if (this.isSuperAdmin(email, displayName)) return true;
+    if (isCloudQuotaExhausted()) {
+      return localStorage.getItem(`ws_approved_${userId}`) !== 'false';
+    }
     try {
       // 1. Direct check by userId
       const snap = await getDoc(doc(db, 'approved_users', userId));
       if (snap.exists()) {
         const st = snap.data().status;
-        if (st === 'active') return true;
-        if (st === 'revoked') return false;
+        if (st === 'active') {
+          localStorage.setItem(`ws_approved_${userId}`, 'true');
+          return true;
+        }
+        if (st === 'revoked') {
+          localStorage.setItem(`ws_approved_${userId}`, 'false');
+          return false;
+        }
       }
 
       // 2. Check by exact lowercase email and legacy normalized email ID
@@ -771,20 +800,36 @@ export class WorkspaceService {
         const snapExactEmail = await getDoc(doc(db, 'approved_users', emailClean));
         if (snapExactEmail.exists()) {
           const st = snapExactEmail.data().status;
-          if (st === 'active') return true;
-          if (st === 'revoked') return false;
+          if (st === 'active') {
+            localStorage.setItem(`ws_approved_${userId}`, 'true');
+            return true;
+          }
+          if (st === 'revoked') {
+            localStorage.setItem(`ws_approved_${userId}`, 'false');
+            return false;
+          }
         }
         const emailUid = 'user_' + emailClean.replace(/[^a-zA-Z0-9]/g, '_');
         const snapEmail = await getDoc(doc(db, 'approved_users', emailUid));
-        if (snapEmail.exists() && snapEmail.data().status === 'active') return true;
+        if (snapEmail.exists() && snapEmail.data().status === 'active') {
+          localStorage.setItem(`ws_approved_${userId}`, 'true');
+          return true;
+        }
       }
       return false;
     } catch (e) {
+      if (isQuotaError(e)) {
+        markCloudQuotaExhausted();
+        return localStorage.getItem(`ws_approved_${userId}`) !== 'false';
+      }
       return false;
     }
   }
 
   static subscribeToUserApprovalStatus(userId: string, email: string | null | undefined, callback: (isApproved: boolean) => void): Unsubscribe {
+    if (isCloudQuotaExhausted()) {
+      return () => {};
+    }
     const unsubs: Unsubscribe[] = [];
     let uidActive = false;
     let exactEmailActive = false;
@@ -793,9 +838,12 @@ export class WorkspaceService {
 
     const evaluate = () => {
       if (isRevoked) {
+        localStorage.setItem(`ws_approved_${userId}`, 'false');
         callback(false);
       } else {
-        callback(uidActive || exactEmailActive || legacyEmailActive);
+        const approved = uidActive || exactEmailActive || legacyEmailActive;
+        if (approved) localStorage.setItem(`ws_approved_${userId}`, 'true');
+        callback(approved);
       }
     };
 
@@ -811,7 +859,9 @@ export class WorkspaceService {
           isRevoked = false;
         }
         evaluate();
-      }, () => {})
+      }, err => {
+        if (isQuotaError(err)) markCloudQuotaExhausted();
+      })
     );
 
     if (email) {
@@ -827,7 +877,9 @@ export class WorkspaceService {
               exactEmailActive = false;
             }
             evaluate();
-          }, () => {})
+          }, err => {
+            if (isQuotaError(err)) markCloudQuotaExhausted();
+          })
         );
       }
       const emailUid = 'user_' + emailClean.replace(/[^a-zA-Z0-9]/g, '_');
@@ -836,7 +888,9 @@ export class WorkspaceService {
           onSnapshot(doc(db, 'approved_users', emailUid), snap => {
             legacyEmailActive = snap.exists() && snap.data().status === 'active';
             evaluate();
-          }, () => {})
+          }, err => {
+            if (isQuotaError(err)) markCloudQuotaExhausted();
+          })
         );
       }
     }
@@ -847,7 +901,7 @@ export class WorkspaceService {
   }
 
   static async cleanupSuperAdminRecords(user: { uid: string; email?: string | null }): Promise<void> {
-    if (!this.isSuperAdmin(user.email)) return;
+    if (isCloudQuotaExhausted() || !this.isSuperAdmin(user.email)) return;
     try {
       await deleteDoc(doc(db, 'approved_users', user.uid)).catch(() => {});
       await deleteDoc(doc(db, 'access_requests', user.uid)).catch(() => {});
@@ -863,7 +917,7 @@ export class WorkspaceService {
   }
 
   static async submitAccessRequest(user: { uid: string; email?: string | null; displayName?: string | null; photoURL?: string | null }): Promise<void> {
-    if (this.isSuperAdmin(user.email)) return;
+    if (isCloudQuotaExhausted() || this.isSuperAdmin(user.email)) return;
     try {
       const reqRef = doc(db, 'access_requests', user.uid);
       await setDoc(reqRef, {
@@ -875,11 +929,12 @@ export class WorkspaceService {
         status: 'pending'
       });
     } catch (e) {
-      // Silent fallback
+      if (isQuotaError(e)) markCloudQuotaExhausted();
     }
   }
 
   static subscribeToAccessRequests(callback: (requests: any[]) => void): Unsubscribe {
+    if (isCloudQuotaExhausted()) return () => {};
     const colRef = collection(db, 'access_requests');
     return onSnapshot(colRef, (snap) => {
       const items: any[] = [];
@@ -890,10 +945,13 @@ export class WorkspaceService {
         items.push({ ...data, id: d.id, userId: data.userId || d.id, email });
       });
       callback(items);
-    }, () => {});
+    }, (err) => {
+      if (isQuotaError(err)) markCloudQuotaExhausted();
+    });
   }
 
   static subscribeToApprovedUsers(callback: (users: any[]) => void): Unsubscribe {
+    if (isCloudQuotaExhausted()) return () => {};
     const colRef = collection(db, 'approved_users');
     return onSnapshot(colRef, (snap) => {
       const rawItems: any[] = [];
@@ -919,10 +977,13 @@ export class WorkspaceService {
         }
       }
       callback(Array.from(byKey.values()));
-    }, () => {});
+    }, (err) => {
+      if (isQuotaError(err)) markCloudQuotaExhausted();
+    });
   }
 
   static async approveUserRequest(request: any, adminEmail: string): Promise<void> {
+    if (isCloudQuotaExhausted()) return;
     const targetUid = request.userId || request.id;
     const cleanEmail = (request.email || '').toLowerCase().trim();
     const payload = {
@@ -951,6 +1012,7 @@ export class WorkspaceService {
   }
 
   static async manualApproveEmail(targetEmail: string, adminEmail: string): Promise<void> {
+    if (isCloudQuotaExhausted()) return;
     const cleanEmail = targetEmail.toLowerCase().trim();
     const reqsCol = collection(db, 'access_requests');
     const snap = await getDocs(reqsCol);
@@ -989,6 +1051,7 @@ export class WorkspaceService {
   }
 
   static async revokeApprovedUser(target: string | { id?: string; userId?: string; email?: string; displayName?: string }): Promise<void> {
+    if (isCloudQuotaExhausted()) return;
     const targetId = typeof target === 'string' ? target : (target.id || target.userId || '');
     const targetUid = typeof target === 'string' ? target : (target.userId || target.id || '');
     let targetEmail = typeof target === 'object' && target.email ? target.email.toLowerCase().trim() : '';
@@ -1037,6 +1100,7 @@ export class WorkspaceService {
   }
 
   static async removeApprovedUser(target: string | { id?: string; userId?: string; email?: string }): Promise<void> {
+    if (isCloudQuotaExhausted()) return;
     const targetId = typeof target === 'string' ? target : (target.id || target.userId || '');
     const targetUid = typeof target === 'string' ? target : (target.userId || target.id || '');
     let targetEmail = typeof target === 'object' && target.email ? target.email.toLowerCase().trim() : '';
@@ -1156,7 +1220,7 @@ export class WorkspaceService {
     uid: string,
     callback: (rooms: SharedRoom[]) => void
   ): Unsubscribe {
-    if (!auth.currentUser) return () => {};
+    if (isCloudQuotaExhausted() || !auth.currentUser) return () => {};
     const roomsCol = collection(db, 'shared_rooms');
     return onSnapshot(roomsCol, (snap) => {
       if (!auth.currentUser) return;
@@ -1169,8 +1233,7 @@ export class WorkspaceService {
       });
       callback(userRooms);
     }, err => {
-      if (!auth.currentUser) return;
-      console.warn('Rooms listener:', err);
+      if (isQuotaError(err)) markCloudQuotaExhausted();
     });
   }
 
@@ -1178,6 +1241,7 @@ export class WorkspaceService {
     roomId: string,
     callback: (pages: PageItem[]) => void
   ): Unsubscribe {
+    if (isCloudQuotaExhausted()) return () => {};
     const colRef = collection(db, 'shared_rooms', roomId, 'pages');
     return onSnapshot(colRef, (snap) => {
       if (!auth.currentUser) return;
@@ -1194,12 +1258,12 @@ export class WorkspaceService {
       pages.sort((a, b) => (a.order || 0) - (b.order || 0));
       callback(pages);
     }, err => {
-      if (!auth.currentUser) return;
-      console.warn('Room pages listener:', err);
+      if (isQuotaError(err)) markCloudQuotaExhausted();
     });
   }
 
   static async saveRoomPage(roomId: string, page: PageItem): Promise<void> {
+    if (isCloudQuotaExhausted()) return;
     const pageRef = doc(db, 'shared_rooms', roomId, 'pages', page.id);
     await setDoc(pageRef, {
       id: page.id,
@@ -1211,6 +1275,7 @@ export class WorkspaceService {
   }
 
   static async deleteRoomPage(roomId: string, pageId: string): Promise<void> {
+    if (isCloudQuotaExhausted()) return;
     const pageRef = doc(db, 'shared_rooms', roomId, 'pages', pageId);
     await deleteDoc(pageRef);
   }
@@ -1219,6 +1284,7 @@ export class WorkspaceService {
     roomId: string,
     callback: (messages: SharedChatMessage[]) => void
   ): Unsubscribe {
+    if (isCloudQuotaExhausted()) return () => {};
     const colRef = collection(db, 'shared_rooms', roomId, 'messages');
     const q = query(colRef, orderBy('timestamp', 'asc'));
     return onSnapshot(q, (snap) => {
@@ -1239,12 +1305,12 @@ export class WorkspaceService {
       });
       callback(msgs);
     }, err => {
-      if (!auth.currentUser) return;
-      console.warn('Room messages listener:', err);
+      if (isQuotaError(err)) markCloudQuotaExhausted();
     });
   }
 
   static async sendRoomMessage(roomId: string, message: SharedChatMessage): Promise<void> {
+    if (isCloudQuotaExhausted()) return;
     const msgRef = doc(db, 'shared_rooms', roomId, 'messages', message.id);
     await setDoc(msgRef, {
       ...message,
@@ -1256,6 +1322,7 @@ export class WorkspaceService {
     roomId: string,
     callback: (materials: MaterialItem[]) => void
   ): Unsubscribe {
+    if (isCloudQuotaExhausted()) return () => {};
     const colRef = collection(db, 'shared_rooms', roomId, 'materials');
     return onSnapshot(colRef, (snap) => {
       if (!auth.currentUser) return;
@@ -1263,8 +1330,7 @@ export class WorkspaceService {
       snap.forEach(d => mats.push(d.data() as MaterialItem));
       callback(mats);
     }, err => {
-      if (!auth.currentUser) return;
-      console.warn('Room materials listener:', err);
+      if (isQuotaError(err)) markCloudQuotaExhausted();
     });
   }
 
