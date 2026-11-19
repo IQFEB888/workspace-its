@@ -38,13 +38,16 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
 }) => {
   const [query, setQuery] = useState<string>('');
   const [activeIndex, setActiveIndex] = useState<number>(0);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
     if (isOpen) {
       setQuery('');
       setActiveIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 20);
+      setHoveredIndex(null);
+      requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [isOpen]);
 
@@ -131,7 +134,41 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
 
   useEffect(() => {
     setActiveIndex(0);
+    setHoveredIndex(null);
   }, [query]);
+
+  // Global keyboard handler while modal is open so arrows work immediately
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setActiveIndex(i => (filteredItems.length ? (i + 1) % filteredItems.length : 0));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setActiveIndex(i =>
+          filteredItems.length ? (i - 1 + filteredItems.length) % filteredItems.length : 0
+        );
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const chosen = filteredItems[activeIndex];
+        if (chosen) {
+          onClose();
+          chosen.onExecute();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, filteredItems, activeIndex, onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    itemRefs.current[activeIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, isOpen]);
 
   if (!isOpen) return null;
 
@@ -158,56 +195,51 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
             placeholder="Cerca schede, materie, PDF, azioni o scrivi 'promemoria domani alle 16...' "
             value={query}
             onChange={e => setQuery(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                onClose();
-              } else if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                setActiveIndex(i => (filteredItems.length ? (i + 1) % filteredItems.length : 0));
-              } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                setActiveIndex(i =>
-                  filteredItems.length ? (i - 1 + filteredItems.length) % filteredItems.length : 0
-                );
-              } else if (e.key === 'Enter') {
-                e.preventDefault();
-                runItem(filteredItems[activeIndex]);
-              }
-            }}
           />
           <kbd className="cmd-palette-kbd">ESC</kbd>
         </div>
 
-        <div className="cmd-palette-results">
+        <div className="cmd-palette-results" onMouseLeave={() => setHoveredIndex(null)}>
           {filteredItems.length === 0 ? (
             <div className="cmd-palette-empty">
               Nessun risultato per &quot;{query}&quot;. Prova a cercare una scheda, un PDF o scrivi un promemoria.
             </div>
           ) : (
-            filteredItems.map((item, idx) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`cmd-palette-item ${idx === activeIndex ? 'is-active' : ''}`}
-                onMouseEnter={() => setActiveIndex(idx)}
-                onClick={() => runItem(item)}
-              >
-                <span className="cmd-palette-item-icon">{item.icon}</span>
-                <div className="cmd-palette-item-text">
-                  <span className="cmd-palette-item-title">{item.title}</span>
-                  <span className="cmd-palette-item-sub">{item.subtitle}</span>
-                </div>
-                <span className="cmd-palette-item-group">{item.shortcut || item.group}</span>
-              </button>
-            ))
+            filteredItems.map((item, idx) => {
+              const isSelected = idx === activeIndex;
+              const isHovered = idx === hoveredIndex && !isSelected;
+              return (
+                <button
+                  key={item.id}
+                  ref={el => {
+                    itemRefs.current[idx] = el;
+                  }}
+                  type="button"
+                  className={`cmd-palette-item ${isSelected ? 'is-active' : ''} ${
+                    isHovered ? 'is-hovered' : ''
+                  }`}
+                  aria-selected={isSelected}
+                  onMouseEnter={() => setHoveredIndex(idx)}
+                  onClick={() => runItem(item)}
+                >
+                  <span className="cmd-palette-item-icon">{item.icon}</span>
+                  <div className="cmd-palette-item-text">
+                    <span className="cmd-palette-item-title">{item.title}</span>
+                    <span className="cmd-palette-item-sub">{item.subtitle}</span>
+                  </div>
+                  {isSelected && <kbd className="cmd-palette-enter-badge">↵ Invio</kbd>}
+                  <span className="cmd-palette-item-group">{item.shortcut || item.group}</span>
+                </button>
+              );
+            })
           )}
         </div>
 
         <div className="cmd-palette-footer">
-          <span>↑↓ Naviga</span>
+          <span>↑↓ Selezione (Indaco)</span>
+          <span>🖱️ Hover Mouse (Turchese)</span>
           <span>↵ Esegui</span>
-          <span>Ctrl+K Apri/Chiudi ovunque</span>
+          <span>Ctrl+K Chiudi</span>
         </div>
       </div>
     </div>

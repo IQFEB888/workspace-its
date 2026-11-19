@@ -126,3 +126,26 @@ test('convertNoteHtmlToMarkdown and buildDispensaHtmlDocument produce TOC, cover
   assert.ok(docHtml.includes('Introduzione SQL'));
   assert.ok(docHtml.includes('Esercizi JOIN'));
 });
+
+import { normalizeGeminiModelName, STUDY_GENERATION_MODEL } from '../services/geminiService';
+
+test('normalizeGeminiModelName preserves exact selected 3.x chat models and migrates legacy 2.5 to 3.6 flash', () => {
+  assert.equal(STUDY_GENERATION_MODEL, 'gemini-3.6-flash');
+  assert.equal(normalizeGeminiModelName('gemini-3.8-flash'), 'gemini-3.8-flash');
+  assert.equal(normalizeGeminiModelName('gemini-3.8-pro'), 'gemini-3.8-pro');
+  assert.equal(normalizeGeminiModelName('gemini-3.6-flash'), 'gemini-3.6-flash');
+  assert.equal(normalizeGeminiModelName('gemini-2.5-flash'), 'gemini-3.6-flash');
+  assert.equal(normalizeGeminiModelName('gemini-1.5-pro'), 'gemini-3.6-flash');
+  assert.equal(normalizeGeminiModelName(''), 'gemini-3.6-flash');
+});
+
+test('generateFlashcardsFromHtml reliably extracts cards from plain multi-line div notes', () => {
+  const plainDivNotes = `
+    <div>Un indice B-Tree riduce i tempi di ricerca sulle colonne filtrate frequentemente</div>
+    <div>Le transazioni ACID garantiscono atomicità coerenza isolamento e durabilità</div>
+    <div>La terza forma normale elimina le dipendenze transitive tra attributi non chiave</div>
+  `;
+  const cards = generateFlashcardsFromHtml(plainDivNotes, 'Database', 'Appunti Rapidi');
+  assert.ok(cards.length >= 2, `Expected at least 2 cards from plain div notes, got ${cards.length}`);
+});
+

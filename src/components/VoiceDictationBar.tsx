@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { formatTranscriptLocally } from '../utils/studyTools';
 import { convertAiMarkdownToNoteHtml } from '../utils/editorTools';
-import { callGeminiWithRotation } from '../services/geminiService';
+import { callGeminiWithRotation, STUDY_GENERATION_MODEL } from '../services/geminiService';
 
 interface VoiceDictationBarProps {
   isOpen: boolean;
@@ -177,7 +177,7 @@ export const VoiceDictationBar: React.FC<VoiceDictationBarProps> = ({
       ];
       const aiText = await callGeminiWithRotation(
         orderedKeys,
-        selectedModel || 'gemini-3.8-flash',
+        STUDY_GENERATION_MODEL,
         [{ role: 'user', parts: [{ text: prompt }] }]
       );
       const structuredHtml = convertAiMarkdownToNoteHtml(aiText || combined);

@@ -6,7 +6,7 @@
 
 ## 1. Informazioni Generali & Versione
 - **Nome Applicazione**: `Workspace ITS`
-- **Versione Attuale**: `v3.7.0` (`APP_VERSION` in `src/utils/editorTools.ts`, mostrata nel badge fisso in basso a sinistra `.app-version-badge`).
+- **Versione Attuale**: `v3.8.0` (`APP_VERSION` in `src/utils/editorTools.ts`, mostrata nel badge fisso in basso a sinistra `.app-version-badge`).
 - **REGOLA OBBLIGATORIA DI VERSIONING**: **Ad ogni singola modifica al codice, incrementare sempre `APP_VERSION` in `src/utils/editorTools.ts`** (e aggiornare `PROJECT_MEMORY.md`), così che l'utente possa verificare immediatamente dal badge in basso a sinistra di avere l'ultima versione su tutti i dispositivi.
 - **PWA & Routing**:
   - Configurata con `vite.config.ts` (`base: './'`, `manifest: false` per evitare doppi manifest), `public/manifest.json` (`start_url: './'`, `scope: './'`), `public/sw.js` e cattura anticipata di `beforeinstallprompt` in `index.html` (`window.__deferredPwaPrompt`) per funzionare sia su AI Studio sia su GitHub Pages (`https://iqfeb888.github.io/...`) senza errori 404.
@@ -26,20 +26,21 @@
 
 ---
 
-## 3. Editor degli Appunti (`#notes-area`), Drag & Drop Schede & Strumenti Studio Avanzati (`v3.7.0`)
+## 3. Editor degli Appunti (`#notes-area`), Drag & Drop FLIP Schede & Strumenti Studio Avanzati (`v3.8.0`)
 L'editor `#notes-area` in `src/App.tsx` (supportato da `src/utils/editorTools.ts`, `src/utils/studyTools.ts` e `src/utils/sqlEngine.ts`) include:
-1. **Riordino Schede Drag-and-Drop (`reorderPagesList`) & Scorrimento Laterale Direzionale (`computeTabSlideDirection`)**:
-   - Ogni scheda nella barra `.vscode-tabs-bar` (sia Personale sia Stanze Condivise) è trascinabile (`draggable`) con grip `⋮⋮`, indicatore luminoso di inserimento sinistro/destro (`drag-over-left` / `drag-over-right`) e salvataggio automatico del nuovo ordine (`order: 0..n-1`) su `localStorage` e Firestore.
-   - Il cambio scheda o materia esegue lo scorrimento laterale direzionale (`note-slide-from-right` / `note-slide-from-left`) stile browser moderni.
+1. **Riordino Schede Drag-and-Drop FLIP Fluido (`reorderPagesList` + `useLayoutEffect`) & Scorrimento Laterale Direzionale (`computeTabSlideDirection`)**:
+   - Ogni scheda nella barra `.vscode-tabs-bar` (sia Personale sia Stanze Condivise) scambia posizione **live durante il trascinamento** con animazione CSS FLIP (`translate3d` 260ms `cubic-bezier(0.22, 1, 0.36, 1)`) stile browser moderni e salva l'ordine finale (`order: 0..n-1`) su `localStorage` e Firestore.
+   - Il cambio scheda o materia esegue lo scorrimento laterale direzionale (`note-slide-from-right` / `note-slide-from-left`).
 2. **Suite Strumenti di Studio (`src/components/`)**:
-   - **🧠 Modalità Ripasso Esame (`StudyReviewModal.tsx`)**: Flashcard 3D con flip CSS `rotateY(180deg)`, ripetizione spaziata (`So bene` / `Da ripassare` con barra percentuale), simulatore **Quiz Verifica ITS** a 4 risposte e potenziamento opzionale con Gemini AI.
+   - **🧠 Studio Flashcard 3D & Quiz (`StudyReviewModal.tsx`)**: accessibile direttamente dal **menu laterale (`.apps-grid`)** e dalla **barra superiore (`.tabs-container`)** oltre a `Ctrl+K`. Layout a 2 colonne con **barra laterale sinistra** contenente: selettore multi-pagina (checkbox per selezionare quali pagine di appunti usare + click diretto su una scheda per generare subito nuove flashcard/quiz) e **Storico Sessioni persistente** (`ws_study_review_history_v1` in `localStorage`) sia per Flashcard che per Quiz per rivedere tutti i set generati in precedenza con relativi progressi. Usa sempre **`gemini-3.6-flash`** (`STUDY_GENERATION_MODEL`) con fallback locale affidabile.
    - **🗺️ Mappa Concettuale Automatica (`MindMapModal.tsx`)**: grafo SVG interattivo con rami Bézier colorati estratti automaticamente da titoli, elenchi, codice e formule, con pan, zoom, compressione rami ed export `.svg`.
-   - **⚡ Command Palette (`CommandPaletteModal.tsx`, `Ctrl+K`)**: ricerca istantanea su schede, materie, PDF/materiali, azioni rapide e creazione diretta di promemoria in calendario scrivendo in italiano naturale.
-   - **🎙️ Dettatura Vocale Lezioni (`VoiceDictationBar.tsx`)**: trascrizione vocale live Web Speech API (`it-IT`) con onde audio animate, inserimento diretto negli appunti o riordino automatico con Gemini AI (`✨ Riordina AI & Inserisci`).
+   - **⚡ Command Palette (`CommandPaletteModal.tsx`, `Ctrl+K`)**: ricerca istantanea su schede, materie, PDF/materiali, azioni rapide e creazione diretta di promemoria in calendario. **Selezione tastiera (`↑`/`↓`) e hover mouse disaccoppiati con colori distinti**: Indaco/Viola con barra laterale sinistra e badge `↵ Invio` per la selezione attiva da tastiera vs Turchese/Teal per il solo passaggio del mouse.
+   - **🎙️ Dettatura Vocale Lezioni (`VoiceDictationBar.tsx`)**: trascrizione vocale live Web Speech API (`it-IT`) con onde audio animate, inserimento diretto negli appunti o riordino automatico con `gemini-3.6-flash`.
    - **🔀 Vista Split-Screen (`SplitScreenPane.tsx`)**: apre a destra dell'editor un'altra scheda di appunti (di qualsiasi materia) oppure una dispensa PDF / immagine dalla libreria Materiali.
    - **📄 Esportazione Dispensa (`ExportDispensaModal.tsx`)**: esporta la singola scheda o l'intera materia con copertina universitaria, indice/sommario automatico e 3 temi in **PDF professionale (stampa)**, **Word (`.doc`)** e **Markdown (`.md`)**.
-3. **Box Codice, Bash Locale, SQL Relazionale & Modelli Chat**:
-   - Interprete Bash locale (`runBashLocally`), SQL relazionale (`sqlEngine.ts`), conversione Chat -> Box Codice/Formule/Citazioni (`convertAiMarkdownToNoteHtml`), modifica in-place (`applyTargetedBoxReplacement`). I modelli visibili nel selettore Chat restano sempre `3.8 Flash`, `3.8 Pro` e `3.6 Flash`.
+3. **Box Codice, Bash Locale, SQL Relazionale & Routing Modelli Gemini (`src/services/geminiService.ts`)**:
+   - Interprete Bash locale (`runBashLocally`), SQL relazionale (`sqlEngine.ts`), conversione Chat -> Box Codice/Formule/Citazioni (`convertAiMarkdownToNoteHtml`), modifica in-place (`applyTargetedBoxReplacement`).
+   - I modelli visibili nel selettore Chat restano sempre `3.8 Flash`, `3.8 Pro` e `3.6 Flash`: la Chat AI utilizza **esattamente il modello selezionato** dall'utente (nessuna riscrittura verso `gemini-2.5-flash`), mentre Flashcard, Quiz e Dettatura Vocale usano `gemini-3.6-flash`.
 4. **Persistenza Scroll, Incolla Intelligente, Foto 8 Maniglie & Barra Collassabile**:
    - Persistenza `scrollTop` per scheda, incolla testo prioritario su screenshot, cornice ridimensionamento foto/disegni a 8 maniglie, collasso barra strumenti appunti.
 

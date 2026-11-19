@@ -6,42 +6,39 @@ export const CHAT_MODEL_OPTIONS = [
   'gemini-3.6-flash',
 ] as const;
 
+export const STUDY_GENERATION_MODEL = 'gemini-3.6-flash';
+
 export const MODEL_FALLBACKS = [
-  'gemini-2.5-flash',
-  'gemini-2.5-pro',
-  'gemini-2.5-flash-lite',
+  'gemini-3.6-flash',
+  'gemini-3.8-flash',
+  'gemini-3.8-pro',
 ];
 
 /**
- * Resolves the UI model choice ('gemini-3.8-flash', 'gemini-3.8-pro', 'gemini-3.6-flash')
- * or any legacy stored value into the active Gemini API endpoint model while keeping
- * the 3 chat models distinct and preventing deprecated 1.5/2.0 errors on Bash execution.
+ * Preserves the exact model selected by the user ('gemini-3.8-flash', 'gemini-3.8-pro', 'gemini-3.6-flash').
+ * Only migrates legacy deprecated 1.5 / 2.0 / 2.5 values to 'gemini-3.6-flash'.
  */
 export function normalizeGeminiModelName(rawModel?: string | null): string {
-  const m = (rawModel || '').trim().toLowerCase();
-  if (!m) return 'gemini-2.5-flash';
+  const trimmed = (rawModel || '').trim();
+  const m = trimmed.toLowerCase();
+  if (!m) return STUDY_GENERATION_MODEL;
 
-  if (m === 'gemini-3.8-pro') {
-    return 'gemini-2.5-pro';
-  }
-  if (m === 'gemini-3.6-flash') {
-    return 'gemini-2.5-flash-lite';
-  }
   if (
-    m === 'gemini-3.8-flash' ||
     m.includes('1.5') ||
     m.includes('2.0') ||
+    m.includes('2.5') ||
     m === 'gemini-pro' ||
     m === 'gemini-flash'
   ) {
-    return 'gemini-2.5-flash';
+    return STUDY_GENERATION_MODEL;
   }
 
-  return rawModel!.trim();
+  return trimmed;
 }
 
 /**
- * Calls the Gemini API with automatic API key rotation and model fallback.
+ * Calls the Gemini API using the exact model requested first, with automatic API key rotation
+ * and modern 3.x fallback models (never silently downgrading to deprecated 2.5 models).
  * Supports both call signatures:
  *   1) callGeminiWithRotation(apiKeys, model, systemPrompt: string, contents: any[])
  *   2) callGeminiWithRotation(apiKeys, model, contents: any[], systemPrompt?: string)

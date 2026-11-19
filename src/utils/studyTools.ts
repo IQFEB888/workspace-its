@@ -24,6 +24,20 @@ export interface StudyQuizQuestion {
   tag: string;
 }
 
+export interface StudyHistorySession {
+  id: string;
+  mode: 'flashcards' | 'quiz';
+  subjectName: string;
+  title: string;
+  pageIds: string[];
+  pageNames: string[];
+  createdAt: string;
+  modelLabel: string;
+  cards: StudyFlashcard[];
+  quizQuestions: StudyQuizQuestion[];
+  selectedAnswers: Record<string, number>;
+}
+
 export interface MindMapNode {
   id: string;
   label: string;
@@ -318,10 +332,30 @@ export function generateFlashcardsFromHtml(
     }
   }
 
-  // Fallback if the note is very short/empty
+  // 6. Sentence-level concept cards if structured rules yielded fewer than 2 cards
+  if (cards.length < 2) {
+    const rawLines = stripHtmlTags(html)
+      .split(/\n+/)
+      .map(l => l.trim())
+      .filter(l => l.length >= 12);
+
+    rawLines.slice(0, 8).forEach((line, idx) => {
+      const words = line.split(/\s+/);
+      if (words.length >= 4) {
+        const cue = words.slice(0, Math.min(4, Math.max(2, Math.floor(words.length / 3)))).join(' ');
+        pushCard(
+          `Completa o spiega il concetto (#${idx + 1}): "${cue}..."`,
+          line,
+          pageTitle || subjectName
+        );
+      }
+    });
+  }
+
+  // Fallback if the note is very short
   if (cards.length === 0) {
     const raw = stripHtmlTags(html);
-    if (raw.length > 10) {
+    if (raw.length >= 4) {
       pushCard(
         `Riassumi il contenuto principale di "${pageTitle || subjectName}"`,
         raw.slice(0, 280),

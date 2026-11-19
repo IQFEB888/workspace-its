@@ -2,7 +2,7 @@
  * Workspace ITS - Main Application Component
  * Linear/Notion style dashboard with Firebase Cloud Firestore Real-time Sync & Google Auth
  */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { User, onAuthStateChanged, signInWithPopup, signOut, GoogleAuthProvider } from 'firebase/auth';
 import { marked } from 'marked';
 import { auth, calendarAuth } from './firebase';
@@ -283,9 +283,12 @@ export default function App() {
   const [pages, setPages] = useState<Record<string, PageItem[]>>(DEFAULT_PAGES);
   const [activePageId, setActivePageId] = useState<string>('');
   const [noteSlideClass, setNoteSlideClass] = useState<'note-slide-from-right' | 'note-slide-from-left' | ''>('');
-  const [draggingTabIndex, setDraggingTabIndex] = useState<number | null>(null);
-  const [dragOverTabIndex, setDragOverTabIndex] = useState<number | null>(null);
-  const [dragOverSide, setDragOverSide] = useState<'left' | 'right' | null>(null);
+  const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
+  const tabElRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const prevTabRectsRef = useRef<Record<string, number>>({});
+  const draggingTabIdRef = useRef<string | null>(null);
+  const lastTabSwapTimeRef = useRef<number>(0);
+  const didReorderDuringDragRef = useRef<boolean>(false);
   const [isStudyReviewOpen, setIsStudyReviewOpen] = useState<boolean>(false);
   const [isMindMapOpen, setIsMindMapOpen] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
@@ -1799,27 +1802,105 @@ export default function App() {
     [activeRoomPageId, activeRoomPages, triggerNoteSlideAnimation]
   );
 
-  // Drag & Drop Note Tab Reordering (Personal & Shared Room)
-  const handleReorderNoteTabs = useCallback(
-    async (fromIdx: number, toIdx: number, isShared: boolean) => {
-      if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0) return;
+  // Capture tab horizontal positions before live swap so useLayoutEffect can run a smooth FLIP glide
+  const captureTabRects = useCallback(() => {
+    const rects: Record<string, number> = {};
+    Object.entries(tabElRefs.current).forEach(([id, el]) => {
+      if (el) rects[id] = el.getBoundingClientRect().left;
+    });
+    prevTabRectsRef.current = rects;
+  }, []);
+
+  // FLIP animation: smoothly slide neighboring tabs when order changes during drag-and-drop
+  const tabOrderSignature =
+    workspaceMode === 'shared'
+      ? activeRoomPages.map(p => p.id).join('|')
+      : (pages[activeSubject] || []).map(p => p.id).join('|');
+
+  useLayoutEffect(() => {
+    const prevRects = prevTabRectsRef.current;
+    if (!prevRects || Object.keys(prevRects).length === 0) return;
+    prevTabRectsRef.current = {};
+
+    Object.entries(tabElRefs.current).forEach(([id, el]) => {
+      if (!el || prevRects[id] === undefined) return;
+      const nextLeft = el.getBoundingClientRect().left;
+      const deltaX = prevRects[id] - nextLeft;
+      if (Math.abs(deltaX) > 1) {
+        el.style.transition = 'none';
+        el.style.transform = `translate3d(${deltaX}px, 0, 0)`;
+        el.getBoundingClientRect(); // force reflow for FLIP start
+        requestAnimationFrame(() => {
+          el.style.transition = 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1)';
+          el.style.transform = 'translate3d(0, 0, 0)';
+        });
+        window.setTimeout(() => {
+          if (el.style.transform === 'translate3d(0, 0, 0)') {
+            el.style.transition = '';
+            el.style.transform = '';
+          }
+        }, 290);
+      }
+    });
+  }, [tabOrderSignature]);
+
+  // Live FLIP swap while dragging a tab across sibling tabs
+  const handleLiveSwapNoteTabs = useCallback(
+    (draggedId: string, targetId: string, isShared: boolean) => {
+      if (!draggedId || !targetId || draggedId === targetId) return;
+      const now = performance.now();
+      if (now - lastTabSwapTimeRef.current < 95) return;
+
       if (isShared) {
-        const reordered = reorderPagesList(activeRoomPages, fromIdx, toIdx);
-        setActiveRoomPages(reordered);
+        const fromIdx = activeRoomPages.findIndex(p => p.id === draggedId);
+        const toIdx = activeRoomPages.findIndex(p => p.id === targetId);
+        if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+        captureTabRects();
+        lastTabSwapTimeRef.current = now;
+        didReorderDuringDragRef.current = true;
+        setActiveRoomPages(prev => {
+          const f = prev.findIndex(p => p.id === draggedId);
+          const t = prev.findIndex(p => p.id === targetId);
+          if (f === -1 || t === -1 || f === t) return prev;
+          return reorderPagesList(prev, f, t);
+        });
+      } else {
+        const list = pages[activeSubject] || [];
+        const fromIdx = list.findIndex(p => p.id === draggedId);
+        const toIdx = list.findIndex(p => p.id === targetId);
+        if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+        captureTabRects();
+        lastTabSwapTimeRef.current = now;
+        didReorderDuringDragRef.current = true;
+        setPages(prev => {
+          const cur = prev[activeSubject] || [];
+          const f = cur.findIndex(p => p.id === draggedId);
+          const t = cur.findIndex(p => p.id === targetId);
+          if (f === -1 || t === -1 || f === t) return prev;
+          return { ...prev, [activeSubject]: reorderPagesList(cur, f, t) };
+        });
+      }
+    },
+    [activeRoomPages, pages, activeSubject, captureTabRects]
+  );
+
+  // Persist final reordered tabs once when drop/drag finishes
+  const persistReorderedNoteTabs = useCallback(
+    async (isShared: boolean, explicitReordered?: PageItem[]) => {
+      if (isShared) {
+        const finalList = explicitReordered || activeRoomPages;
         if (activeRoomId) {
-          for (const page of reordered) {
+          for (const page of finalList) {
             await WorkspaceService.saveRoomPage(activeRoomId, page);
           }
         }
         showToast('Schede condivise riordinate!');
       } else {
-        const currentList = pages[activeSubject] || [];
-        const reordered = reorderPagesList(currentList, fromIdx, toIdx);
-        const updatedPages = { ...pages, [activeSubject]: reordered };
-        setPages(updatedPages);
+        const finalList = explicitReordered || (pages[activeSubject] || []);
+        const updatedPages = { ...pages, [activeSubject]: finalList };
         WorkspaceService.saveLocalPages(updatedPages);
         if (currentUser) {
-          for (const page of reordered) {
+          for (const page of finalList) {
             await WorkspaceService.savePageToCloud(currentUser.uid, activeSubject, page);
           }
         }
@@ -1827,6 +1908,25 @@ export default function App() {
       }
     },
     [activeRoomPages, activeRoomId, pages, activeSubject, currentUser, showToast]
+  );
+
+  // Direct drop fallback (e.g. fast drop without intermediate dragOver swap)
+  const handleReorderNoteTabs = useCallback(
+    async (fromIdx: number, toIdx: number, isShared: boolean) => {
+      if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0) return;
+      captureTabRects();
+      if (isShared) {
+        const reordered = reorderPagesList(activeRoomPages, fromIdx, toIdx);
+        setActiveRoomPages(reordered);
+        await persistReorderedNoteTabs(true, reordered);
+      } else {
+        const currentList = pages[activeSubject] || [];
+        const reordered = reorderPagesList(currentList, fromIdx, toIdx);
+        setPages(prev => ({ ...prev, [activeSubject]: reordered }));
+        await persistReorderedNoteTabs(false, reordered);
+      }
+    },
+    [activeRoomPages, pages, activeSubject, captureTabRects, persistReorderedNoteTabs]
   );
 
   // Append structured HTML (e.g., from Voice Dictation) directly into #notes-area and save
@@ -6321,6 +6421,21 @@ REGOLE TASSATIVE:
                 Calendario{calendarEvents.length > 0 ? ` (${calendarEvents.length})` : ''}
               </span>
             </button>
+            <button
+              type="button"
+              className={`app-card ${isStudyReviewOpen ? 'active-tool-card' : ''}`}
+              onClick={() => setIsStudyReviewOpen(true)}
+              title="Apri lo Studio Flashcard 3D & Quiz con storico sessioni (Gemini 3.6 Flash)"
+              style={{ border: '1px solid var(--panel-border)', cursor: 'pointer', textAlign: 'left' }}
+            >
+              <svg className="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+                <rect x="3" y="5" width="14" height="10" rx="2" />
+                <path d="M7 15v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-2" />
+                <path d="M7 9h6" />
+                <path d="M7 12h4" />
+              </svg>
+              <span className="app-name">Flashcard &amp; Quiz</span>
+            </button>
             <a href="https://drive.google.com" className="app-card" target="_blank" rel="noreferrer">
               <svg className="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M22 12H12l-5 9h10l5-9z" /><path d="M6 12L2 5h10l4 7-10 9z" />
@@ -6417,6 +6532,14 @@ REGOLE TASSATIVE:
                   onClick={() => setActiveTab('calendar')}
                 >
                   📅 Calendario ({calendarEvents.length})
+                </button>
+                <button
+                  type="button"
+                  className={`tab-btn ${isStudyReviewOpen ? 'active' : ''}`}
+                  onClick={() => setIsStudyReviewOpen(true)}
+                  title="Apri Studio Flashcard 3D & Quiz con storico e selezione pagine"
+                >
+                  🧠 Flashcard &amp; Quiz
                 </button>
               </div>
             </div>
@@ -6722,51 +6845,58 @@ REGOLE TASSATIVE:
                       activeRoomPages.map((page, idx) => (
                         <div
                           key={page.id}
+                          ref={el => {
+                            tabElRefs.current[page.id] = el;
+                          }}
                           draggable
                           data-tab-index={idx}
+                          data-tab-id={page.id}
                           className={`vscode-tab ${page.id === activeRoomPageId ? 'active' : ''} ${
-                            draggingTabIndex === idx ? 'is-dragging' : ''
-                          } ${
-                            dragOverTabIndex === idx && draggingTabIndex !== idx
-                              ? dragOverSide === 'left'
-                                ? 'drag-over-left'
-                                : 'drag-over-right'
-                              : ''
+                            draggingTabId === page.id ? 'is-dragging' : ''
                           }`}
                           onDragStart={e => {
-                            setDraggingTabIndex(idx);
+                            draggingTabIdRef.current = page.id;
+                            didReorderDuringDragRef.current = false;
+                            setDraggingTabId(page.id);
                             e.dataTransfer.effectAllowed = 'move';
-                            e.dataTransfer.setData('text/plain', String(idx));
+                            e.dataTransfer.setData('text/plain', page.id);
                           }}
                           onDragOver={e => {
                             e.preventDefault();
                             e.dataTransfer.dropEffect = 'move';
+                            const draggedId = draggingTabIdRef.current;
+                            if (!draggedId || draggedId === page.id) return;
                             const rect = e.currentTarget.getBoundingClientRect();
-                            const side = e.clientX < rect.left + rect.width / 2 ? 'left' : 'right';
-                            setDragOverTabIndex(idx);
-                            setDragOverSide(side);
-                          }}
-                          onDragLeave={() => {
-                            if (dragOverTabIndex === idx) {
-                              setDragOverTabIndex(null);
-                              setDragOverSide(null);
+                            const midX = rect.left + rect.width / 2;
+                            const fromIdx = activeRoomPages.findIndex(p => p.id === draggedId);
+                            if (fromIdx === -1) return;
+                            // Smooth midpoint hysteresis so tabs glide without flickering
+                            if ((fromIdx < idx && e.clientX >= midX - 6) || (fromIdx > idx && e.clientX <= midX + 6)) {
+                              handleLiveSwapNoteTabs(draggedId, page.id, true);
                             }
                           }}
                           onDrop={e => {
                             e.preventDefault();
-                            const fromStr = e.dataTransfer.getData('text/plain');
-                            const fromIdx = draggingTabIndex !== null ? draggingTabIndex : parseInt(fromStr, 10);
-                            setDraggingTabIndex(null);
-                            setDragOverTabIndex(null);
-                            setDragOverSide(null);
-                            if (!Number.isNaN(fromIdx) && fromIdx !== idx) {
-                              handleReorderNoteTabs(fromIdx, idx, true);
+                            const draggedId = draggingTabIdRef.current || e.dataTransfer.getData('text/plain');
+                            if (didReorderDuringDragRef.current) {
+                              didReorderDuringDragRef.current = false;
+                              persistReorderedNoteTabs(true);
+                            } else if (draggedId && draggedId !== page.id) {
+                              const fromIdx = activeRoomPages.findIndex(p => p.id === draggedId);
+                              if (fromIdx !== -1 && fromIdx !== idx) {
+                                handleReorderNoteTabs(fromIdx, idx, true);
+                              }
                             }
+                            draggingTabIdRef.current = null;
+                            setDraggingTabId(null);
                           }}
                           onDragEnd={() => {
-                            setDraggingTabIndex(null);
-                            setDragOverTabIndex(null);
-                            setDragOverSide(null);
+                            if (didReorderDuringDragRef.current) {
+                              didReorderDuringDragRef.current = false;
+                              persistReorderedNoteTabs(true);
+                            }
+                            draggingTabIdRef.current = null;
+                            setDraggingTabId(null);
                           }}
                           onClick={() => handleSelectSharedRoomPageTab(page.id)}
                           onContextMenu={e => {
@@ -6790,51 +6920,57 @@ REGOLE TASSATIVE:
                       currentSubPages.map((page, idx) => (
                         <div
                           key={page.id}
+                          ref={el => {
+                            tabElRefs.current[page.id] = el;
+                          }}
                           draggable
                           data-tab-index={idx}
+                          data-tab-id={page.id}
                           className={`vscode-tab ${page.id === activePageId ? 'active' : ''} ${
-                            draggingTabIndex === idx ? 'is-dragging' : ''
-                          } ${
-                            dragOverTabIndex === idx && draggingTabIndex !== idx
-                              ? dragOverSide === 'left'
-                                ? 'drag-over-left'
-                                : 'drag-over-right'
-                              : ''
+                            draggingTabId === page.id ? 'is-dragging' : ''
                           }`}
                           onDragStart={e => {
-                            setDraggingTabIndex(idx);
+                            draggingTabIdRef.current = page.id;
+                            didReorderDuringDragRef.current = false;
+                            setDraggingTabId(page.id);
                             e.dataTransfer.effectAllowed = 'move';
-                            e.dataTransfer.setData('text/plain', String(idx));
+                            e.dataTransfer.setData('text/plain', page.id);
                           }}
                           onDragOver={e => {
                             e.preventDefault();
                             e.dataTransfer.dropEffect = 'move';
+                            const draggedId = draggingTabIdRef.current;
+                            if (!draggedId || draggedId === page.id) return;
                             const rect = e.currentTarget.getBoundingClientRect();
-                            const side = e.clientX < rect.left + rect.width / 2 ? 'left' : 'right';
-                            setDragOverTabIndex(idx);
-                            setDragOverSide(side);
-                          }}
-                          onDragLeave={() => {
-                            if (dragOverTabIndex === idx) {
-                              setDragOverTabIndex(null);
-                              setDragOverSide(null);
+                            const midX = rect.left + rect.width / 2;
+                            const fromIdx = currentSubPages.findIndex(p => p.id === draggedId);
+                            if (fromIdx === -1) return;
+                            if ((fromIdx < idx && e.clientX >= midX - 6) || (fromIdx > idx && e.clientX <= midX + 6)) {
+                              handleLiveSwapNoteTabs(draggedId, page.id, false);
                             }
                           }}
                           onDrop={e => {
                             e.preventDefault();
-                            const fromStr = e.dataTransfer.getData('text/plain');
-                            const fromIdx = draggingTabIndex !== null ? draggingTabIndex : parseInt(fromStr, 10);
-                            setDraggingTabIndex(null);
-                            setDragOverTabIndex(null);
-                            setDragOverSide(null);
-                            if (!Number.isNaN(fromIdx) && fromIdx !== idx) {
-                              handleReorderNoteTabs(fromIdx, idx, false);
+                            const draggedId = draggingTabIdRef.current || e.dataTransfer.getData('text/plain');
+                            if (didReorderDuringDragRef.current) {
+                              didReorderDuringDragRef.current = false;
+                              persistReorderedNoteTabs(false);
+                            } else if (draggedId && draggedId !== page.id) {
+                              const fromIdx = currentSubPages.findIndex(p => p.id === draggedId);
+                              if (fromIdx !== -1 && fromIdx !== idx) {
+                                handleReorderNoteTabs(fromIdx, idx, false);
+                              }
                             }
+                            draggingTabIdRef.current = null;
+                            setDraggingTabId(null);
                           }}
                           onDragEnd={() => {
-                            setDraggingTabIndex(null);
-                            setDragOverTabIndex(null);
-                            setDragOverSide(null);
+                            if (didReorderDuringDragRef.current) {
+                              didReorderDuringDragRef.current = false;
+                              persistReorderedNoteTabs(false);
+                            }
+                            draggingTabIdRef.current = null;
+                            setDraggingTabId(null);
                           }}
                           onClick={() => handleSelectPersonalPageTab(page.id)}
                           onContextMenu={e => {
@@ -9884,9 +10020,11 @@ REGOLE TASSATIVE:
             : currentSubPages.find(p => p.id === activePageId) || currentSubPages[0] || null
         }
         allSubjectPages={workspaceMode === 'shared' ? activeRoomPages : currentSubPages}
+        subjects={subjects}
+        pagesBySubject={pages}
+        isSharedMode={workspaceMode === 'shared'}
         apiKeys={apiKeys}
         selectedKeyIndex={selectedKeyIndex}
-        selectedModel={selectedModel}
         onNotify={showToast}
       />
 
