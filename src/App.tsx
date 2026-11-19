@@ -30,6 +30,13 @@ import { WeatherModal } from './components/WeatherModal';
 import { SettingsModal, BACKGROUND_THEMES, ACCENT_THEMES, PANEL_THEMES } from './components/SettingsModal';
 import { WorkspaceWidgetsDock } from './components/WorkspaceWidgetsDock';
 import { StudyCalendarPanel } from './components/StudyCalendarPanel';
+import { StudyReviewModal } from './components/StudyReviewModal';
+import { MindMapModal } from './components/MindMapModal';
+import { CommandPaletteModal, CommandPaletteAction } from './components/CommandPaletteModal';
+import { VoiceDictationBar } from './components/VoiceDictationBar';
+import { SplitScreenPane } from './components/SplitScreenPane';
+import { ExportDispensaModal } from './components/ExportDispensaModal';
+import { reorderPagesList } from './utils/studyTools';
 import {
   APP_VERSION,
   CODE_LANGUAGES,
@@ -276,6 +283,15 @@ export default function App() {
   const [pages, setPages] = useState<Record<string, PageItem[]>>(DEFAULT_PAGES);
   const [activePageId, setActivePageId] = useState<string>('');
   const [noteSlideClass, setNoteSlideClass] = useState<'note-slide-from-right' | 'note-slide-from-left' | ''>('');
+  const [draggingTabIndex, setDraggingTabIndex] = useState<number | null>(null);
+  const [dragOverTabIndex, setDragOverTabIndex] = useState<number | null>(null);
+  const [dragOverSide, setDragOverSide] = useState<'left' | 'right' | null>(null);
+  const [isStudyReviewOpen, setIsStudyReviewOpen] = useState<boolean>(false);
+  const [isMindMapOpen, setIsMindMapOpen] = useState<boolean>(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+  const [isVoiceDictationOpen, setIsVoiceDictationOpen] = useState<boolean>(false);
+  const [isSplitScreenOpen, setIsSplitScreenOpen] = useState<boolean>(false);
+  const [isExportDispensaOpen, setIsExportDispensaOpen] = useState<boolean>(false);
   const [materials, setMaterials] = useState<Record<string, MaterialItem[]>>({});
   const [mobileTab, setMobileTab] = useState<'notes' | 'materials' | 'chat' | 'tools'>('notes');
 
@@ -1782,6 +1798,46 @@ export default function App() {
     },
     [activeRoomPageId, activeRoomPages, triggerNoteSlideAnimation]
   );
+
+  // Drag & Drop Note Tab Reordering (Personal & Shared Room)
+  const handleReorderNoteTabs = useCallback(
+    async (fromIdx: number, toIdx: number, isShared: boolean) => {
+      if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0) return;
+      if (isShared) {
+        const reordered = reorderPagesList(activeRoomPages, fromIdx, toIdx);
+        setActiveRoomPages(reordered);
+        if (activeRoomId) {
+          for (const page of reordered) {
+            await WorkspaceService.saveRoomPage(activeRoomId, page);
+          }
+        }
+        showToast('Schede condivise riordinate!');
+      } else {
+        const currentList = pages[activeSubject] || [];
+        const reordered = reorderPagesList(currentList, fromIdx, toIdx);
+        const updatedPages = { ...pages, [activeSubject]: reordered };
+        setPages(updatedPages);
+        WorkspaceService.saveLocalPages(updatedPages);
+        if (currentUser) {
+          for (const page of reordered) {
+            await WorkspaceService.savePageToCloud(currentUser.uid, activeSubject, page);
+          }
+        }
+        showToast('Ordine schede aggiornato!');
+      }
+    },
+    [activeRoomPages, activeRoomId, pages, activeSubject, currentUser, showToast]
+  );
+
+  // Append structured HTML (e.g., from Voice Dictation) directly into #notes-area and save
+  const handleInsertHtmlIntoNotes = useCallback((html: string) => {
+    if (!html || !notesAreaRef.current) return;
+    setActiveTab('notes');
+    const el = notesAreaRef.current;
+    el.insertAdjacentHTML('beforeend', `<div style="margin-top:10px;">${html}</div>`);
+    el.scrollTop = el.scrollHeight;
+    handleEditorInput();
+  }, []);
 
   // Subject change
   const handleSelectSubject = (newSubject: string) => {
@@ -3939,6 +3995,13 @@ export default function App() {
 
       if (!currentUser || !isApproved) return;
 
+      // Global Command Palette Shortcut (Ctrl+K / Cmd+K)
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+        return;
+      }
+
       const s = {
         ...(DEFAULT_SHORTCUTS as Record<ShortcutActionId, string>),
         ...customShortcuts
@@ -6018,6 +6081,14 @@ REGOLE TASSATIVE:
           </div>
 
           <div className="topbar-right">
+            <button
+              type="button"
+              className="top-btn top-btn-cmd-palette"
+              onClick={() => setIsCommandPaletteOpen(true)}
+              title="Apri Command Palette rapida (Ctrl+K)"
+            >
+              ⚡ Cerca <kbd className="topbar-kbd">Ctrl+K</kbd>
+            </button>
             {!isInstalled && (
               <button
                 type="button"
@@ -6428,18 +6499,60 @@ REGOLE TASSATIVE:
                 </div>
                 <div className="notes-header-right">
                   {activeTab === 'notes' && (
-                    <button
-                      type="button"
-                      className={`header-btn toolbar-collapse-header-btn ${isEditorToolbarCollapsed ? 'is-collapsed' : ''}`}
-                      onClick={handleToggleEditorToolbar}
-                      title={
-                        isEditorToolbarCollapsed
-                          ? 'Mostra barra strumenti degli appunti'
-                          : 'Nascondi barra strumenti degli appunti'
-                      }
-                    >
-                      {isEditorToolbarCollapsed ? '🛠️ ▼ Strumenti' : '🛠️ ▲ Nascondi Strumenti'}
-                    </button>
+                    <div className="study-power-actions">
+                      <button
+                        type="button"
+                        className="header-btn study-action-pill"
+                        onClick={() => setIsStudyReviewOpen(true)}
+                        title="Modalità Ripasso Esame: Flashcard 3D & Quiz Verifica dai tuoi appunti"
+                      >
+                        🧠 Ripasso
+                      </button>
+                      <button
+                        type="button"
+                        className="header-btn study-action-pill"
+                        onClick={() => setIsMindMapOpen(true)}
+                        title="Genera Mappa Concettuale Interattiva dagli appunti"
+                      >
+                        🗺️ Mappa
+                      </button>
+                      <button
+                        type="button"
+                        className={`header-btn study-action-pill ${isVoiceDictationOpen ? 'is-active' : ''}`}
+                        onClick={() => setIsVoiceDictationOpen(v => !v)}
+                        title="Registrazione Lezione & Dettatura Vocale AI"
+                      >
+                        🎙️ Detta
+                      </button>
+                      <button
+                        type="button"
+                        className={`header-btn study-action-pill ${isSplitScreenOpen ? 'is-active' : ''}`}
+                        onClick={() => setIsSplitScreenOpen(v => !v)}
+                        title="Vista Split-Screen: affianca un'altra scheda o una dispensa PDF"
+                      >
+                        🔀 Split
+                      </button>
+                      <button
+                        type="button"
+                        className="header-btn study-action-pill"
+                        onClick={() => setIsExportDispensaOpen(true)}
+                        title="Esporta Dispensa Impaginata in PDF, Word (.doc) o Markdown (.md) con Sommario"
+                      >
+                        📄 Esporta
+                      </button>
+                      <button
+                        type="button"
+                        className={`header-btn toolbar-collapse-header-btn ${isEditorToolbarCollapsed ? 'is-collapsed' : ''}`}
+                        onClick={handleToggleEditorToolbar}
+                        title={
+                          isEditorToolbarCollapsed
+                            ? 'Mostra barra strumenti degli appunti'
+                            : 'Nascondi barra strumenti degli appunti'
+                        }
+                      >
+                        {isEditorToolbarCollapsed ? '🛠️ ▼' : '🛠️ ▲'}
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -6606,17 +6719,63 @@ REGOLE TASSATIVE:
                 <div className="vscode-tabs-bar">
                   <div style={{ display: 'flex', gap: '4px', overflowX: 'auto' }}>
                     {workspaceMode === 'shared' ? (
-                      activeRoomPages.map(page => (
+                      activeRoomPages.map((page, idx) => (
                         <div
                           key={page.id}
-                          className={`vscode-tab ${page.id === activeRoomPageId ? 'active' : ''}`}
+                          draggable
+                          data-tab-index={idx}
+                          className={`vscode-tab ${page.id === activeRoomPageId ? 'active' : ''} ${
+                            draggingTabIndex === idx ? 'is-dragging' : ''
+                          } ${
+                            dragOverTabIndex === idx && draggingTabIndex !== idx
+                              ? dragOverSide === 'left'
+                                ? 'drag-over-left'
+                                : 'drag-over-right'
+                              : ''
+                          }`}
+                          onDragStart={e => {
+                            setDraggingTabIndex(idx);
+                            e.dataTransfer.effectAllowed = 'move';
+                            e.dataTransfer.setData('text/plain', String(idx));
+                          }}
+                          onDragOver={e => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = 'move';
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const side = e.clientX < rect.left + rect.width / 2 ? 'left' : 'right';
+                            setDragOverTabIndex(idx);
+                            setDragOverSide(side);
+                          }}
+                          onDragLeave={() => {
+                            if (dragOverTabIndex === idx) {
+                              setDragOverTabIndex(null);
+                              setDragOverSide(null);
+                            }
+                          }}
+                          onDrop={e => {
+                            e.preventDefault();
+                            const fromStr = e.dataTransfer.getData('text/plain');
+                            const fromIdx = draggingTabIndex !== null ? draggingTabIndex : parseInt(fromStr, 10);
+                            setDraggingTabIndex(null);
+                            setDragOverTabIndex(null);
+                            setDragOverSide(null);
+                            if (!Number.isNaN(fromIdx) && fromIdx !== idx) {
+                              handleReorderNoteTabs(fromIdx, idx, true);
+                            }
+                          }}
+                          onDragEnd={() => {
+                            setDraggingTabIndex(null);
+                            setDragOverTabIndex(null);
+                            setDragOverSide(null);
+                          }}
                           onClick={() => handleSelectSharedRoomPageTab(page.id)}
                           onContextMenu={e => {
                             e.preventDefault();
                             handleRenameRoomPage(page.id);
                           }}
-                          title="Clicca per aprire, clic destro per rinominare (condiviso)"
+                          title="Trascina per riordinare • Clicca per aprire • Clic destro per rinominare (condiviso)"
                         >
+                          <span className="tab-drag-grip" aria-hidden="true">⋮⋮</span>
                           <span>{page.name}</span>
                           <span
                             className="close-tab"
@@ -6628,17 +6787,63 @@ REGOLE TASSATIVE:
                         </div>
                       ))
                     ) : (
-                      currentSubPages.map(page => (
+                      currentSubPages.map((page, idx) => (
                         <div
                           key={page.id}
-                          className={`vscode-tab ${page.id === activePageId ? 'active' : ''}`}
+                          draggable
+                          data-tab-index={idx}
+                          className={`vscode-tab ${page.id === activePageId ? 'active' : ''} ${
+                            draggingTabIndex === idx ? 'is-dragging' : ''
+                          } ${
+                            dragOverTabIndex === idx && draggingTabIndex !== idx
+                              ? dragOverSide === 'left'
+                                ? 'drag-over-left'
+                                : 'drag-over-right'
+                              : ''
+                          }`}
+                          onDragStart={e => {
+                            setDraggingTabIndex(idx);
+                            e.dataTransfer.effectAllowed = 'move';
+                            e.dataTransfer.setData('text/plain', String(idx));
+                          }}
+                          onDragOver={e => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = 'move';
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const side = e.clientX < rect.left + rect.width / 2 ? 'left' : 'right';
+                            setDragOverTabIndex(idx);
+                            setDragOverSide(side);
+                          }}
+                          onDragLeave={() => {
+                            if (dragOverTabIndex === idx) {
+                              setDragOverTabIndex(null);
+                              setDragOverSide(null);
+                            }
+                          }}
+                          onDrop={e => {
+                            e.preventDefault();
+                            const fromStr = e.dataTransfer.getData('text/plain');
+                            const fromIdx = draggingTabIndex !== null ? draggingTabIndex : parseInt(fromStr, 10);
+                            setDraggingTabIndex(null);
+                            setDragOverTabIndex(null);
+                            setDragOverSide(null);
+                            if (!Number.isNaN(fromIdx) && fromIdx !== idx) {
+                              handleReorderNoteTabs(fromIdx, idx, false);
+                            }
+                          }}
+                          onDragEnd={() => {
+                            setDraggingTabIndex(null);
+                            setDragOverTabIndex(null);
+                            setDragOverSide(null);
+                          }}
                           onClick={() => handleSelectPersonalPageTab(page.id)}
                           onContextMenu={e => {
                             e.preventDefault();
                             handleRenamePage(page.id);
                           }}
-                          title="Clicca per aprire, clic destro per rinominare"
+                          title="Trascina per riordinare • Clicca per aprire • Clic destro per rinominare"
                         >
+                          <span className="tab-drag-grip" aria-hidden="true">⋮⋮</span>
                           <span>{page.name}</span>
                           <span
                             className="close-tab"
@@ -7448,102 +7653,137 @@ REGOLE TASSATIVE:
                   </div>
                 )}
 
-                {/* Stage Wrapper for #notes-area + Interactive 8-Handle Photo/Drawing Resize Frame */}
-                <div
-                  ref={notesStageRef}
-                  className="notes-surface-stage"
-                  style={{
-                    position: 'relative',
-                    flex: 1,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    minHeight: 0
-                  }}
-                >
-                  <div
-                    id="notes-area"
-                    ref={notesAreaRef}
-                    data-slide-dir={noteSlideClass || undefined}
-                    className={`font-${fontFamily} ${noteSlideClass} ${isDrawingMode ? 'drawing-mode-active' : ''} ${
-                      isDrawingMode && drawingTool === 'eraser' ? 'eraser-active' : ''
-                    }`}
-                    style={{ fontSize: `${fontSize}px` }}
-                    contentEditable={!isDrawingMode}
-                    suppressContentEditableWarning
-                    data-placeholder="Inizia a scrivere i tuoi appunti... Incolla screenshot (Ctrl+V), inserisci tabelle, disegna con la penna o usa le scorciatoie."
-                    onInput={handleNotesAreaInput}
-                    onChange={handleNotesAreaChange}
-                    onKeyDown={handleNotesAreaKeyDown}
-                    onPaste={handleNotesPaste}
-                    onScroll={handleNotesScroll}
-                    onClick={handleNotesAreaClick}
-                    onMouseDown={handleNotesMouseDown}
-                    onMouseMove={handleNotesMouseMove}
-                    onMouseUp={e => {
-                      handleNotesMouseUp();
-                      handleRecordEditorSelection();
-                    }}
-                    onKeyUp={handleRecordEditorSelection}
-                    onContextMenu={handleNotesContextMenu}
-                  />
+                {/* Live Lecture Voice Dictation & AI Structuring Bar */}
+                <VoiceDictationBar
+                  isOpen={isVoiceDictationOpen}
+                  onClose={() => setIsVoiceDictationOpen(false)}
+                  subjectName={activeSubject}
+                  apiKeys={apiKeys}
+                  selectedKeyIndex={selectedKeyIndex}
+                  selectedModel={selectedModel}
+                  onInsertHtml={handleInsertHtmlIntoNotes}
+                  onNotify={showToast}
+                />
 
-                  {/* 8-Handle Interactive Border/Corner Resize Frame for Selected Photo or Post-Esc Drawing */}
-                  {!isDrawingMode && (selectedImageEl || selectedDrawingEl) && selectionBoxRect && (
+                {/* Split-Screen Container (Single Editor OR Side-by-Side Reference Note/PDF) */}
+                <div className={`notes-split-container ${isSplitScreenOpen ? 'is-split' : ''}`}>
+                  {/* Stage Wrapper for #notes-area + Interactive 8-Handle Photo/Drawing Resize Frame */}
+                  <div
+                    ref={notesStageRef}
+                    className="notes-surface-stage"
+                    style={{
+                      position: 'relative',
+                      flex: 1,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      minHeight: 0,
+                      minWidth: 0
+                    }}
+                  >
                     <div
-                      className="note-object-selection-frame"
-                      style={{
-                        top: `${selectionBoxRect.top}px`,
-                        left: `${selectionBoxRect.left}px`,
-                        width: `${selectionBoxRect.width}px`,
-                        height: `${selectionBoxRect.height}px`
+                      id="notes-area"
+                      ref={notesAreaRef}
+                      data-slide-dir={noteSlideClass || undefined}
+                      className={`font-${fontFamily} ${noteSlideClass} ${isDrawingMode ? 'drawing-mode-active' : ''} ${
+                        isDrawingMode && drawingTool === 'eraser' ? 'eraser-active' : ''
+                      }`}
+                      style={{ fontSize: `${fontSize}px` }}
+                      contentEditable={!isDrawingMode}
+                      suppressContentEditableWarning
+                      data-placeholder="Inizia a scrivere i tuoi appunti... Incolla screenshot (Ctrl+V), inserisci tabelle, disegna con la penna o usa le scorciatoie."
+                      onInput={handleNotesAreaInput}
+                      onChange={handleNotesAreaChange}
+                      onKeyDown={handleNotesAreaKeyDown}
+                      onPaste={handleNotesPaste}
+                      onScroll={handleNotesScroll}
+                      onClick={handleNotesAreaClick}
+                      onMouseDown={handleNotesMouseDown}
+                      onMouseMove={handleNotesMouseMove}
+                      onMouseUp={e => {
+                        handleNotesMouseUp();
+                        handleRecordEditorSelection();
                       }}
-                    >
-                      {(
-                        ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as Array<
-                          'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
-                        >
-                      ).map(h => (
-                        <div
-                          key={h}
-                          className={`note-resize-handle ${h}`}
-                          onMouseDown={e => handleStartResizeObject(h, e)}
-                          title="Trascina per ridimensionare"
-                        />
-                      ))}
-                      <button
-                        type="button"
-                        className="note-object-del-corner"
-                        onMouseDown={e => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                        }}
-                        onClick={e => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (selectedImageEl) handleDeleteSelectedImage();
-                          else if (selectedDrawingEl) handleDeleteSelectedDrawing();
-                        }}
-                        title="Elimina elemento selezionato"
+                      onKeyUp={handleRecordEditorSelection}
+                      onContextMenu={handleNotesContextMenu}
+                    />
+
+                    {/* 8-Handle Interactive Border/Corner Resize Frame for Selected Photo or Post-Esc Drawing */}
+                    {!isDrawingMode && (selectedImageEl || selectedDrawingEl) && selectionBoxRect && (
+                      <div
+                        className="note-object-selection-frame"
                         style={{
-                          position: 'absolute',
-                          top: '-14px',
-                          right: '14px',
-                          pointerEvents: 'auto',
-                          background: '#e11d48',
-                          color: '#ffffff',
-                          border: '1px solid #fda4af',
-                          borderRadius: '6px',
-                          padding: '2px 7px',
-                          fontSize: '0.68rem',
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.45)',
-                          zIndex: 32
+                          top: `${selectionBoxRect.top}px`,
+                          left: `${selectionBoxRect.left}px`,
+                          width: `${selectionBoxRect.width}px`,
+                          height: `${selectionBoxRect.height}px`
                         }}
                       >
-                        🗑️ Elimina
-                      </button>
-                    </div>
+                        {(
+                          ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as Array<
+                            'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
+                          >
+                        ).map(h => (
+                          <div
+                            key={h}
+                            className={`note-resize-handle ${h}`}
+                            onMouseDown={e => handleStartResizeObject(h, e)}
+                            title="Trascina per ridimensionare"
+                          />
+                        ))}
+                        <button
+                          type="button"
+                          className="note-object-del-corner"
+                          onMouseDown={e => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                          onClick={e => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (selectedImageEl) handleDeleteSelectedImage();
+                            else if (selectedDrawingEl) handleDeleteSelectedDrawing();
+                          }}
+                          title="Elimina elemento selezionato"
+                          style={{
+                            position: 'absolute',
+                            top: '-14px',
+                            right: '14px',
+                            pointerEvents: 'auto',
+                            background: '#e11d48',
+                            color: '#ffffff',
+                            border: '1px solid #fda4af',
+                            borderRadius: '6px',
+                            padding: '2px 7px',
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.45)',
+                            zIndex: 32
+                          }}
+                        >
+                          🗑️ Elimina
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Secondary Split-Screen Pane (Another Note Tab OR PDF/Material) */}
+                  {isSplitScreenOpen && (
+                    <SplitScreenPane
+                      activeSubject={activeSubject}
+                      activePageId={activePageId}
+                      pagesBySubject={pages}
+                      materialsBySubject={materials}
+                      onClose={() => setIsSplitScreenOpen(false)}
+                      onOpenInMainEditor={(subId, pId) => {
+                        setWorkspaceMode('personal');
+                        setActiveTab('notes');
+                        if (subId !== activeSubject) {
+                          handleSelectSubject(subId);
+                        }
+                        setTimeout(() => handleSelectPersonalPageTab(pId), 20);
+                      }}
+                    />
                   )}
                 </div>
               </div>
@@ -9631,6 +9871,196 @@ REGOLE TASSATIVE:
           setIsBackupModalOpen(true);
         }}
         showToast={showToast}
+      />
+
+      {/* MODAL #1: FLASHCARD 3D & QUIZ VERIFICA ITS */}
+      <StudyReviewModal
+        isOpen={isStudyReviewOpen}
+        onClose={() => setIsStudyReviewOpen(false)}
+        subjectName={activeSubject}
+        activePage={
+          workspaceMode === 'shared'
+            ? activeRoomPages.find(p => p.id === activeRoomPageId) || activeRoomPages[0] || null
+            : currentSubPages.find(p => p.id === activePageId) || currentSubPages[0] || null
+        }
+        allSubjectPages={workspaceMode === 'shared' ? activeRoomPages : currentSubPages}
+        apiKeys={apiKeys}
+        selectedKeyIndex={selectedKeyIndex}
+        selectedModel={selectedModel}
+        onNotify={showToast}
+      />
+
+      {/* MODAL #2: MAPPA CONCETTUALE INTERATTIVA AUTOMATICA */}
+      <MindMapModal
+        isOpen={isMindMapOpen}
+        onClose={() => setIsMindMapOpen(false)}
+        subjectName={activeSubject}
+        activePage={
+          workspaceMode === 'shared'
+            ? activeRoomPages.find(p => p.id === activeRoomPageId) || activeRoomPages[0] || null
+            : currentSubPages.find(p => p.id === activePageId) || currentSubPages[0] || null
+        }
+        allSubjectPages={workspaceMode === 'shared' ? activeRoomPages : currentSubPages}
+        onNotify={showToast}
+      />
+
+      {/* MODAL #3: COMMAND PALETTE (CTRL+K) */}
+      <CommandPaletteModal
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        subjects={subjects}
+        pagesBySubject={pages}
+        materialsBySubject={materials}
+        quickActions={
+          [
+            {
+              id: 'qa_new_page',
+              title: 'Nuova Scheda Appunti',
+              subtitle: `Crea una nuova scheda in ${activeSubject}`,
+              icon: '➕',
+              group: 'Azioni Rapide',
+              onExecute: () => {
+                setActiveTab('notes');
+                if (workspaceMode === 'shared') handleAddNewRoomPage();
+                else handleAddNewPage();
+              }
+            },
+            {
+              id: 'qa_study_review',
+              title: 'Modalità Ripasso: Flashcard 3D & Quiz',
+              subtitle: 'Genera flashcard e quiz verifica dagli appunti',
+              icon: '🧠',
+              group: 'Azioni Rapide',
+              onExecute: () => setIsStudyReviewOpen(true)
+            },
+            {
+              id: 'qa_mindmap',
+              title: 'Mappa Concettuale Automatica',
+              subtitle: 'Visualizza la struttura interattiva della lezione',
+              icon: '🗺️',
+              group: 'Azioni Rapide',
+              onExecute: () => setIsMindMapOpen(true)
+            },
+            {
+              id: 'qa_voice',
+              title: isVoiceDictationOpen ? 'Chiudi Dettatura Vocale' : 'Avvia Dettatura Vocale Lezione',
+              subtitle: 'Trascrivi a voce e riordina con Gemini AI',
+              icon: '🎙️',
+              group: 'Azioni Rapide',
+              onExecute: () => {
+                setActiveTab('notes');
+                setIsVoiceDictationOpen(v => !v);
+              }
+            },
+            {
+              id: 'qa_split',
+              title: isSplitScreenOpen ? 'Disattiva Vista Split-Screen' : 'Attiva Vista Split-Screen (Doppio Foglio / PDF)',
+              subtitle: 'Affianca una scheda o una dispensa PDF agli appunti',
+              icon: '🔀',
+              group: 'Azioni Rapide',
+              onExecute: () => {
+                setActiveTab('notes');
+                setIsSplitScreenOpen(v => !v);
+              }
+            },
+            {
+              id: 'qa_export',
+              title: 'Esporta Dispensa (PDF / Word / Markdown)',
+              subtitle: 'Impaginazione con copertina e sommario automatico',
+              icon: '📄',
+              group: 'Azioni Rapide',
+              onExecute: () => setIsExportDispensaOpen(true)
+            },
+            {
+              id: 'qa_code_box',
+              title: 'Inserisci Blocco Codice Interattivo',
+              subtitle: 'Aggiungi una box codice eseguibile negli appunti',
+              icon: '💻',
+              group: 'Azioni Rapide',
+              onExecute: () => {
+                setActiveTab('notes');
+                handleInsertDirectCodeBlock();
+              }
+            },
+            {
+              id: 'qa_formula_box',
+              title: 'Inserisci Box Formula Live',
+              subtitle: 'Aggiungi una formula matematica calcolata',
+              icon: '∑',
+              group: 'Azioni Rapide',
+              onExecute: () => {
+                setActiveTab('notes');
+                handleInsertDirectFormulaBox();
+              }
+            },
+            {
+              id: 'qa_calendar',
+              title: 'Vai al Calendario Studi & Lezioni',
+              subtitle: 'Apri viste Giorno, Settimana, Mese e Agenda',
+              icon: '📅',
+              group: 'Azioni Rapide',
+              onExecute: () => setActiveTab('calendar')
+            }
+          ] as CommandPaletteAction[]
+        }
+        onJumpToSubject={subId => {
+          setWorkspaceMode('personal');
+          setActiveTab('notes');
+          handleSelectSubject(subId);
+        }}
+        onJumpToPage={(subId, pId) => {
+          setWorkspaceMode('personal');
+          setActiveTab('notes');
+          if (subId !== activeSubject) {
+            handleSelectSubject(subId);
+          }
+          setTimeout(() => handleSelectPersonalPageTab(pId), 20);
+        }}
+        onOpenMaterial={(subId, mat) => {
+          setWorkspaceMode('personal');
+          if (subId !== activeSubject) handleSelectSubject(subId);
+          handleOpenPreview(mat);
+        }}
+        onCreateCalendarReminderFromCommand={rawText => {
+          const parsed = parseCalendarChatCommand(
+            rawText,
+            subjects.map(s => s.name)
+          );
+          if (parsed && parsed.isAddCommand) {
+            handleAddCalendarEvent(
+              {
+                title: parsed.title,
+                date: parsed.date,
+                startTime: parsed.startTime,
+                endTime: parsed.endTime,
+                category: parsed.category,
+                subject: parsed.subject || activeSubject,
+                description: parsed.description || 'Creato tramite Command Palette (Ctrl+K)',
+                completed: false
+              },
+              !!googleOAuthAccessToken
+            );
+            showToast(`📅 Promemoria "${parsed.title}" aggiunto per il ${parsed.date} alle ${parsed.startTime}!`);
+            return true;
+          }
+          setActiveTab('calendar');
+          return false;
+        }}
+      />
+
+      {/* MODAL #7: ESPORTA DISPENSA (PDF / WORD / MARKDOWN) */}
+      <ExportDispensaModal
+        isOpen={isExportDispensaOpen}
+        onClose={() => setIsExportDispensaOpen(false)}
+        subjectName={activeSubject}
+        authorName={currentUser?.displayName || currentUser?.email || 'Studente ITS'}
+        activePage={
+          workspaceMode === 'shared'
+            ? activeRoomPages.find(p => p.id === activeRoomPageId) || activeRoomPages[0] || null
+            : currentSubPages.find(p => p.id === activePageId) || currentSubPages[0] || null
+        }
+        allSubjectPages={workspaceMode === 'shared' ? activeRoomPages : currentSubPages}
+        onNotify={showToast}
       />
 
       {/* TOAST CONTAINER */}

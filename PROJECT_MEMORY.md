@@ -6,7 +6,7 @@
 
 ## 1. Informazioni Generali & Versione
 - **Nome Applicazione**: `Workspace ITS`
-- **Versione Attuale**: `v3.6.0` (`APP_VERSION` in `src/utils/editorTools.ts`, mostrata nel badge fisso in basso a sinistra `.app-version-badge`).
+- **Versione Attuale**: `v3.7.0` (`APP_VERSION` in `src/utils/editorTools.ts`, mostrata nel badge fisso in basso a sinistra `.app-version-badge`).
 - **REGOLA OBBLIGATORIA DI VERSIONING**: **Ad ogni singola modifica al codice, incrementare sempre `APP_VERSION` in `src/utils/editorTools.ts`** (e aggiornare `PROJECT_MEMORY.md`), così che l'utente possa verificare immediatamente dal badge in basso a sinistra di avere l'ultima versione su tutti i dispositivi.
 - **PWA & Routing**:
   - Configurata con `vite.config.ts` (`base: './'`, `manifest: false` per evitare doppi manifest), `public/manifest.json` (`start_url: './'`, `scope: './'`), `public/sw.js` e cattura anticipata di `beforeinstallprompt` in `index.html` (`window.__deferredPwaPrompt`) per funzionare sia su AI Studio sia su GitHub Pages (`https://iqfeb888.github.io/...`) senza errori 404.
@@ -26,40 +26,28 @@
 
 ---
 
-## 3. Editor degli Appunti (`#notes-area`), Scorrimento Laterale Schede & Strumenti Avanzati
-L'editor `#notes-area` in `src/App.tsx` (supportato da `src/utils/editorTools.ts` e `src/utils/sqlEngine.ts`) include:
-1. **Animazione di Scorrimento Laterale Direzionale tra Schede (`computeTabSlideDirection` & `triggerNoteSlideAnimation`)**:
-   - Passando da una scheda di appunti (`.vscode-tab`) o materia all'altra, `#notes-area` esegue un'animazione di scorrimento laterale stile browser moderni (`note-slide-from-right` se si passa a una scheda a destra, `note-slide-from-left` se si passa a una scheda a sinistra) con indicatore luminoso scorrevole sotto la scheda attiva (`.vscode-tab::after`) e animazioni fluide GPU-accelerate (`cubic-bezier(0.16, 1, 0.3, 1)`) su box codice/formule/citazioni, chat, modali e viste calendario.
-2. **Persistenza Posizione di Scorrimento (`scrollTop`)**:
-   - Un `useEffect` dedicato salva `scrollTop` in `localStorage` per ogni materia e scheda (`ws_notes_scroll_personal_...` e `ws_notes_scroll_map`) e ripristina la posizione esatta sia al cambio scheda/materia/tab sia al ricaricamento della pagina (`F5`).
-3. **Incolla Intelligente Testo vs Screenshot (`Ctrl+V`)**:
-   - Sia negli appunti (`handleNotesPaste`) sia nella Chat AI (`handleChatPaste`), se gli appunti di sistema contengono `text/plain` non vuoto viene sempre incollato il testo copiato senza mai ri-allegare un vecchio screenshot.
-4. **Box di Codice Interattive (`💻 Codice`), Interprete Bash Locale & Motore SQL Relazionale**:
-   - Esecuzione diretta (`▶ Esegui`) senza chiave API per:
-     - **Bash / Shell (`runBashLocally` + Wandbox `/bin/bash` via `cpython-3.12.7`)**: interprete Bash locale istantaneo (cicli `for (( i=0; i<n; i++ ))`, `for x in ...`, `while`, `if`, aritmetica `$(( ... ))`, variabili) + fallback Wandbox reale e normalizzazione modelli Gemini (`normalizeGeminiModelName` -> `gemini-2.5-flash`) per evitare qualsiasi errore di modello deprecato. I modelli visibili nel selettore Chat restano sempre `3.8 Flash`, `3.8 Pro` e `3.6 Flash`.
-     - **SQL (`src/utils/sqlEngine.ts`)**: motore relazionale persistente in `localStorage` che supporta `CREATE TABLE`, `DROP TABLE`, `ALTER TABLE`, `TRUNCATE`, `INSERT INTO`, `UPDATE`, `DELETE`, `SHOW TABLES`, `DESCRIBE` e `SELECT` con `JOIN`, `WHERE`, `GROUP BY`, `ORDER BY`, `LIMIT` e output tabellare ASCII.
-     - **JavaScript / TypeScript, HTML/CSS, JSON** (locali nel browser) e **Python, C/C++, Java, PHP** (tramite Wandbox API keyless).
-5. **Conversione Automatica Chat AI -> Box Codice / Formule / Citazioni & Modifica In-Place nella Box**:
-   - Premendo `➕ Aggiungi` in fondo alla chat o `➕ Appunti` sotto ogni singola risposta di Gemini (`convertAiMarkdownToNoteHtml`), i blocchi ` ```linguaggio ... ``` ` diventano automaticamente **Box Codice interattive** (`.note-code-block` con `▶ Esegui`, `📋 Copia`, selettore linguaggio), le formule `$$ ... $$` diventano **Box Formula live** (`.note-formula-box`) e le citazioni `> ...` diventano **Box Citazione** (`.note-quote-block`).
-   - Scrivendo in chat comandi come *"nel blocco di codice dove faccio il ciclo per calcolare fibonacci sistemalo e sostituiscilo già nella box anche solo se è una parte"* (oppure *"nella formula ... sostituiscila nella box"* o *"nella citazione ... correggila nella box"*), l'AI individua la box corrispondente negli appunti e aggiorna direttamente il codice/formula/citazione **dentro la box esistente** (`applyTargetedBoxReplacement`).
-6. **Foto Ridimensionabili dai Bordi (8 Maniglie) & Disegni Modificabili dopo `Esc`**:
-   - Cliccando una foto o un tratto disegnato (anche dopo aver premuto `Esc`), compare la cornice `.note-object-selection-frame` con 8 maniglie trascinabili (`nw, n, ne, e, se, s, sw, w`), trascinamento libero col mouse e pulsante `🗑️ Elimina` (oltre ai tasti `Canc` / `Backspace`).
-7. **Barra Orizzontale Semplificata per il Disegno (`isDrawingMode`), Collasso Barra Strumenti & Animazione Slide-Down**:
-   - Rimosso il vecchio tasto `⛶ Massimizza Spazio` e sostituito con il controllo di collasso della barra strumenti degli appunti (`isEditorToolbarCollapsed`, persistito in `localStorage`) tramite i pulsanti in alto a destra (`🛠️ ▲ Nascondi Strumenti` / `🛠️ ▼ Strumenti`, `▲` nella barra delle schede e `▲ Nascondi` a destra nella barra strumenti).
-   - Sia `.editor-toolbar` sia `.notes-drawing-bar` utilizzano l'animazione `@keyframes toolbarSlideDown` (`toolbar-slide-down`) per comparire con una transizione fluida dall'alto verso il basso.
+## 3. Editor degli Appunti (`#notes-area`), Drag & Drop Schede & Strumenti Studio Avanzati (`v3.7.0`)
+L'editor `#notes-area` in `src/App.tsx` (supportato da `src/utils/editorTools.ts`, `src/utils/studyTools.ts` e `src/utils/sqlEngine.ts`) include:
+1. **Riordino Schede Drag-and-Drop (`reorderPagesList`) & Scorrimento Laterale Direzionale (`computeTabSlideDirection`)**:
+   - Ogni scheda nella barra `.vscode-tabs-bar` (sia Personale sia Stanze Condivise) è trascinabile (`draggable`) con grip `⋮⋮`, indicatore luminoso di inserimento sinistro/destro (`drag-over-left` / `drag-over-right`) e salvataggio automatico del nuovo ordine (`order: 0..n-1`) su `localStorage` e Firestore.
+   - Il cambio scheda o materia esegue lo scorrimento laterale direzionale (`note-slide-from-right` / `note-slide-from-left`) stile browser moderni.
+2. **Suite Strumenti di Studio (`src/components/`)**:
+   - **🧠 Modalità Ripasso Esame (`StudyReviewModal.tsx`)**: Flashcard 3D con flip CSS `rotateY(180deg)`, ripetizione spaziata (`So bene` / `Da ripassare` con barra percentuale), simulatore **Quiz Verifica ITS** a 4 risposte e potenziamento opzionale con Gemini AI.
+   - **🗺️ Mappa Concettuale Automatica (`MindMapModal.tsx`)**: grafo SVG interattivo con rami Bézier colorati estratti automaticamente da titoli, elenchi, codice e formule, con pan, zoom, compressione rami ed export `.svg`.
+   - **⚡ Command Palette (`CommandPaletteModal.tsx`, `Ctrl+K`)**: ricerca istantanea su schede, materie, PDF/materiali, azioni rapide e creazione diretta di promemoria in calendario scrivendo in italiano naturale.
+   - **🎙️ Dettatura Vocale Lezioni (`VoiceDictationBar.tsx`)**: trascrizione vocale live Web Speech API (`it-IT`) con onde audio animate, inserimento diretto negli appunti o riordino automatico con Gemini AI (`✨ Riordina AI & Inserisci`).
+   - **🔀 Vista Split-Screen (`SplitScreenPane.tsx`)**: apre a destra dell'editor un'altra scheda di appunti (di qualsiasi materia) oppure una dispensa PDF / immagine dalla libreria Materiali.
+   - **📄 Esportazione Dispensa (`ExportDispensaModal.tsx`)**: esporta la singola scheda o l'intera materia con copertina universitaria, indice/sommario automatico e 3 temi in **PDF professionale (stampa)**, **Word (`.doc`)** e **Markdown (`.md`)**.
+3. **Box Codice, Bash Locale, SQL Relazionale & Modelli Chat**:
+   - Interprete Bash locale (`runBashLocally`), SQL relazionale (`sqlEngine.ts`), conversione Chat -> Box Codice/Formule/Citazioni (`convertAiMarkdownToNoteHtml`), modifica in-place (`applyTargetedBoxReplacement`). I modelli visibili nel selettore Chat restano sempre `3.8 Flash`, `3.8 Pro` e `3.6 Flash`.
+4. **Persistenza Scroll, Incolla Intelligente, Foto 8 Maniglie & Barra Collassabile**:
+   - Persistenza `scrollTop` per scheda, incolla testo prioritario su screenshot, cornice ridimensionamento foto/disegni a 8 maniglie, collasso barra strumenti appunti.
 
 ---
 
 ## 4. Calendario Studi & Lezioni (`StudyCalendarPanel.tsx`), Viste Giorno/Settimana/Mese/Agenda & AI Chat Integration
-- **4 Viste Calendario (`Giorno`, `Settimana`, `Mese`, `Agenda`)**:
-  - **⏰ Giorno (`'day'`)**: timeline oraria (`07:00`–`21:00`) con inserimento rapido 1-click (`+ Aggiungi alle HH:00`) su ogni fascia oraria.
-  - **📊 Settimana (`'week'`)**: bacheca settimanale a 7 colonne (`Lun`–`Dom`) con card degli impegni e pulsante `+` su ogni giorno.
-  - **🗓️ Mese (`'month'`)** e **📋 Agenda (`'agenda'`)**.
-- **Propagazione Firestore & Listener Cloud (`users/{uid}/calendar_events`)**:
-  - `saveCalendarEventToCloud` sanitizza tutti i campi e il listener `onCalendarEvents` preserva `updatedAt` e traccia gli ID già sincronizzati (`syncedCalendarIdsRef`) evitando qualsiasi loop di riscrittura verso Firestore.
-- **Comandi Vocali/Testuali Calendario nella Chat AI (`parseCalendarChatCommand` & `buildCalendarScheduleContextForChat`)**:
-  - Scrivendo in chat frasi come *"aggiungi un promemoria per domani alle 15:30 per studiare Database"* l'evento viene creato automaticamente nel Calendario (e su Google Calendar personale se collegato).
-  - Scrivendo domande come *"che materie ho domani?"* o *"che impegni ho questa settimana?"*, la Chat AI ha visibilità completa sul calendario (e risponde anche senza API key tramite `answerCalendarQueryLocally`).
+- **4 Viste Calendario (`Giorno`, `Settimana`, `Mese`, `Agenda`)** con propagazione Firestore protetta contro loop (`syncedCalendarIdsRef`) e comandi vocali/testuali in Chat AI (`parseCalendarChatCommand`, `answerCalendarQueryLocally`).
+
 
 
 
