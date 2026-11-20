@@ -36,6 +36,18 @@ import { CommandPaletteModal, CommandPaletteAction } from './components/CommandP
 import { VoiceDictationBar } from './components/VoiceDictationBar';
 import { SplitScreenPane } from './components/SplitScreenPane';
 import { ExportDispensaModal } from './components/ExportDispensaModal';
+import { IdeTopHeader } from './components/IdeTopHeader';
+import { IdeExplorerPane } from './components/IdeExplorerPane';
+import {
+  UiStyleMode,
+  IdeThemeMode,
+  IdeWindowVisibility,
+  DEFAULT_IDE_WINDOWS,
+  toggleIdeWindowSafe,
+  normalizeUiStyle,
+  normalizeIdeThemeMode,
+  computeNoteWordCount
+} from './utils/ideTheme';
 import { reorderPagesList } from './utils/studyTools';
 import {
   APP_VERSION,
@@ -175,6 +187,9 @@ export default function App() {
   const [accentColor, setAccentColor] = useState<string>('indigo');
   const [panelTheme, setPanelTheme] = useState<string>('default');
   const [panelOpacity, setPanelOpacity] = useState<number>(82);
+  const [uiStyle, setUiStyle] = useState<UiStyleMode>('ide');
+  const [ideThemeMode, setIdeThemeMode] = useState<IdeThemeMode>('dark');
+  const [ideWindows, setIdeWindows] = useState<IdeWindowVisibility>(DEFAULT_IDE_WINDOWS);
   const [showDriveBar, setShowDriveBar] = useState<boolean>(true);
   const [columnLayout, setColumnLayout] = useState<ColumnLayoutPreset>('tools-notes-chat');
   const [leftColumnWidth, setLeftColumnWidth] = useState<number>(256);
@@ -571,6 +586,19 @@ export default function App() {
     if (typeof localPref.panelOpacity === 'number') {
       setPanelOpacity(localPref.panelOpacity);
     }
+    if (localPref.uiStyle) {
+      setUiStyle(normalizeUiStyle(localPref.uiStyle));
+    }
+    if (localPref.ideThemeMode) {
+      setIdeThemeMode(normalizeIdeThemeMode(localPref.ideThemeMode));
+    }
+    if (localPref.ideWindows) {
+      setIdeWindows({
+        explorer: localPref.ideWindows.explorer !== false,
+        editor: localPref.ideWindows.editor !== false,
+        chat: localPref.ideWindows.chat !== false
+      });
+    }
     if (typeof localPref.showDriveBar === 'boolean') {
       setShowDriveBar(localPref.showDriveBar);
     }
@@ -634,8 +662,22 @@ export default function App() {
     setSelectedKeyIndex(localKeys.selectedIndex);
   }, []);
 
-  // Apply Background (Monocolor or Photographic) and Compact Mode
+  // Apply Background (Monocolor or Photographic), Compact Mode, and Reversible IDE Studio Body Classes
   useEffect(() => {
+    if (uiStyle === 'ide') {
+      document.body.classList.add('ide-studio-body');
+      document.body.classList.toggle('ide-theme-light', ideThemeMode === 'light');
+      document.body.classList.toggle('ide-theme-dark', ideThemeMode !== 'light');
+      document.body.classList.remove('compact-mode');
+      document.body.style.backgroundImage = 'none';
+      document.documentElement.style.setProperty(
+        '--bg-base',
+        ideThemeMode === 'light' ? '#ffffff' : '#1e1e1e'
+      );
+      return;
+    }
+
+    document.body.classList.remove('ide-studio-body', 'ide-theme-light', 'ide-theme-dark');
     const selectedBg = BACKGROUND_THEMES.find(t => t.id === bgIndex) || BACKGROUND_THEMES[0];
     if (compactMode) {
       document.body.classList.add('compact-mode');
@@ -652,7 +694,7 @@ export default function App() {
         document.documentElement.style.setProperty('--bg-base', '#070709');
       }
     }
-  }, [bgIndex, compactMode]);
+  }, [bgIndex, compactMode, uiStyle, ideThemeMode]);
 
   // Apply Accent Color, Panel/Sidebar/Topbar Theme & Column Dimension CSS Variables
   useEffect(() => {
@@ -842,6 +884,15 @@ export default function App() {
             if (pref.accentColor !== undefined) setAccentColor(pref.accentColor);
             if (pref.panelTheme !== undefined) setPanelTheme(pref.panelTheme);
             if (pref.panelOpacity !== undefined) setPanelOpacity(pref.panelOpacity);
+            if (pref.uiStyle !== undefined) setUiStyle(normalizeUiStyle(pref.uiStyle));
+            if (pref.ideThemeMode !== undefined) setIdeThemeMode(normalizeIdeThemeMode(pref.ideThemeMode));
+            if (pref.ideWindows !== undefined) {
+              setIdeWindows({
+                explorer: pref.ideWindows.explorer !== false,
+                editor: pref.ideWindows.editor !== false,
+                chat: pref.ideWindows.chat !== false
+              });
+            }
             if (pref.showDriveBar !== undefined) setShowDriveBar(pref.showDriveBar);
             if (pref.columnLayout !== undefined) setColumnLayout(pref.columnLayout);
             if (pref.leftColumnWidth !== undefined) setLeftColumnWidth(pref.leftColumnWidth);
@@ -1564,6 +1615,56 @@ export default function App() {
     if (currentUser) {
       WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { panelOpacity: opacity });
     }
+  };
+
+  // Reversible UI Style ('ide' | 'classic') handler
+  const handleSelectUiStyle = (nextStyle: UiStyleMode) => {
+    const normalized = normalizeUiStyle(nextStyle);
+    setUiStyle(normalized);
+    WorkspaceService.saveLocalPreferences({ uiStyle: normalized });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { uiStyle: normalized });
+    }
+    showToast(
+      normalized === 'ide'
+        ? '💻 Stile IDE Studio attivato (puoi tornare al Classico quando vuoi da Impostazioni).'
+        : '✨ Stile Classico Workspace ITS ripristinato.'
+    );
+  };
+
+  // IDE Dark / Light Theme Toggle handler
+  const handleSelectIdeThemeMode = (nextMode: IdeThemeMode) => {
+    const normalized = normalizeIdeThemeMode(nextMode);
+    setIdeThemeMode(normalized);
+    WorkspaceService.saveLocalPreferences({ ideThemeMode: normalized });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { ideThemeMode: normalized });
+    }
+  };
+
+  // IDE Window visibility toggle (Explorer / Editor / AI Chat)
+  const handleToggleIdeWindow = (key: keyof IdeWindowVisibility) => {
+    setIdeWindows(prev => {
+      const next = toggleIdeWindowSafe(prev, key);
+      if (next === prev) {
+        showToast('Almeno una finestra deve rimanere visibile.', 'error');
+        return prev;
+      }
+      WorkspaceService.saveLocalPreferences({ ideWindows: next });
+      if (currentUser) {
+        WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { ideWindows: next });
+      }
+      return next;
+    });
+  };
+
+  const handleRestoreIdeWindows = () => {
+    setIdeWindows(DEFAULT_IDE_WINDOWS);
+    WorkspaceService.saveLocalPreferences({ ideWindows: DEFAULT_IDE_WINDOWS });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { ideWindows: DEFAULT_IDE_WINDOWS });
+    }
+    showToast('Layout IDE ripristinato (3/3 finestre attive).');
   };
 
   // Show/Hide Google Drive link bar
@@ -5965,8 +6066,7 @@ REGOLE TASSATIVE:
     workspaceMode === 'shared'
       ? (activeRoomPages.find(p => p.id === activeRoomPageId) || activeRoomPages[0])?.content || ''
       : (currentSubPages.find(p => p.id === activePageId) || currentSubPages[0])?.content || '';
-  const activeNotePlainText = activeNoteRawHtml.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').trim();
-  const activeNoteWordCount = activeNotePlainText ? activeNotePlainText.split(/\s+/).filter(Boolean).length : 0;
+  const activeNoteWordCount = computeNoteWordCount(activeNoteRawHtml);
 
   // 1. Loading screen while Firebase Auth initializes
   if (authLoading) {
@@ -6153,9 +6253,65 @@ REGOLE TASSATIVE:
 
   // 3. Authenticated Workspace (When currentUser is present)
   return (
-    <div className="app-viewport">
-      {/* Unified App Top Header - NEVER overlaps content or chat toggle */}
+    <div className={`app-viewport ${uiStyle === 'ide' ? `ide-studio-mode ide-theme-${ideThemeMode}` : ''}`}>
+      {/* Unified App Top Header - IDE Studio TopBar OR Classic TopBar */}
       {!isImmersion && (
+        uiStyle === 'ide' ? (
+          <IdeTopHeader
+            currentUser={currentUser}
+            subjects={subjects}
+            activeSubject={activeSubject}
+            workspaceMode={workspaceMode}
+            activeRoomName={activeRoom?.name}
+            userRoomsCount={userRooms.length}
+            activeTab={activeTab}
+            isSplitScreenOpen={isSplitScreenOpen}
+            isStudyReviewOpen={isStudyReviewOpen}
+            isMindMapOpen={isMindMapOpen}
+            ideWindows={ideWindows}
+            ideThemeMode={ideThemeMode}
+            isAdmin={isAdmin}
+            pendingRequestsCount={accessRequests.filter(r => r.status === 'pending').length}
+            isInstalled={isInstalled}
+            onSelectSubject={handleSelectSubject}
+            onAddNewSubject={handleAddNewSubject}
+            onDeleteSubject={handleDeleteSubject}
+            onSwitchWorkspaceMode={mode => {
+              setWorkspaceMode(mode);
+              if (mode === 'shared' && userRooms.length === 0) {
+                setIsRoomModalOpen(true);
+              }
+            }}
+            onOpenCreateRoom={() => {
+              setRoomModalTab('create');
+              setIsRoomModalOpen(true);
+            }}
+            onOpenJoinRoom={() => {
+              setRoomModalTab('join');
+              setIsRoomModalOpen(true);
+            }}
+            onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+            onToggleIdeWindow={handleToggleIdeWindow}
+            onRestoreDefaultWindows={handleRestoreIdeWindows}
+            onSelectCenterTab={tab => setActiveTab(tab)}
+            onToggleSplitScreen={() => setIsSplitScreenOpen(v => !v)}
+            onOpenStudyReview={() => setIsStudyReviewOpen(true)}
+            onOpenMindMap={() => setIsMindMapOpen(true)}
+            onToggleIdeThemeMode={() =>
+              handleSelectIdeThemeMode(ideThemeMode === 'dark' ? 'light' : 'dark')
+            }
+            onSwitchUiStyle={handleSelectUiStyle}
+            onOpenSettings={() => {
+              setSettingsInitialTab('appearance');
+              setIsSettingsModalOpen(true);
+            }}
+            onOpenBackup={() => setIsBackupModalOpen(true)}
+            onOpenSync={() => setIsSyncModalOpen(true)}
+            onOpenAdmin={() => setIsAdminModalOpen(true)}
+            onInstallApp={handleInstallAppClick}
+            onLogout={handleLogout}
+          />
+        ) : (
         <header className="app-topbar">
           <div className="topbar-left">
             <div className="topbar-brand">
@@ -6304,17 +6460,80 @@ REGOLE TASSATIVE:
             </button>
           </div>
         </header>
+        )
       )}
 
       {/* Main Multi-Column Dashboard Container (Supports Dedicated Full-Column Widgets) */}
       <div
-        className={`dashboard-container layout-${columnLayout} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${
-          isChatCollapsed ? 'chat-collapsed' : ''
-        } ${customWidgets.some(w => w.enabled && w.slot === 'full_column') ? 'has-widget-column' : ''}`}
+        className={`dashboard-container layout-${columnLayout} ${isSidebarCollapsed && uiStyle === 'classic' ? 'sidebar-collapsed' : ''} ${
+          isChatCollapsed && uiStyle === 'classic' ? 'chat-collapsed' : ''
+        } ${customWidgets.some(w => w.enabled && w.slot === 'full_column') ? 'has-widget-column' : ''} ${
+          uiStyle === 'ide' && !ideWindows.explorer ? 'ide-hide-explorer' : ''
+        } ${uiStyle === 'ide' && !ideWindows.editor ? 'ide-hide-editor' : ''} ${
+          uiStyle === 'ide' && !ideWindows.chat ? 'ide-hide-chat' : ''
+        }`}
         id="main-container"
       >
-        {/* Left Column: Tools & Quick Launch */}
+        {/* Left Column: IDE Explorer Pane OR Classic Tools & Quick Launch */}
         <div className={`panel tools-column ${mobileTab === 'tools' ? 'mobile-active' : ''}`}>
+          {uiStyle === 'ide' ? (
+            <IdeExplorerPane
+              pages={workspaceMode === 'shared' ? activeRoomPages : currentSubPages}
+              activePageId={workspaceMode === 'shared' ? activeRoomPageId : activePageId}
+              activeTab={activeTab}
+              workspaceMode={workspaceMode}
+              materialsCount={activeDisplayMaterials.length}
+              calendarEventsCount={calendarEvents.length}
+              isStudyReviewOpen={isStudyReviewOpen}
+              isMindMapOpen={isMindMapOpen}
+              onSelectPage={pageId => {
+                if (workspaceMode === 'shared') {
+                  handleSelectSharedRoomPageTab(pageId);
+                } else {
+                  handleSelectPersonalPageTab(pageId);
+                }
+              }}
+              onAddNewPage={() => {
+                if (workspaceMode === 'shared') {
+                  handleAddNewRoomPage();
+                } else {
+                  handleAddNewPage();
+                }
+              }}
+              onRenamePage={pageId => {
+                if (workspaceMode === 'shared') {
+                  handleRenameRoomPage(pageId);
+                } else {
+                  handleRenamePage(pageId);
+                }
+              }}
+              onDeletePage={pageId => {
+                const fakeEvent = { stopPropagation: () => {} } as React.MouseEvent;
+                if (workspaceMode === 'shared') {
+                  handleDeleteRoomPage(pageId, fakeEvent);
+                } else {
+                  handleDeletePage(pageId, fakeEvent);
+                }
+              }}
+              onOpenAddMaterial={handleOpenAddMaterialModal}
+              onSelectCenterTab={tab => setActiveTab(tab)}
+              onOpenStudyReview={() => setIsStudyReviewOpen(true)}
+              onOpenMindMap={() => setIsMindMapOpen(true)}
+              onOpenWeather={() => setIsWeatherModalOpen(true)}
+              onOpenWidgetsSettings={() => {
+                setSettingsInitialTab('widgets');
+                setIsSettingsModalOpen(true);
+              }}
+              onToggleWorkspaceMode={() => {
+                const nextMode = workspaceMode === 'shared' ? 'personal' : 'shared';
+                setWorkspaceMode(nextMode);
+                if (nextMode === 'shared' && userRooms.length === 0) {
+                  setIsRoomModalOpen(true);
+                }
+              }}
+            />
+          ) : (
+            <>
           <div className="sidebar-top-row">
             <div className="datetime-header">
               <div id="clock">{currentTime}</div>
@@ -6497,12 +6716,139 @@ REGOLE TASSATIVE:
             onSyncGoogleCalendar={handleSyncGoogleCalendar}
             onOpenFullCalendar={() => setActiveTab('calendar')}
           />
+            </>
+          )}
         </div>
 
         {/* Center Column: Workspace Notes & Materials */}
         <div className={`panel ${isNotesMaximized ? 'notes-maximized' : ''} ${mobileTab === 'notes' || mobileTab === 'materials' ? 'mobile-active' : ''}`} id="notes-panel">
-          
-          {/* Top Unified Bar: Mode Switcher (Personal vs Shared) + View Switcher (Appunti vs Materiali vs Calendario) */}
+          {uiStyle === 'ide' && (
+            <>
+              <div className="ide-pane-header ide-editor-pane-header">
+                <div className="ide-pane-header-left">
+                  <span className="ide-grip-dots" aria-hidden="true">⋮⋮</span>
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#3b82f6"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <polyline points="16 18 22 12 16 6" />
+                    <polyline points="8 6 2 12 8 18" />
+                  </svg>
+                  <span className="ide-pane-title">
+                    {activeTab === 'materials'
+                      ? 'SLIDE / MATERIALI'
+                      : activeTab === 'calendar'
+                      ? 'CALENDARIO STUDIO'
+                      : 'EDITOR'}
+                  </span>
+                </div>
+                <div className="ide-pane-header-actions">
+                  {activeTab !== 'notes' ? (
+                    <button
+                      type="button"
+                      className="ide-pane-mini-btn"
+                      onClick={() => setActiveTab('notes')}
+                      title="Torna all'Editor Appunti"
+                    >
+                      &lt;&gt; Editor
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className={`ide-pane-mini-btn ${isVoiceDictationOpen ? 'is-active' : ''}`}
+                        onClick={() => setIsVoiceDictationOpen(v => !v)}
+                        title="Registrazione Lezione & Dettatura Vocale AI"
+                      >
+                        🎙️ Detta
+                      </button>
+                      <button
+                        type="button"
+                        className={`ide-pane-mini-btn ${isSplitScreenOpen ? 'is-active' : ''}`}
+                        onClick={() => setIsSplitScreenOpen(v => !v)}
+                        title="Vista Split-Screen"
+                      >
+                        🔀 Split
+                      </button>
+                      <button
+                        type="button"
+                        className="ide-pane-mini-btn"
+                        onClick={() => setIsExportDispensaOpen(true)}
+                        title="Esporta Dispensa Impaginata (PDF / Word / Markdown)"
+                      >
+                        ↓ Esporta
+                      </button>
+                      <button
+                        type="button"
+                        className={`ide-pane-mini-btn ${isEditorToolbarCollapsed ? 'is-active' : ''}`}
+                        onClick={handleToggleEditorToolbar}
+                        title={
+                          isEditorToolbarCollapsed
+                            ? 'Mostra barra strumenti'
+                            : 'Nascondi barra strumenti'
+                        }
+                      >
+                        {isEditorToolbarCollapsed ? '🛠️ ▼' : '🛠️ ▲'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {workspaceMode === 'shared' && activeRoom && (
+                <div className="ide-shared-room-strip">
+                  <div className="ide-shared-strip-left">
+                    <span>👥 Stanza:</span>
+                    <select
+                      value={activeRoomId}
+                      onChange={e => setActiveRoomId(e.target.value)}
+                      className="ide-shared-select"
+                    >
+                      {userRooms.map(r => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="ide-pane-mini-btn"
+                      onClick={() => handleCopyRoomCode(activeRoom.code)}
+                      title="Copia codice invito"
+                    >
+                      📋 {activeRoom.code}
+                    </button>
+                    <span className="ide-shared-members">
+                      {activeRoomMemberList.length} {activeRoomMemberList.length === 1 ? 'membro' : 'membri'}
+                    </span>
+                  </div>
+                  <div className="ide-shared-strip-right">
+                    <button type="button" className="ide-pane-mini-btn" onClick={handleLeaveRoom}>
+                      🚪 Esci
+                    </button>
+                    {(activeRoom.createdBy === currentUser?.uid || isAdmin) && (
+                      <button
+                        type="button"
+                        className="ide-pane-mini-btn is-danger"
+                        onClick={handleDeleteRoom}
+                      >
+                        🗑️ Elimina
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Top Unified Bar: Mode Switcher (Personal vs Shared) + View Switcher (Classic Only) */}
           <div className="workspace-mode-bar">
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <div className="workspace-mode-selector">
@@ -7950,6 +8296,32 @@ REGOLE TASSATIVE:
                     />
                   )}
                 </div>
+
+                {uiStyle === 'ide' && (
+                  <div className="ide-editor-statusbar" role="status" aria-live="polite">
+                    <div className="ide-statusbar-left">
+                      <span className="ide-status-saved">Salvato</span>
+                      <span className="ide-status-sep">·</span>
+                      <span className="ide-status-words">
+                        {activeNoteWordCount} {activeNoteWordCount === 1 ? 'parola' : 'parole'}
+                      </span>
+                    </div>
+                    <div className="ide-statusbar-right">
+                      <button
+                        type="button"
+                        className="ide-status-search-btn"
+                        onClick={() => setIsCommandPaletteOpen(true)}
+                        title="Cerca negli appunti e nei comandi (Ctrl+K)"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                          <circle cx="11" cy="11" r="8" />
+                          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                        </svg>
+                        <span>Cerca</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : activeTab === 'calendar' ? (
               <div
@@ -8135,6 +8507,94 @@ REGOLE TASSATIVE:
           onPaste={handleChatPaste}
         >
           <div className="ai-chat-panel">
+            {uiStyle === 'ide' ? (
+              <>
+                <div className="ide-pane-header ide-chat-pane-header">
+                  <div className="ide-pane-header-left">
+                    <span className="ide-grip-dots" aria-hidden="true">⋮⋮</span>
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#a855f7"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <rect x="3" y="8" width="18" height="12" rx="2" />
+                      <path d="M12 2v6" />
+                      <circle cx="9" cy="14" r="1" />
+                      <circle cx="15" cy="14" r="1" />
+                    </svg>
+                    <span className="ide-pane-title">
+                      {workspaceMode === 'shared'
+                        ? `AI CHAT · ${activeRoom?.name || 'GRUPPO'}`
+                        : 'AI CHAT'}
+                    </span>
+                  </div>
+                  <div className="ide-pane-header-actions">
+                    {workspaceMode === 'personal' && (
+                      <button
+                        type="button"
+                        className="ide-pane-mini-btn"
+                        onClick={handleClearChatHistory}
+                        title="Pulisci cronologia chat"
+                      >
+                        ↺ Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* IDE Quick Actions Chips Row (Riassumi / Spiega Concetti / Mini-Quiz) */}
+                <div className="ide-chat-quick-bar">
+                  <button
+                    type="button"
+                    className="ide-chat-quick-chip"
+                    onClick={() =>
+                      handleSendAIChat(
+                        'Riassumi in modo chiaro e strutturato per punti chiave gli appunti della scheda attiva.',
+                        false
+                      )
+                    }
+                    disabled={isAILoading}
+                  >
+                    <span className="ide-chip-icon" style={{ color: '#60a5fa' }}>≡</span>
+                    <span>Riassumi</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="ide-chat-quick-chip"
+                    onClick={() =>
+                      handleSendAIChat(
+                        'Spiega in modo semplice con esempi pratici i concetti più importanti presenti nella scheda attiva.',
+                        false
+                      )
+                    }
+                    disabled={isAILoading}
+                  >
+                    <span className="ide-chip-icon" style={{ color: '#c084fc' }}>💡</span>
+                    <span>Spiega Concetti</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="ide-chat-quick-chip"
+                    onClick={() =>
+                      handleSendAIChat(
+                        'Crea un mini-quiz interattivo di 4 domande a risposta multipla (con soluzioni nascoste alla fine) sugli appunti della scheda attiva.',
+                        false
+                      )
+                    }
+                    disabled={isAILoading}
+                  >
+                    <span className="ide-chip-icon" style={{ color: '#34d399' }}>❓</span>
+                    <span>Mini-Quiz</span>
+                  </button>
+                </div>
+              </>
+            ) : (
             <div className="chat-header-bar">
               <button
                 className="expand-btn"
@@ -8172,6 +8632,7 @@ REGOLE TASSATIVE:
                 )}
               </div>
             </div>
+            )}
 
             <div className="chat-vertical-title">GEMINI AI</div>
 
@@ -9978,6 +10439,10 @@ REGOLE TASSATIVE:
         onSelectPanelTheme={handleSelectPanelTheme}
         panelOpacity={panelOpacity}
         onChangePanelOpacity={handleChangePanelOpacity}
+        uiStyle={uiStyle}
+        onSelectUiStyle={handleSelectUiStyle}
+        ideThemeMode={ideThemeMode}
+        onSelectIdeThemeMode={handleSelectIdeThemeMode}
         showDriveBar={showDriveBar}
         onToggleShowDriveBar={handleToggleShowDriveBar}
         fontFamily={fontFamily}
@@ -10141,6 +10606,31 @@ REGOLE TASSATIVE:
               icon: '📄',
               group: 'Azioni Rapide',
               onExecute: () => setIsExportDispensaOpen(true)
+            },
+            {
+              id: 'qa_switch_ui_style',
+              title:
+                uiStyle === 'ide'
+                  ? 'Torna allo Stile Classico Workspace ITS'
+                  : 'Attiva Stile IDE Studio (VS Code)',
+              subtitle: 'Cambia stile interfaccia in 1 clic senza perdere dati',
+              icon: uiStyle === 'ide' ? '✨' : '💻',
+              group: 'Azioni Rapide',
+              onExecute: () => handleSelectUiStyle(uiStyle === 'ide' ? 'classic' : 'ide')
+            },
+            {
+              id: 'qa_toggle_ide_theme',
+              title:
+                ideThemeMode === 'dark'
+                  ? 'Tema IDE Studio: Passa a Chiaro'
+                  : 'Tema IDE Studio: Passa a Scuro (VS Code)',
+              subtitle: 'Alterna palette Chiara / Scura nello stile IDE Studio',
+              icon: ideThemeMode === 'dark' ? '☀️' : '🌙',
+              group: 'Azioni Rapide',
+              onExecute: () => {
+                if (uiStyle !== 'ide') handleSelectUiStyle('ide');
+                handleSelectIdeThemeMode(ideThemeMode === 'dark' ? 'light' : 'dark');
+              }
             },
             {
               id: 'qa_code_box',

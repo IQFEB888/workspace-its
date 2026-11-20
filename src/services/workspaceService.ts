@@ -98,7 +98,10 @@ export class WorkspaceService {
       customShortcuts: this.localGet('workspace_custom_shortcuts', DEFAULT_SHORTCUTS),
       savedTextColors: this.localGet('workspace_saved_text_colors', DEFAULT_TEXT_COLORS),
       savedHighlightColors: this.localGet('workspace_saved_highlight_colors', DEFAULT_HIGHLIGHT_COLORS),
-      savedPenColors: this.localGet('workspace_saved_pen_colors', DEFAULT_PEN_COLORS)
+      savedPenColors: this.localGet('workspace_saved_pen_colors', DEFAULT_PEN_COLORS),
+      uiStyle: localStorage.getItem('workspace_ui_style') === 'classic' ? 'classic' : 'ide',
+      ideThemeMode: localStorage.getItem('workspace_ide_theme_mode') === 'light' ? 'light' : 'dark',
+      ideWindows: this.localGet('workspace_ide_windows', { explorer: true, editor: true, chat: true })
     };
   }
 
@@ -202,6 +205,9 @@ export class WorkspaceService {
     if (pref.savedTextColors !== undefined) this.localSet('workspace_saved_text_colors', pref.savedTextColors);
     if (pref.savedHighlightColors !== undefined) this.localSet('workspace_saved_highlight_colors', pref.savedHighlightColors);
     if (pref.savedPenColors !== undefined) this.localSet('workspace_saved_pen_colors', pref.savedPenColors);
+    if (pref.uiStyle !== undefined) localStorage.setItem('workspace_ui_style', pref.uiStyle);
+    if (pref.ideThemeMode !== undefined) localStorage.setItem('workspace_ide_theme_mode', pref.ideThemeMode);
+    if (pref.ideWindows !== undefined) this.localSet('workspace_ide_windows', pref.ideWindows);
   }
 
   static saveLocalPages(pages: Record<string, PageItem[]>): void {
@@ -283,7 +289,10 @@ export class WorkspaceService {
                 customShortcuts: data.customShortcuts,
                 savedTextColors: data.savedTextColors,
                 savedHighlightColors: data.savedHighlightColors,
-                savedPenColors: data.savedPenColors
+                savedPenColors: data.savedPenColors,
+                uiStyle: data.uiStyle,
+                ideThemeMode: data.ideThemeMode,
+                ideWindows: data.ideWindows
               });
             }
           }
@@ -517,6 +526,9 @@ export class WorkspaceService {
       if (pref.savedTextColors !== undefined) payload.savedTextColors = pref.savedTextColors;
       if (pref.savedHighlightColors !== undefined) payload.savedHighlightColors = pref.savedHighlightColors;
       if (pref.savedPenColors !== undefined) payload.savedPenColors = pref.savedPenColors;
+      if (pref.uiStyle !== undefined) payload.uiStyle = pref.uiStyle;
+      if (pref.ideThemeMode !== undefined) payload.ideThemeMode = pref.ideThemeMode;
+      if (pref.ideWindows !== undefined) payload.ideWindows = pref.ideWindows;
 
       await setDoc(userDocRef, payload, { merge: true });
     } catch (e) {

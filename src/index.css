@@ -7600,6 +7600,1575 @@ body.is-resizing-column object {
   }
 }
 
+/* ============================================================================
+   WORKSPACE ITS v4.1.0 — REVERSIBLE "IDE STUDIO" MODE (VS CODE DARK & LIGHT)
+   100% scoped under .ide-studio-mode / body.ide-studio-body so Classic mode
+   remains completely untouched and reversible in 1 click from Settings.
+   ============================================================================ */
+
+.ide-studio-mode.ide-theme-dark,
+body.ide-studio-body.ide-theme-dark {
+  --ide-bg: #1e1e1e;
+  --ide-sidebar: #252526;
+  --ide-tab-inactive: #2d2d2d;
+  --ide-border: #333333;
+  --ide-border-light: #454545;
+  --ide-input: #3c3c3c;
+  --ide-hover: #2a2d2e;
+  --ide-active-row: #37373d;
+  --ide-text: #cccccc;
+  --ide-text-bright: #ffffff;
+  --ide-text-muted: #858585;
+  --ide-primary: #3b82f6;
+  --ide-primary-btn: #2563eb;
+  --ide-primary-btn-hover: #1d4ed8;
+  --ide-saved: #10b981;
+  --ide-popover-bg: #252526;
+  --ide-popover-shadow: 0 14px 36px rgba(0, 0, 0, 0.65);
+  --ide-code-bg: #141416;
+  --ide-ai-card-bg: #1f1f22;
+}
+
+.ide-studio-mode.ide-theme-light,
+body.ide-studio-body.ide-theme-light {
+  --ide-bg: #ffffff;
+  --ide-sidebar: #f8fafc;
+  --ide-tab-inactive: #f1f5f9;
+  --ide-border: #e2e8f0;
+  --ide-border-light: #cbd5e1;
+  --ide-input: #ffffff;
+  --ide-hover: #e2e8f0;
+  --ide-active-row: #e0ecff;
+  --ide-text: #334155;
+  --ide-text-bright: #0f172a;
+  --ide-text-muted: #64748b;
+  --ide-primary: #2563eb;
+  --ide-primary-btn: #2563eb;
+  --ide-primary-btn-hover: #1d4ed8;
+  --ide-saved: #059669;
+  --ide-popover-bg: #ffffff;
+  --ide-popover-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  --ide-code-bg: #f1f5f9;
+  --ide-ai-card-bg: #ffffff;
+}
+
+body.ide-studio-body {
+  background: var(--ide-bg) !important;
+  background-image: none !important;
+  color: var(--ide-text);
+}
+
+body.ide-studio-body::before,
+body.ide-studio-body::after {
+  display: none !important;
+  opacity: 0 !important;
+}
+
+.app-viewport.ide-studio-mode {
+  background: var(--ide-bg);
+  color: var(--ide-text);
+  overflow: hidden;
+}
+
+/* ---------- 1. IDE TOP HEADER (48px) ---------- */
+.ide-top-header {
+  height: 48px;
+  min-height: 48px;
+  width: 100%;
+  background: var(--ide-sidebar);
+  border-bottom: 1px solid var(--ide-border);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  position: relative;
+  z-index: 60;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.ide-header-left,
+.ide-header-center,
+.ide-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ide-header-center {
+  justify-content: center;
+}
+
+.ide-header-right {
+  justify-content: flex-end;
+}
+
+.ide-brand-block {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ide-brand-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--ide-primary-btn);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ide-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.ide-brand-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ide-text-bright);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.ide-brand-ver {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.64rem;
+  color: var(--ide-text-muted);
+}
+
+.ide-header-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--ide-border-light);
+  flex-shrink: 0;
+}
+
+.ide-menu-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ide-pill-trigger {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--ide-border-light);
+  background: var(--ide-tab-inactive);
+  color: var(--ide-text-bright);
+  font-size: 0.78rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease;
+  white-space: nowrap;
+}
+
+.ide-pill-trigger:hover,
+.ide-pill-trigger.is-open {
+  background: var(--ide-hover);
+  border-color: var(--ide-primary);
+}
+
+.ide-pill-label {
+  max-width: 165px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-subject-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.ide-window-count {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  color: var(--ide-text-muted);
+}
+
+.ide-cmd-trigger {
+  height: 30px;
+  min-width: 220px;
+  width: clamp(200px, 24vw, 320px);
+  padding: 0 8px 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--ide-border);
+  background: var(--ide-tab-inactive);
+  color: var(--ide-text-muted);
+  font-size: 0.77rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.ide-cmd-trigger:hover {
+  background: var(--ide-hover);
+  border-color: var(--ide-border-light);
+  color: var(--ide-text-bright);
+}
+
+.ide-cmd-prompt {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  color: var(--ide-text-muted);
+}
+
+.ide-cmd-placeholder {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-cmd-kbd {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.67rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--ide-bg);
+  border: 1px solid var(--ide-border-light);
+  color: var(--ide-text);
+}
+
+.ide-icon-pill-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--ide-border-light);
+  background: var(--ide-tab-inactive);
+  color: var(--ide-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.ide-icon-pill-btn:hover {
+  background: var(--ide-hover);
+  border-color: var(--ide-primary);
+  color: var(--ide-text-bright);
+}
+
+.ide-profile-avatar {
+  width: 19px;
+  height: 19px;
+  border-radius: 999px;
+  background: var(--ide-border-light);
+  color: var(--ide-text-bright);
+  font-size: 0.68rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ide-profile-avatar-img {
+  width: 19px;
+  height: 19px;
+  border-radius: 999px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+/* ---------- IDE HEADER POPOVERS (Subject / Finestre / Profile) ---------- */
+.ide-dropdown-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  min-width: 240px;
+  background: var(--ide-popover-bg);
+  border: 1px solid var(--ide-border-light);
+  border-radius: 8px;
+  box-shadow: var(--ide-popover-shadow);
+  padding: 6px;
+  z-index: 120;
+  color: var(--ide-text);
+}
+
+.ide-subject-popover {
+  left: 0;
+  width: 264px;
+}
+
+.ide-windows-popover {
+  right: 0;
+  width: 268px;
+}
+
+.ide-profile-popover {
+  right: 0;
+  width: 248px;
+}
+
+.ide-popover-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px 4px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--ide-text-muted);
+}
+
+.ide-popover-inline-link {
+  border: none;
+  background: transparent;
+  color: var(--ide-primary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
+.ide-popover-inline-link:hover {
+  background: var(--ide-hover);
+}
+
+.ide-mode-segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+  background: var(--ide-bg);
+  border: 1px solid var(--ide-border);
+}
+
+.ide-mode-segmented button {
+  border: none;
+  background: transparent;
+  color: var(--ide-text-muted);
+  font-size: 0.73rem;
+  font-weight: 600;
+  padding: 5px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.ide-mode-segmented button.is-active {
+  background: var(--ide-primary-btn);
+  color: #ffffff;
+}
+
+.ide-popover-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.ide-popover-row {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--ide-text);
+  font-size: 0.78rem;
+  padding: 7px 9px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.ide-popover-row:hover {
+  background: var(--ide-hover);
+  color: var(--ide-text-bright);
+}
+
+.ide-popover-row.is-active {
+  background: var(--ide-active-row);
+  color: var(--ide-text-bright);
+  font-weight: 600;
+}
+
+.ide-popover-row-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-row-check {
+  color: var(--ide-primary);
+  font-weight: 700;
+}
+
+.ide-popover-footer {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--ide-border);
+}
+
+.ide-popover-danger-btn {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #f87171;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-radius: 5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ide-popover-danger-btn:hover {
+  background: rgba(239, 68, 68, 0.14);
+}
+
+/* Finestre Layout Popover Rows (matches reference image_0e3fe8ff.png) */
+.ide-windows-pop-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--ide-border);
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--ide-text-bright);
+}
+
+.ide-windows-pop-ratio {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.73rem;
+  color: var(--ide-primary);
+  font-weight: 700;
+}
+
+.ide-windows-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ide-window-row {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--ide-text-muted);
+  padding: 7px 8px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.ide-window-row:hover {
+  background: var(--ide-hover);
+  color: var(--ide-text-bright);
+}
+
+.ide-window-row.is-on {
+  background: var(--ide-active-row);
+  color: var(--ide-text-bright);
+}
+
+.ide-win-checkbox {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--ide-border-light);
+  background: transparent;
+  color: #ffffff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ide-win-checkbox.is-checked {
+  background: var(--ide-primary-btn);
+  border-color: var(--ide-primary-btn);
+}
+
+.ide-win-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ide-win-name {
+  flex: 1;
+  text-align: left;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.71rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.ide-win-state {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--ide-text-muted);
+}
+
+.ide-win-state.is-on {
+  color: var(--ide-primary);
+}
+
+.ide-windows-pop-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ide-profile-meta {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 9px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--ide-border);
+}
+
+.ide-profile-meta strong {
+  font-size: 0.8rem;
+  color: var(--ide-text-bright);
+}
+
+.ide-profile-meta span {
+  font-size: 0.7rem;
+  color: var(--ide-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- 2. IDE 3-COLUMN GRID (ZERO GAP, CRISP 1PX BORDERS) ---------- */
+.ide-studio-mode #main-container.dashboard-container {
+  display: grid !important;
+  grid-template-columns: 242px minmax(0, 1fr) 360px !important;
+  gap: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: calc(100vh - 48px) !important;
+  max-height: calc(100vh - 48px) !important;
+  background: var(--ide-bg);
+}
+
+.ide-studio-mode #main-container.dashboard-container.has-widget-column {
+  grid-template-columns: 242px minmax(0, 1fr) 340px var(--user-widget-col-w, 360px) !important;
+}
+
+/* Dynamic IDE Window Visibility States */
+.ide-studio-mode #main-container.ide-hide-explorer {
+  grid-template-columns: minmax(0, 1fr) 360px !important;
+}
+.ide-studio-mode #main-container.ide-hide-explorer .tools-column {
+  display: none !important;
+}
+
+.ide-studio-mode #main-container.ide-hide-chat {
+  grid-template-columns: 242px minmax(0, 1fr) !important;
+}
+.ide-studio-mode #main-container.ide-hide-chat .chat-column {
+  display: none !important;
+}
+
+.ide-studio-mode #main-container.ide-hide-editor {
+  grid-template-columns: 260px minmax(0, 1fr) !important;
+}
+.ide-studio-mode #main-container.ide-hide-editor #notes-panel {
+  display: none !important;
+}
+
+.ide-studio-mode #main-container.ide-hide-explorer.ide-hide-chat {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+.ide-studio-mode #main-container.ide-hide-explorer.ide-hide-editor {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+.ide-studio-mode #main-container.ide-hide-editor.ide-hide-chat {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+/* Strip Classic Glassmorphism / Radii / Padding inside IDE Mode */
+.ide-studio-mode .panel {
+  border-radius: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+  transition: none;
+}
+
+.ide-studio-mode .tools-column {
+  background: var(--ide-sidebar) !important;
+  border-right: 1px solid var(--ide-border) !important;
+}
+
+.ide-studio-mode #notes-panel {
+  background: var(--ide-bg) !important;
+}
+
+.ide-studio-mode .chat-column {
+  background: var(--ide-sidebar) !important;
+  border-left: 1px solid var(--ide-border) !important;
+}
+
+/* Hide Classic Center Bars when IDE Mode is active */
+.ide-studio-mode #notes-panel > .workspace-mode-bar,
+.ide-studio-mode #notes-panel > .notes-header,
+.ide-studio-mode #notes-panel > .drive-bar {
+  display: none !important;
+}
+
+/* ---------- 3. MONOSPACE PANE HEADERS (EXPLORER / EDITOR / AI CHAT) ---------- */
+.ide-pane-header {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 10px;
+  background: var(--ide-sidebar);
+  border-bottom: 1px solid var(--ide-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.ide-pane-header-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.ide-grip-dots {
+  color: var(--ide-text-muted);
+  font-size: 0.72rem;
+  letter-spacing: -1px;
+  opacity: 0.7;
+}
+
+.ide-pane-title {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.71rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ide-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ide-pane-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ide-pane-mini-btn {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ide-text-muted);
+  font-size: 0.71rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  white-space: nowrap;
+}
+
+.ide-pane-mini-btn:hover {
+  background: var(--ide-hover);
+  color: var(--ide-text-bright);
+  border-color: var(--ide-border-light);
+}
+
+.ide-pane-mini-btn.is-active {
+  background: var(--ide-active-row);
+  color: var(--ide-primary);
+  border-color: var(--ide-primary);
+}
+
+.ide-pane-mini-btn.is-danger {
+  color: #f87171;
+}
+
+.ide-shared-room-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px;
+  background: var(--ide-tab-inactive);
+  border-bottom: 1px solid var(--ide-border);
+  font-size: 0.74rem;
+  color: var(--ide-text);
+  flex-wrap: wrap;
+}
+
+.ide-shared-strip-left,
+.ide-shared-strip-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ide-shared-select {
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid var(--ide-border-light);
+  background: var(--ide-input);
+  color: var(--ide-text-bright);
+  font-size: 0.74rem;
+}
+
+.ide-shared-members {
+  font-size: 0.71rem;
+  color: var(--ide-text-muted);
+}
+
+/* ---------- 4. LEFT EXPLORER PANE ---------- */
+.ide-explorer-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--ide-sidebar);
+  color: var(--ide-text);
+}
+
+.ide-explorer-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 8px;
+  border-bottom: 1px solid var(--ide-border);
+  flex-shrink: 0;
+}
+
+.ide-explorer-search-input-wrap {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px;
+  border-radius: 5px;
+  border: 1px solid var(--ide-border-light);
+  background: var(--ide-input);
+  color: var(--ide-text-muted);
+}
+
+.ide-explorer-search-input-wrap:focus-within {
+  border-color: var(--ide-primary);
+}
+
+.ide-explorer-search-input-wrap input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--ide-text-bright);
+  font-size: 0.75rem;
+  outline: none;
+}
+
+.ide-explorer-search-input-wrap input::placeholder {
+  color: var(--ide-text-muted);
+}
+
+.ide-search-clear-btn {
+  border: none;
+  background: transparent;
+  color: var(--ide-text-muted);
+  font-size: 0.68rem;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.ide-explorer-icon-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ide-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.ide-explorer-icon-btn:hover,
+.ide-explorer-icon-btn.is-active {
+  background: var(--ide-hover);
+  color: var(--ide-text-bright);
+}
+
+.ide-explorer-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ide-explorer-empty {
+  padding: 16px 10px;
+  font-size: 0.74rem;
+  color: var(--ide-text-muted);
+  text-align: center;
+}
+
+.ide-explorer-row {
+  display: flex;
+  align-items: center;
+  border-radius: 5px;
+  padding-right: 4px;
+  transition: background 0.12s ease;
+}
+
+.ide-explorer-row:hover {
+  background: var(--ide-hover);
+}
+
+.ide-explorer-row.is-active {
+  background: var(--ide-active-row);
+}
+
+.ide-explorer-row-main {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--ide-text);
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.78rem;
+}
+
+.ide-explorer-row.is-active .ide-explorer-row-main {
+  color: var(--ide-text-bright);
+  font-weight: 600;
+}
+
+.ide-explorer-file-icon {
+  color: var(--ide-primary);
+  flex-shrink: 0;
+}
+
+.ide-explorer-row-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-explorer-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.ide-explorer-row:hover .ide-explorer-row-actions,
+.ide-explorer-row:focus-within .ide-explorer-row-actions {
+  opacity: 1;
+}
+
+.ide-explorer-row-actions button {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ide-text-muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ide-explorer-row-actions button:hover {
+  background: var(--ide-border-light);
+  color: var(--ide-text-bright);
+}
+
+.ide-explorer-tools-dock {
+  border-top: 1px solid var(--ide-border);
+  padding: 8px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.ide-explorer-section-label {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ide-text-muted);
+  padding: 2px 6px 4px;
+}
+
+.ide-explorer-tool-btn {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--ide-text);
+  font-size: 0.76rem;
+  padding: 6px 8px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.ide-explorer-tool-btn:hover {
+  background: var(--ide-hover);
+  color: var(--ide-text-bright);
+}
+
+.ide-explorer-tool-btn.is-active {
+  background: var(--ide-active-row);
+  color: var(--ide-primary);
+  font-weight: 600;
+}
+
+.ide-explorer-count {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.67rem;
+  color: var(--ide-text-muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--ide-bg);
+  border: 1px solid var(--ide-border);
+}
+
+.ide-explorer-mini-footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--ide-border);
+}
+
+.ide-explorer-mini-footer button {
+  height: 26px;
+  border-radius: 5px;
+  border: 1px solid var(--ide-border);
+  background: var(--ide-tab-inactive);
+  color: var(--ide-text);
+  font-size: 0.71rem;
+  cursor: pointer;
+}
+
+.ide-explorer-mini-footer button:hover {
+  background: var(--ide-hover);
+  color: var(--ide-text-bright);
+}
+
+/* ---------- 5. CENTER EDITOR TABS, TOOLBAR, SHEET & STATUSBAR ---------- */
+.ide-studio-mode #notes-panel .content-area {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ide-studio-mode #notes-area-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0 !important;
+  background: var(--ide-bg);
+}
+
+/* VS Code Tab Strip */
+.ide-studio-mode .vscode-tabs-bar {
+  background: var(--ide-sidebar) !important;
+  border-bottom: 1px solid var(--ide-border) !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  min-height: 36px;
+  align-items: stretch;
+  gap: 0 !important;
+}
+
+.ide-studio-mode .vscode-tab {
+  border-radius: 0 !important;
+  background: var(--ide-tab-inactive) !important;
+  border: none !important;
+  border-right: 1px solid var(--ide-border) !important;
+  border-top: 2px solid transparent !important;
+  color: var(--ide-text-muted) !important;
+  padding: 7px 12px !important;
+  font-size: 0.78rem !important;
+  height: 36px;
+  box-shadow: none !important;
+}
+
+.ide-studio-mode .vscode-tab:hover {
+  background: var(--ide-hover) !important;
+  color: var(--ide-text-bright) !important;
+}
+
+.ide-studio-mode .vscode-tab.active {
+  background: var(--ide-bg) !important;
+  color: var(--ide-text-bright) !important;
+  border-top: 2px solid var(--ide-primary) !important;
+}
+
+.ide-studio-mode .add-page-btn {
+  border-radius: 0 !important;
+  border: none !important;
+  border-right: 1px solid var(--ide-border) !important;
+  background: transparent !important;
+  color: var(--ide-text-muted) !important;
+  height: 36px;
+  padding: 0 12px !important;
+}
+
+.ide-studio-mode .add-page-btn:hover {
+  background: var(--ide-hover) !important;
+  color: var(--ide-text-bright) !important;
+}
+
+/* Flat IDE Editor Toolbar */
+.ide-studio-mode .editor-toolbar {
+  background: var(--ide-sidebar) !important;
+  border: none !important;
+  border-bottom: 1px solid var(--ide-border) !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 5px 10px !important;
+  box-shadow: none !important;
+}
+
+.ide-studio-mode .editor-toolbar button,
+.ide-studio-mode .editor-toolbar select {
+  background: transparent !important;
+  border-color: transparent !important;
+  color: var(--ide-text) !important;
+  border-radius: 4px !important;
+}
+
+.ide-studio-mode .editor-toolbar button:hover,
+.ide-studio-mode .editor-toolbar select:hover {
+  background: var(--ide-hover) !important;
+  color: var(--ide-text-bright) !important;
+  border-color: var(--ide-border-light) !important;
+}
+
+.ide-studio-mode .editor-toolbar select option {
+  background: var(--ide-popover-bg);
+  color: var(--ide-text-bright);
+}
+
+.ide-studio-mode .toolbar-divider {
+  background: var(--ide-border-light) !important;
+}
+
+/* Clean Editor Document Canvas */
+.ide-studio-mode .notes-split-container {
+  flex: 1;
+  min-height: 0;
+  background: var(--ide-bg);
+}
+
+.ide-studio-mode #notes-area {
+  background: var(--ide-bg) !important;
+  color: var(--ide-text-bright) !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 28px clamp(24px, 5vw, 60px) 64px !important;
+  line-height: 1.7;
+  transition: none !important;
+}
+
+.ide-studio-mode.ide-theme-light #notes-area {
+  color: #0f172a !important;
+}
+
+.ide-studio-mode #notes-area h1,
+.ide-studio-mode #notes-area h2,
+.ide-studio-mode #notes-area h3 {
+  color: var(--ide-text-bright);
+  letter-spacing: -0.015em;
+}
+
+.ide-studio-mode #notes-area h1 {
+  border-bottom: 1px solid var(--ide-border);
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+
+.ide-studio-mode #notes-area code {
+  background: var(--ide-tab-inactive);
+  border: 1px solid var(--ide-border-light);
+  color: var(--ide-text-bright);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.88em;
+}
+
+/* Bottom Editor Status Bar (Salvato · N parole | Cerca) */
+.ide-editor-statusbar {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 12px;
+  background: var(--ide-sidebar);
+  border-top: 1px solid var(--ide-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  color: var(--ide-text-muted);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.ide-statusbar-left,
+.ide-statusbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ide-status-saved {
+  color: var(--ide-saved);
+  font-weight: 600;
+}
+
+.ide-status-sep {
+  opacity: 0.6;
+}
+
+.ide-status-search-btn {
+  border: none;
+  background: transparent;
+  color: var(--ide-text-muted);
+  font-family: inherit;
+  font-size: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.ide-status-search-btn:hover {
+  background: var(--ide-hover);
+  color: var(--ide-text-bright);
+}
+
+/* ---------- 6. RIGHT AI CHAT PANE ---------- */
+.ide-studio-mode .ai-chat-panel {
+  background: var(--ide-sidebar) !important;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 0 !important;
+}
+
+.ide-chat-quick-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px;
+  border-bottom: 1px solid var(--ide-border);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.ide-chat-quick-chip {
+  flex: 1 1 auto;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid var(--ide-border-light);
+  background: var(--ide-tab-inactive);
+  color: var(--ide-text);
+  font-size: 0.72rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.ide-chat-quick-chip:hover:not(:disabled) {
+  background: var(--ide-hover);
+  border-color: var(--ide-primary);
+  color: var(--ide-text-bright);
+}
+
+.ide-chat-quick-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ide-studio-mode .chat-messages {
+  padding: 12px 12px !important;
+  gap: 10px;
+}
+
+.ide-studio-mode .chat-msg.user {
+  background: var(--ide-primary-btn) !important;
+  color: #ffffff !important;
+  border: none !important;
+  border-radius: 12px 12px 4px 12px !important;
+  box-shadow: none !important;
+}
+
+.ide-studio-mode .chat-msg.ai {
+  background: var(--ide-ai-card-bg) !important;
+  color: var(--ide-text) !important;
+  border: 1px solid var(--ide-border) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+
+.ide-studio-mode .chat-msg.ai strong,
+.ide-studio-mode .chat-msg.ai h1,
+.ide-studio-mode .chat-msg.ai h2,
+.ide-studio-mode .chat-msg.ai h3 {
+  color: var(--ide-text-bright);
+}
+
+.ide-studio-mode .chat-msg.ai pre,
+.ide-studio-mode .chat-msg.ai code {
+  background: var(--ide-code-bg) !important;
+  border-color: var(--ide-border) !important;
+  color: var(--ide-text-bright) !important;
+}
+
+.ide-studio-mode .chat-input-row {
+  padding: 10px !important;
+  background: var(--ide-sidebar) !important;
+  border-top: 1px solid var(--ide-border) !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+}
+
+.ide-studio-mode .chat-input-row textarea,
+.ide-studio-mode .chat-input-row input[type="text"],
+.ide-studio-mode .chat-input-row select {
+  background: var(--ide-input) !important;
+  border: 1px solid var(--ide-border-light) !important;
+  color: var(--ide-text-bright) !important;
+  border-radius: 6px !important;
+}
+
+.ide-studio-mode .chat-input-row textarea::placeholder {
+  color: var(--ide-text-muted) !important;
+}
+
+.ide-studio-mode .send-chat-btn {
+  background: var(--ide-primary-btn) !important;
+  color: #ffffff !important;
+  border-radius: 6px !important;
+}
+
+.ide-studio-mode .send-chat-btn:hover {
+  background: var(--ide-primary-btn-hover) !important;
+}
+
+/* Light-mode surface legibility for Materials & Calendar inside IDE Light */
+.ide-studio-mode.ide-theme-light #materials-area {
+  background: var(--ide-bg);
+  color: var(--ide-text-bright);
+  padding: 18px 24px;
+}
+
+.ide-studio-mode.ide-theme-light .material-card {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #0f172a;
+}
+
+.ide-studio-mode.ide-theme-light .material-name,
+.ide-studio-mode.ide-theme-light .materials-header-title,
+.ide-studio-mode.ide-theme-light .material-category-title {
+  color: #0f172a;
+}
+
+.ide-studio-mode.ide-theme-dark #materials-area {
+  padding: 18px 24px;
+}
+
+/* ---------- 7. SETTINGS MODAL — REVERSIBLE UI STYLE SWITCHER ---------- */
+.settings-ui-style-section {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.34);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+.settings-ui-style-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 3px;
+}
+
+.settings-ui-style-sub {
+  font-size: 0.76rem;
+  color: #cbd5e1;
+  line-height: 1.4;
+  margin-bottom: 12px;
+}
+
+.settings-ui-style-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-style-card {
+  text-align: left;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.65);
+  color: #e2e8f0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.settings-style-card:hover {
+  border-color: rgba(96, 165, 250, 0.65);
+  background: rgba(30, 41, 59, 0.85);
+}
+
+.settings-style-card.is-selected {
+  border-color: #3b82f6;
+  background: rgba(37, 99, 235, 0.18);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.22);
+}
+
+.settings-style-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.settings-style-card-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.settings-style-active-tag {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.settings-style-card-desc {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
+.settings-style-preview-ide,
+.settings-style-preview-classic {
+  height: 44px;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  margin-top: auto;
+}
+
+.settings-style-preview-ide {
+  background: #1e1e1e;
+  border: 1px solid #333333;
+}
+
+.settings-style-preview-ide .prev-bar {
+  height: 9px;
+  background: #252526;
+  border-bottom: 1px solid #333333;
+}
+
+.settings-style-preview-ide .prev-cols {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 22% 1fr 28%;
+}
+
+.settings-style-preview-ide .prev-exp {
+  background: #252526;
+  border-right: 1px solid #333333;
+}
+
+.settings-style-preview-ide .prev-ed {
+  background: #1e1e1e;
+}
+
+.settings-style-preview-ide .prev-chat {
+  background: #252526;
+  border-left: 1px solid #333333;
+}
+
+.settings-style-preview-classic {
+  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 55%, #0f172a 100%);
+  border: 1px solid rgba(129, 140, 248, 0.35);
+  padding: 3px;
+  gap: 3px;
+}
+
+.settings-style-preview-classic .prev-bar {
+  height: 7px;
+  border-radius: 3px;
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.settings-style-preview-classic .prev-cols {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 22% 1fr 28%;
+  gap: 3px;
+}
+
+.settings-style-preview-classic .prev-exp,
+.settings-style-preview-classic .prev-ed,
+.settings-style-preview-classic .prev-chat {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+.settings-ide-mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.settings-ide-mode-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.settings-ide-mode-btns {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.settings-ide-mode-btn {
+  padding: 5px 11px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.65);
+  color: #cbd5e1;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-ide-mode-btn.is-active {
+  background: #2563eb;
+  border-color: #3b82f6;
+  color: #ffffff;
+}
+
+@media (max-width: 980px) {
+  .ide-cmd-trigger {
+    min-width: 140px;
+    width: 160px;
+  }
+  .ide-studio-mode #main-container.dashboard-container {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .ide-studio-mode #main-container .panel:not(.mobile-active) {
+    display: none !important;
+  }
+  .settings-ui-style-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
 
 
 

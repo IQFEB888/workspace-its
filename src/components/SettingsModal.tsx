@@ -364,6 +364,10 @@ interface SettingsModalProps {
   onExportBackup: () => void;
   onOpenRestoreBackup: () => void;
   showToast: (msg: string, type?: 'info' | 'error') => void;
+  uiStyle?: 'ide' | 'classic';
+  onSelectUiStyle?: (style: 'ide' | 'classic') => void;
+  ideThemeMode?: 'dark' | 'light';
+  onSelectIdeThemeMode?: (mode: 'dark' | 'light') => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -425,7 +429,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   cloudSyncActive,
   onExportBackup,
   onOpenRestoreBackup,
-  showToast
+  showToast,
+  uiStyle = 'ide',
+  onSelectUiStyle,
+  ideThemeMode = 'dark',
+  onSelectIdeThemeMode
 }) => {
   const [activeTab, setActiveTab] = useState<'appearance' | 'theme_bars' | 'widgets' | 'shortcuts' | 'keys' | 'account'>(initialTab);
   const [recordingShortcutId, setRecordingShortcutId] = useState<string | null>(null);
@@ -1207,6 +1215,88 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* TAB 1: SFONDI & TIPOGRAFIA */}
         {activeTab === 'appearance' && (
           <div>
+            {/* Stile Grafico Principale: IDE Studio (Nuovo) vs Classico Workspace ITS (Precedente) */}
+            {onSelectUiStyle && (
+              <div className="settings-ui-style-section">
+                <div className="settings-ui-style-head">
+                  <div>
+                    <div className="settings-ui-style-title">🎨 Stile Interfaccia Workspace</div>
+                    <div className="settings-ui-style-sub">
+                      Passa in qualsiasi momento tra il nuovo layout <strong>IDE Studio</strong> (stile VS Code / ITS Study Assistant) e il <strong>Classico Workspace ITS</strong> senza perdere nessun dato.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="settings-ui-style-grid">
+                  <button
+                    type="button"
+                    className={`settings-style-card ${uiStyle === 'ide' ? 'is-selected' : ''}`}
+                    onClick={() => onSelectUiStyle('ide')}
+                  >
+                    <div className="settings-style-card-top">
+                      <span className="settings-style-card-name">💻 IDE Studio (Nuovo)</span>
+                      {uiStyle === 'ide' && <span className="settings-style-active-tag">ATTIVO</span>}
+                    </div>
+                    <p className="settings-style-card-desc">
+                      Top Bar unificata con selettore materia, barra Comandi Ctrl+K, menu Finestre 3/3 e pannelli netti Explorer · Editor · AI Chat.
+                    </p>
+                    <div className="settings-style-preview-ide" aria-hidden="true">
+                      <span className="prev-bar" />
+                      <span className="prev-cols">
+                        <span className="prev-exp" />
+                        <span className="prev-ed" />
+                        <span className="prev-chat" />
+                      </span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`settings-style-card ${uiStyle === 'classic' ? 'is-selected' : ''}`}
+                    onClick={() => onSelectUiStyle('classic')}
+                  >
+                    <div className="settings-style-card-top">
+                      <span className="settings-style-card-name">✨ Classico Workspace ITS</span>
+                      {uiStyle === 'classic' && <span className="settings-style-active-tag">ATTIVO</span>}
+                    </div>
+                    <p className="settings-style-card-desc">
+                      Ripristina la grafica precedente con sfondi personalizzabili, effetto vetro traslucido, barra superiore classica e griglia originale.
+                    </p>
+                    <div className="settings-style-preview-classic" aria-hidden="true">
+                      <span className="prev-bar" />
+                      <span className="prev-cols">
+                        <span className="prev-exp" />
+                        <span className="prev-ed" />
+                        <span className="prev-chat" />
+                      </span>
+                    </div>
+                  </button>
+                </div>
+
+                {uiStyle === 'ide' && onSelectIdeThemeMode && (
+                  <div className="settings-ide-mode-row">
+                    <span className="settings-ide-mode-label">Variante Colore IDE Studio:</span>
+                    <div className="settings-ide-mode-btns">
+                      <button
+                        type="button"
+                        className={`settings-ide-mode-btn ${ideThemeMode === 'dark' ? 'is-active' : ''}`}
+                        onClick={() => onSelectIdeThemeMode('dark')}
+                      >
+                        🌙 Scuro VS Code (#1e1e1e)
+                      </button>
+                      <button
+                        type="button"
+                        className={`settings-ide-mode-btn ${ideThemeMode === 'light' ? 'is-active' : ''}`}
+                        onClick={() => onSelectIdeThemeMode('light')}
+                      >
+                        ☀️ Chiaro Pulito
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Quick Toggle: Modalità Minimal Senza Sfondo & Spazi Compatti */}
             <div
               style={{

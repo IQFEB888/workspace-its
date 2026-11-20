@@ -131,6 +131,9 @@ export interface UserPreferences {
   savedTextColors?: string[];
   savedHighlightColors?: string[];
   savedPenColors?: string[];
+  uiStyle?: 'ide' | 'classic';
+  ideThemeMode?: 'dark' | 'light';
+  ideWindows?: { explorer: boolean; editor: boolean; chat: boolean };
 }
 
 export interface AttachedFile {
