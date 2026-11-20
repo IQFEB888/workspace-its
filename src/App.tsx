@@ -6436,6 +6436,26 @@ REGOLE TASSATIVE:
               </svg>
               <span className="app-name">Flashcard &amp; Quiz</span>
             </button>
+            <button
+              type="button"
+              className={`app-card ${isMindMapOpen ? 'active-tool-card' : ''}`}
+              onClick={() => setIsMindMapOpen(true)}
+              title="Apri lo Studio Mappa Concettuale Interattiva (Gemini 3.6 Flash + Editor visuale)"
+              style={{ border: '1px solid var(--panel-border)', cursor: 'pointer', textAlign: 'left' }}
+            >
+              <svg className="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+                <circle cx="12" cy="12" r="3" />
+                <circle cx="4.5" cy="6" r="2" />
+                <circle cx="19.5" cy="6" r="2" />
+                <circle cx="4.5" cy="18" r="2" />
+                <circle cx="19.5" cy="18" r="2" />
+                <line x1="9.5" y1="10.2" x2="6.2" y2="7.4" />
+                <line x1="14.5" y1="10.2" x2="17.8" y2="7.4" />
+                <line x1="9.5" y1="13.8" x2="6.2" y2="16.6" />
+                <line x1="14.5" y1="13.8" x2="17.8" y2="16.6" />
+              </svg>
+              <span className="app-name">Mappa Concettuale</span>
+            </button>
             <a href="https://drive.google.com" className="app-card" target="_blank" rel="noreferrer">
               <svg className="app-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M22 12H12l-5 9h10l5-9z" /><path d="M6 12L2 5h10l4 7-10 9z" />
@@ -6540,6 +6560,14 @@ REGOLE TASSATIVE:
                   title="Apri Studio Flashcard 3D & Quiz con storico e selezione pagine"
                 >
                   🧠 Flashcard &amp; Quiz
+                </button>
+                <button
+                  type="button"
+                  className={`tab-btn ${isMindMapOpen ? 'active' : ''}`}
+                  onClick={() => setIsMindMapOpen(true)}
+                  title="Apri Mappa Concettuale Interattiva con selezione schede, AI Gemini 3.6 Flash e strumenti di modifica"
+                >
+                  🗺️ Mappa Interattiva
                 </button>
               </div>
             </div>
@@ -10028,7 +10056,7 @@ REGOLE TASSATIVE:
         onNotify={showToast}
       />
 
-      {/* MODAL #2: MAPPA CONCETTUALE INTERATTIVA AUTOMATICA */}
+      {/* MODAL #2: MAPPA CONCETTUALE INTERATTIVA AUTOMATICA & EDITOR STUDIO */}
       <MindMapModal
         isOpen={isMindMapOpen}
         onClose={() => setIsMindMapOpen(false)}
@@ -10039,6 +10067,11 @@ REGOLE TASSATIVE:
             : currentSubPages.find(p => p.id === activePageId) || currentSubPages[0] || null
         }
         allSubjectPages={workspaceMode === 'shared' ? activeRoomPages : currentSubPages}
+        subjects={subjects}
+        pagesBySubject={pages}
+        isSharedMode={workspaceMode === 'shared'}
+        apiKeys={apiKeys}
+        selectedKeyIndex={selectedKeyIndex}
         onNotify={showToast}
       />
 
