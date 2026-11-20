@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { PageItem, SubjectItem } from '../types';
 import {
   StudyFlashcard,
@@ -73,7 +73,6 @@ export const StudyReviewModal: React.FC<StudyReviewModalProps> = ({
   isOpen,
   onClose,
   subjectName,
-  activePage,
   allSubjectPages,
   subjects = [],
   pagesBySubject,
@@ -83,6 +82,7 @@ export const StudyReviewModal: React.FC<StudyReviewModalProps> = ({
   onNotify
 }) => {
   const [mode, setMode] = useState<'flashcards' | 'quiz'>('flashcards');
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [pickerSubject, setPickerSubject] = useState<string>(subjectName);
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
   const [history, setHistory] = useState<StudyHistorySession[]>(() => loadSavedHistory());
@@ -97,32 +97,38 @@ export const StudyReviewModal: React.FC<StudyReviewModalProps> = ({
   const [quizIndex, setQuizIndex] = useState<number>(0);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [generatingLabel, setGeneratingLabel] = useState<string>('');
+  const markAdvanceTimerRef = useRef<number | null>(null);
 
-  // Sync subject picker when modal opens
+  const clearPendingAdvance = useCallback(() => {
+    if (markAdvanceTimerRef.current !== null) {
+      window.clearTimeout(markAdvanceTimerRef.current);
+      markAdvanceTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => clearPendingAdvance(), [clearPendingAdvance]);
+
+  // Reset picker & fullscreen state cleanly when modal opens/closes (ZERO auto-selection & ZERO auto-generation)
+  useEffect(() => {
+    if (isOpen) {
+      setPickerSubject(subjectName);
+      setSelectedPageIds([]);
+    } else {
+      setIsFullscreen(false);
+    }
+  }, [isOpen, subjectName]);
+
+  // Clear checked pages when user switches subject inside the left sidebar
   useEffect(() => {
     if (!isOpen) return;
-    setPickerSubject(subjectName);
-  }, [isOpen, subjectName]);
+    setSelectedPageIds([]);
+  }, [isOpen, pickerSubject]);
 
   // Pages available in the left sidebar page picker
   const availablePages = useMemo<PageItem[]>(() => {
     if (isSharedMode || !pagesBySubject) return allSubjectPages;
     return pagesBySubject[pickerSubject] || allSubjectPages;
   }, [isSharedMode, pagesBySubject, pickerSubject, allSubjectPages]);
-
-  // Default checked page selection when opening or switching subject in picker
-  useEffect(() => {
-    if (!isOpen) return;
-    if (availablePages.length === 0) {
-      setSelectedPageIds([]);
-      return;
-    }
-    const defaultId =
-      activePage && availablePages.some(p => p.id === activePage.id)
-        ? activePage.id
-        : availablePages[0].id;
-    setSelectedPageIds([defaultId]);
-  }, [isOpen, pickerSubject, availablePages, activePage]);
 
   // Persist history changes
   useEffect(() => {
@@ -136,11 +142,8 @@ export const StudyReviewModal: React.FC<StudyReviewModalProps> = ({
 
   const activeSessionId = activeSessionIdByMode[mode];
   const activeSession = useMemo(() => {
-    if (activeSessionId) {
-      const exact = modeHistory.find(h => h.id === activeSessionId);
-      if (exact) return exact;
-    }
-    return modeHistory[0] || null;
+    if (!activeSessionId) return null;
+    return modeHistory.find(h => h.id === activeSessionId) || null;
   }, [modeHistory, activeSessionId]);
 
   // Reset card/quiz cursor when switching active session or mode
@@ -154,7 +157,7 @@ export const StudyReviewModal: React.FC<StudyReviewModalProps> = ({
   const generateSessionForPages = useCallback(
     async (targetPages: PageItem[], targetMode: 'flashcards' | 'quiz', forceSubjectLabel?: string) => {
       if (targetPages.length === 0) {
-        onNotify('Seleziona almeno una pagina di appunti dalla barra a sinistra.', 'error');
+        onNotify('Spunta almeno una pagina di appunti a sinistra prima di premere Genera.', 'error');
         return;
       }
 
@@ -246,7 +249,6 @@ ${plainText.slice(0, 8000)}`;
             }
           }
         } catch {
-          // Graceful fallback to instant local generation
           usedModelLabel = 'Estrazione Locale';
         }
       }
@@ -302,21 +304,6 @@ ${plainText.slice(0, 8000)}`;
     [apiKeys, selectedKeyIndex, pickerSubject, subjectName, onNotify]
   );
 
-  // Auto-generate an initial session if the current mode has no history yet when opened
-  useEffect(() => {
-    if (!isOpen || isGenerating) return;
-    if (modeHistory.length > 0) return;
-    const candidate =
-      (activePage && stripHtmlTags(activePage.content || '').trim().length >= 4 ? activePage : null) ||
-      availablePages.find(p => stripHtmlTags(p.content || '').trim().length >= 4) ||
-      null;
-    if (candidate) {
-      setSelectedPageIds([candidate.id]);
-      generateSessionForPages([candidate], mode, pickerSubject);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, mode]);
-
   const cards = activeSession?.cards || [];
   const quizQuestions = activeSession?.quizQuestions || [];
   const selectedAnswers = activeSession?.selectedAnswers || {};
@@ -327,25 +314,32 @@ ${plainText.slice(0, 8000)}`;
     return filtered.length > 0 ? filtered : cards;
   }, [cards, onlyReviewMode]);
 
-  const currentCard =
-    visibleCards[Math.min(cardIndex, Math.max(0, visibleCards.length - 1))] || null;
+  const safeCardIndex = Math.min(cardIndex, Math.max(0, visibleCards.length - 1));
+  const currentCard = visibleCards[safeCardIndex] || null;
 
   const knownCount = cards.filter(c => c.status === 'known').length;
   const reviewCount = cards.filter(c => c.status === 'review').length;
   const readinessPct = cards.length > 0 ? Math.round((knownCount / cards.length) * 100) : 0;
 
-  // Keyboard shortcuts inside Flashcard mode (guarded against buttons/inputs)
+  // Keyboard shortcuts (Escape exits fullscreen first or closes modal; Space/Arrows navigate cards)
   useEffect(() => {
-    if (!isOpen || mode !== 'flashcards' || !currentCard) return;
+    if (!isOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON') {
-        if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (isFullscreen) {
+          setIsFullscreen(false);
+        } else {
+          onClose();
+        }
         return;
       }
-      if (e.key === 'Escape') {
-        onClose();
-      } else if (e.key === ' ' || e.key === 'Enter') {
+      if (mode !== 'flashcards' || !currentCard) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON') {
+        return;
+      }
+      if (e.key === ' ' || e.key === 'Enter') {
         e.preventDefault();
         setIsFlipped(prev => !prev);
       } else if (e.key === 'ArrowRight') {
@@ -360,7 +354,7 @@ ${plainText.slice(0, 8000)}`;
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, mode, currentCard, visibleCards.length, onClose]);
+  }, [isOpen, isFullscreen, mode, currentCard, visibleCards.length, onClose]);
 
   const updateActiveSession = (updater: (s: StudyHistorySession) => StudyHistorySession) => {
     if (!activeSession) return;
@@ -369,14 +363,20 @@ ${plainText.slice(0, 8000)}`;
 
   const handleMarkCard = (status: 'known' | 'review') => {
     if (!currentCard || !activeSession) return;
+    clearPendingAdvance();
     updateActiveSession(s => ({
       ...s,
       cards: s.cards.map(c => (c.id === currentCard.id ? { ...c, status } : c))
     }));
     setIsFlipped(false);
-    setTimeout(() => {
+    // In onlyReviewMode marking a card as known removes it from visibleCards, so next card shifts into the current index automatically.
+    if (onlyReviewMode && status === 'known') {
+      return;
+    }
+    markAdvanceTimerRef.current = window.setTimeout(() => {
+      markAdvanceTimerRef.current = null;
       setCardIndex(i => (visibleCards.length > 1 ? (i + 1) % visibleCards.length : 0));
-    }, 140);
+    }, 320);
   };
 
   const handleSelectQuizAnswer = (questionId: string, optionIdx: number) => {
@@ -433,13 +433,34 @@ ${plainText.slice(0, 8000)}`;
 
   const answeredCount = Object.keys(selectedAnswers).length;
   const correctCount = quizQuestions.filter(q => selectedAnswers[q.id] === q.correctIndex).length;
-  const currentQ = quizQuestions[Math.min(quizIndex, Math.max(0, quizQuestions.length - 1))] || null;
+  const wrongCount = answeredCount - correctCount;
+  const safeQuizIndex = Math.min(quizIndex, Math.max(0, quizQuestions.length - 1));
+  const currentQ = quizQuestions[safeQuizIndex] || null;
   const quizFinished = quizQuestions.length > 0 && answeredCount === quizQuestions.length;
 
+  const currentQChosen = currentQ ? selectedAnswers[currentQ.id] : undefined;
+  const currentQStatus: 'unanswered' | 'correct' | 'wrong' =
+    currentQ && currentQChosen !== undefined
+      ? currentQChosen === currentQ.correctIndex
+        ? 'correct'
+        : 'wrong'
+      : 'unanswered';
+
+  const cardStatusMeta = currentCard
+    ? currentCard.status === 'known'
+      ? { className: 'known', icon: '✓', label: 'So bene' }
+      : currentCard.status === 'review'
+        ? { className: 'review', icon: '↻', label: 'Da ripassare' }
+        : { className: 'unseen', icon: '○', label: 'Da valutare' }
+    : null;
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div
+      className={`modal-overlay ${isFullscreen ? 'is-study-fullscreen' : ''}`}
+      onClick={onClose}
+    >
       <div
-        className="modal-box study-review-modal study-studio-modal"
+        className={`modal-box study-review-modal study-studio-modal ${isFullscreen ? 'is-fullscreen' : ''}`}
         onClick={e => e.stopPropagation()}
         role="dialog"
         aria-label="Studio Flashcard e Quiz"
@@ -469,16 +490,48 @@ ${plainText.slice(0, 8000)}`;
             </span>
           </div>
 
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Chiudi studio flashcard e quiz">
-            ✕
-          </button>
+          <div className="study-header-actions">
+            <button
+              type="button"
+              className={`study-fullscreen-btn ${isFullscreen ? 'is-active' : ''}`}
+              onClick={() => setIsFullscreen(prev => !prev)}
+              title={isFullscreen ? 'Esci da schermo intero (Esc)' : 'Espandi a schermo intero'}
+              aria-label={isFullscreen ? 'Esci da schermo intero' : 'Espandi a schermo intero'}
+              aria-pressed={isFullscreen}
+            >
+              {isFullscreen ? (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="4 14 10 14 10 20" />
+                  <polyline points="20 10 14 10 14 4" />
+                  <line x1="14" y1="10" x2="21" y2="3" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
+              ) : (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="15 3 21 3 21 9" />
+                  <polyline points="9 21 3 21 3 15" />
+                  <line x1="21" y1="3" x2="14" y2="10" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
+              )}
+            </button>
+            <button
+              type="button"
+              className="modal-close"
+              onClick={onClose}
+              aria-label="Chiudi studio flashcard e quiz"
+              title="Chiudi"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* 2-Column Body: Left Sidebar (Page Selector + History) + Right Interactive Stage */}
         <div className="study-studio-layout">
           {/* LEFT SIDEBAR */}
           <aside className="study-history-sidebar" aria-label="Selezione pagine e storico sessioni">
-            {/* Multi-Page Picker */}
+            {/* Multi-Page Picker (CHECKBOX ONLY — NO AUTO-GENERATION) */}
             <div className="study-sidebar-section">
               <div className="study-sidebar-heading-row">
                 <span className="study-sidebar-heading">📄 Pagine Appunti</span>
@@ -517,7 +570,7 @@ ${plainText.slice(0, 8000)}`;
               )}
 
               <div className="study-sidebar-tip">
-                Spunta più pagine e genera, oppure <strong>clicca sul nome di una scheda</strong> per creare subito un nuovo mazzo!
+                Spunta le schede che vuoi includere e poi premi <strong>Genera</strong> qui sotto.
               </div>
 
               <div className="study-page-picker-list">
@@ -546,11 +599,8 @@ ${plainText.slice(0, 8000)}`;
                           type="button"
                           className="study-page-quick-btn"
                           disabled={isGenerating}
-                          onClick={() => {
-                            setSelectedPageIds([page.id]);
-                            generateSessionForPages([page], mode, pickerSubject);
-                          }}
-                          title={`Clicca per generare subito nuove ${mode === 'flashcards' ? 'flashcard' : 'domande quiz'} da "${page.name}"`}
+                          onClick={() => togglePageCheckbox(page.id)}
+                          title={`Spunta o deseleziona "${page.name}"`}
                         >
                           <span className="study-page-name">{page.name}</span>
                           <span className="study-page-words">
@@ -571,9 +621,13 @@ ${plainText.slice(0, 8000)}`;
               >
                 {isGenerating
                   ? `⏳ Generazione (${generatingLabel})...`
-                  : mode === 'flashcards'
-                    ? `✨ Genera Flashcard (${selectedPageIds.length} ${selectedPageIds.length === 1 ? 'pagina' : 'pagine'})`
-                    : `✨ Genera Quiz (${selectedPageIds.length} ${selectedPageIds.length === 1 ? 'pagina' : 'pagine'})`}
+                  : selectedPageIds.length === 0
+                    ? mode === 'flashcards'
+                      ? 'Seleziona pagine per Generare'
+                      : 'Seleziona pagine per Generare Quiz'
+                    : mode === 'flashcards'
+                      ? `✨ Genera Flashcard (${selectedPageIds.length} ${selectedPageIds.length === 1 ? 'pagina' : 'pagine'})`
+                      : `✨ Genera Quiz (${selectedPageIds.length} ${selectedPageIds.length === 1 ? 'pagina' : 'pagine'})`}
               </button>
             </div>
 
@@ -588,16 +642,18 @@ ${plainText.slice(0, 8000)}`;
               <div className="study-history-list">
                 {modeHistory.length === 0 ? (
                   <div className="study-sidebar-empty">
-                    Nessuna sessione salvata ancora. Clicca una pagina qui sopra per creare la prima!
+                    Nessuna sessione salvata ancora. Spunta una o più pagine qui sopra e premi Genera!
                   </div>
                 ) : (
                   modeHistory.map(sess => {
                     const isSelected = activeSession?.id === sess.id;
                     const sessKnown = sess.cards.filter(c => c.status === 'known').length;
+                    const sessReview = sess.cards.filter(c => c.status === 'review').length;
                     const sessCorrect = sess.quizQuestions.filter(
                       q => sess.selectedAnswers[q.id] === q.correctIndex
                     ).length;
                     const sessAnswered = Object.keys(sess.selectedAnswers || {}).length;
+                    const sessWrong = Math.max(0, sessAnswered - sessCorrect);
                     return (
                       <div
                         key={sess.id}
@@ -633,8 +689,8 @@ ${plainText.slice(0, 8000)}`;
                           <span className="study-history-dot">•</span>
                           <span>
                             {mode === 'flashcards'
-                              ? `${sessKnown}/${sess.cards.length} ✅`
-                              : `${sessCorrect}/${sess.quizQuestions.length} 🎯${sessAnswered > 0 ? '' : ' (nuovo)'}`}
+                              ? `${sessKnown}/${sess.cards.length} ✓${sessReview > 0 ? ` · ${sessReview} ↻` : ''}`
+                              : `${sessCorrect}/${sess.quizQuestions.length} ✓${sessWrong > 0 ? ` · ${sessWrong} ✕` : sessAnswered === 0 ? ' (nuovo)' : ''}`}
                           </span>
                         </div>
                         <div className="study-history-submeta">
@@ -655,19 +711,29 @@ ${plainText.slice(0, 8000)}`;
               <div className="study-generating-state">
                 <div className="study-spinner-ring" />
                 <h4>Generazione in corso con Gemini 3.6 Flash...</h4>
-                <p>Sto preparando {mode === 'flashcards' ? 'nuove flashcard 3D' : 'un nuovo quiz verifica'} da: <strong>{generatingLabel}</strong></p>
+                <p>
+                  Sto preparando {mode === 'flashcards' ? 'nuove flashcard 3D' : 'un nuovo quiz verifica'} da:{' '}
+                  <strong>{generatingLabel}</strong>
+                </p>
               </div>
             ) : !activeSession ? (
-              <div className="study-empty-state">
-                <div style={{ fontSize: '2.2rem', marginBottom: '10px' }}>
-                  {mode === 'flashcards' ? '🃏' : '📝'}
-                </div>
-                <p style={{ fontWeight: 700, color: '#f8fafc', marginBottom: '6px' }}>
-                  Nessuna sessione {mode === 'flashcards' ? 'Flashcard' : 'Quiz'} selezionata
+              <div className="study-empty-state study-idle-guide">
+                <div className="study-idle-icon">{mode === 'flashcards' ? '🃏' : '📝'}</div>
+                <h4>
+                  {mode === 'flashcards'
+                    ? 'Pronto a generare le tue Flashcard'
+                    : 'Pronto a generare il tuo Quiz Verifica'}
+                </h4>
+                <p>
+                  1. Spunta una o più pagine di appunti nella barra a sinistra.
+                  <br />
+                  2. Premi il pulsante <strong>✨ Genera</strong> in basso per creare il set con Gemini 3.6 Flash.
                 </p>
-                <span>
-                  Clicca su una pagina di appunti nella barra a sinistra (oppure spuntane più di una e premi &quot;Genera&quot;) per iniziare subito!
-                </span>
+                {modeHistory.length > 0 && (
+                  <span className="study-idle-history-hint">
+                    Oppure clicca una delle {modeHistory.length} sessioni salvate nello <strong>Storico</strong> a sinistra per riprenderla subito.
+                  </span>
+                )}
               </div>
             ) : (
               <>
@@ -698,8 +764,11 @@ ${plainText.slice(0, 8000)}`;
                   <div className="study-readiness-bar-wrap">
                     <div className="study-readiness-meta">
                       <span>
-                        ✅ So bene: <strong>{knownCount}</strong> • 🔁 Da ripassare:{' '}
-                        <strong>{reviewCount}</strong> • Totale: <strong>{cards.length}</strong> ({readinessPct}%)
+                        <span className="study-meta-emerald">✓ So bene: <strong>{knownCount}</strong></span>
+                        {' · '}
+                        <span className="study-meta-amber">↻ Da ripassare: <strong>{reviewCount}</strong></span>
+                        {' · '}
+                        Totale: <strong>{cards.length}</strong> ({readinessPct}%)
                       </span>
                       {reviewCount > 0 && (
                         <button
@@ -725,8 +794,11 @@ ${plainText.slice(0, 8000)}`;
                   <div className="study-readiness-bar-wrap">
                     <div className="study-readiness-meta">
                       <span>
-                        🎯 Risposte esatte: <strong>{correctCount}</strong> / {quizQuestions.length} • Completate:{' '}
-                        <strong>{answeredCount}</strong> / {quizQuestions.length}
+                        <span className="study-meta-emerald">✓ Esatte: <strong>{correctCount}</strong></span>
+                        {' · '}
+                        <span className="study-meta-rose">✕ Errate: <strong>{wrongCount}</strong></span>
+                        {' · '}
+                        Completate: <strong>{answeredCount}</strong> / {quizQuestions.length}
                       </span>
                       {answeredCount > 0 && (
                         <button
@@ -755,8 +827,52 @@ ${plainText.slice(0, 8000)}`;
 
                 {/* FLASHCARDS 3D VIEWER */}
                 {mode === 'flashcards' ? (
-                  currentCard ? (
+                  currentCard && cardStatusMeta ? (
                     <div className="flashcard-stage">
+                      {/* Clickable Numbered Status Dots Navigator */}
+                      <div className="study-dots-bar" role="tablist" aria-label="Navigazione rapida flashcard">
+                        {visibleCards.map((c, idx) => {
+                          const isCurrent = idx === safeCardIndex;
+                          const dotStatusClass =
+                            c.status === 'known'
+                              ? 'is-known'
+                              : c.status === 'review'
+                                ? 'is-review'
+                                : '';
+                          const dotGlyph =
+                            c.status === 'known' ? '✓' : c.status === 'review' ? '↻' : String(idx + 1);
+                          const statusTitle =
+                            c.status === 'known'
+                              ? 'So bene'
+                              : c.status === 'review'
+                                ? 'Da ripassare'
+                                : 'Non valutata';
+                          return (
+                            <button
+                              key={c.id}
+                              type="button"
+                              role="tab"
+                              aria-selected={isCurrent}
+                              className={`study-dot-btn ${dotStatusClass} ${isCurrent ? 'is-current' : ''}`}
+                              onClick={() => {
+                                clearPendingAdvance();
+                                setIsFlipped(false);
+                                setCardIndex(idx);
+                              }}
+                              title={`Carta ${idx + 1}: ${statusTitle}`}
+                              aria-label={`Vai alla carta ${idx + 1}, stato: ${statusTitle}`}
+                            >
+                              <span className="study-dot-num">{idx + 1}</span>
+                              {c.status !== 'unseen' && (
+                                <span className="study-dot-badge-icon" aria-hidden="true">
+                                  {dotGlyph}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
                       <div
                         className={`flashcard-3d-scene ${isFlipped ? 'is-flipped' : ''}`}
                         onClick={() => setIsFlipped(f => !f)}
@@ -765,11 +881,25 @@ ${plainText.slice(0, 8000)}`;
                         aria-label="Gira flashcard"
                       >
                         <div className="flashcard-3d-inner">
-                          <div className="flashcard-face flashcard-front">
+                          <div
+                            className={`flashcard-face flashcard-front ${
+                              currentCard.status === 'known'
+                                ? 'is-status-known'
+                                : currentCard.status === 'review'
+                                  ? 'is-status-review'
+                                  : ''
+                            }`}
+                          >
                             <div className="flashcard-face-head">
-                              <span className="flashcard-tag">{currentCard.tag}</span>
+                              <div className="flashcard-face-head-left">
+                                <span className="flashcard-tag">{currentCard.tag}</span>
+                                <span className={`study-card-status-chip ${cardStatusMeta.className}`}>
+                                  <span aria-hidden="true">{cardStatusMeta.icon}</span>
+                                  <span>{cardStatusMeta.label}</span>
+                                </span>
+                              </div>
                               <span className="flashcard-counter">
-                                {Math.min(cardIndex + 1, visibleCards.length)} / {visibleCards.length}
+                                {safeCardIndex + 1} / {visibleCards.length}
                               </span>
                             </div>
                             <div className="flashcard-body-text">{currentCard.front}</div>
@@ -778,15 +908,25 @@ ${plainText.slice(0, 8000)}`;
                             </div>
                           </div>
 
-                          <div className="flashcard-face flashcard-back">
+                          <div
+                            className={`flashcard-face flashcard-back ${
+                              currentCard.status === 'known'
+                                ? 'is-status-known'
+                                : currentCard.status === 'review'
+                                  ? 'is-status-review'
+                                  : ''
+                            }`}
+                          >
                             <div className="flashcard-face-head">
-                              <span className="flashcard-tag back">RISPOSTA • {currentCard.tag}</span>
+                              <div className="flashcard-face-head-left">
+                                <span className="flashcard-tag back">RISPOSTA · {currentCard.tag}</span>
+                                <span className={`study-card-status-chip ${cardStatusMeta.className}`}>
+                                  <span aria-hidden="true">{cardStatusMeta.icon}</span>
+                                  <span>{cardStatusMeta.label}</span>
+                                </span>
+                              </div>
                               <span className="flashcard-counter">
-                                {currentCard.status === 'known'
-                                  ? '✅ Padroneggiata'
-                                  : currentCard.status === 'review'
-                                    ? '🔁 Da ripassare'
-                                    : '🆕 Nuova'}
+                                {safeCardIndex + 1} / {visibleCards.length}
                               </span>
                             </div>
                             <div className="flashcard-body-text answer">{currentCard.back}</div>
@@ -800,6 +940,7 @@ ${plainText.slice(0, 8000)}`;
                           type="button"
                           className="study-nav-btn"
                           onClick={() => {
+                            clearPendingAdvance();
                             setIsFlipped(false);
                             setCardIndex(i => (i - 1 + visibleCards.length) % visibleCards.length);
                           }}
@@ -810,17 +951,23 @@ ${plainText.slice(0, 8000)}`;
                         <div style={{ display: 'flex', gap: '8px' }}>
                           <button
                             type="button"
-                            className="study-rate-btn review"
+                            className={`study-rate-btn review ${
+                              currentCard.status === 'review' ? 'is-selected' : ''
+                            }`}
                             onClick={() => handleMarkCard('review')}
+                            aria-pressed={currentCard.status === 'review'}
                           >
-                            🔁 Da ripassare
+                            ↻ Da ripassare
                           </button>
                           <button
                             type="button"
-                            className="study-rate-btn known"
+                            className={`study-rate-btn known ${
+                              currentCard.status === 'known' ? 'is-selected' : ''
+                            }`}
                             onClick={() => handleMarkCard('known')}
+                            aria-pressed={currentCard.status === 'known'}
                           >
-                            ✅ So bene
+                            ✓ So bene
                           </button>
                         </div>
 
@@ -828,6 +975,7 @@ ${plainText.slice(0, 8000)}`;
                           type="button"
                           className="study-nav-btn"
                           onClick={() => {
+                            clearPendingAdvance();
                             setIsFlipped(false);
                             setCardIndex(i => (i + 1) % visibleCards.length);
                           }}
@@ -843,16 +991,82 @@ ${plainText.slice(0, 8000)}`;
                   )
                 ) : /* QUIZ VIEWER */ currentQ ? (
                   <div className="quiz-stage">
+                    {/* Clickable Numbered Status Dots Navigator for Quiz (Automatic Green/Red) */}
+                    <div className="study-dots-bar" role="tablist" aria-label="Navigazione rapida domande quiz">
+                      {quizQuestions.map((q, idx) => {
+                        const isCurrent = idx === safeQuizIndex;
+                        const ans = selectedAnswers[q.id];
+                        const qState =
+                          ans === undefined ? 'unanswered' : ans === q.correctIndex ? 'correct' : 'wrong';
+                        const dotStatusClass =
+                          qState === 'correct' ? 'is-known' : qState === 'wrong' ? 'is-wrong' : '';
+                        const dotGlyph = qState === 'correct' ? '✓' : qState === 'wrong' ? '✕' : '';
+                        const statusTitle =
+                          qState === 'correct'
+                            ? 'Risposta esatta'
+                            : qState === 'wrong'
+                              ? 'Risposta errata'
+                              : 'Non ancora risposta';
+                        return (
+                          <button
+                            key={q.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={isCurrent}
+                            className={`study-dot-btn ${dotStatusClass} ${isCurrent ? 'is-current' : ''}`}
+                            onClick={() => setQuizIndex(idx)}
+                            title={`Domanda ${idx + 1}: ${statusTitle}`}
+                            aria-label={`Vai alla domanda ${idx + 1}, stato: ${statusTitle}`}
+                          >
+                            <span className="study-dot-num">{idx + 1}</span>
+                            {dotGlyph && (
+                              <span className="study-dot-badge-icon" aria-hidden="true">
+                                {dotGlyph}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
                     <div className="quiz-header-row">
-                      <span className="flashcard-tag">
-                        Domanda {quizIndex + 1} di {quizQuestions.length} • {currentQ.tag}
-                      </span>
+                      <div className="flashcard-face-head-left">
+                        <span className="flashcard-tag">
+                          Domanda {safeQuizIndex + 1} di {quizQuestions.length} · {currentQ.tag}
+                        </span>
+                        {currentQStatus === 'correct' ? (
+                          <span className="study-card-status-chip known">
+                            <span aria-hidden="true">✓</span>
+                            <span>Risposta esatta</span>
+                          </span>
+                        ) : currentQStatus === 'wrong' ? (
+                          <span className="study-card-status-chip wrong">
+                            <span aria-hidden="true">✕</span>
+                            <span>Risposta errata</span>
+                          </span>
+                        ) : (
+                          <span className="study-card-status-chip unseen">
+                            <span aria-hidden="true">○</span>
+                            <span>Da rispondere</span>
+                          </span>
+                        )}
+                      </div>
                       <span className="quiz-score-pill">
                         Punteggio: {correctCount} / {answeredCount || 0}
                       </span>
                     </div>
 
-                    <div className="quiz-question-card">{currentQ.question}</div>
+                    <div
+                      className={`quiz-question-card ${
+                        currentQStatus === 'correct'
+                          ? 'is-status-correct'
+                          : currentQStatus === 'wrong'
+                            ? 'is-status-wrong'
+                            : ''
+                      }`}
+                    >
+                      {currentQ.question}
+                    </div>
 
                     <div className="quiz-options-grid">
                       {currentQ.options.map((opt, idx) => {
@@ -888,8 +1102,8 @@ ${plainText.slice(0, 8000)}`;
                       >
                         <strong>
                           {selectedAnswers[currentQ.id] === currentQ.correctIndex
-                            ? '✅ Risposta esatta!'
-                            : '❌ Risposta errata'}
+                            ? '✓ Risposta esatta!'
+                            : '✕ Risposta errata'}
                         </strong>
                         <p>{currentQ.explanation}</p>
                       </div>
@@ -899,7 +1113,7 @@ ${plainText.slice(0, 8000)}`;
                       <button
                         type="button"
                         className="study-nav-btn"
-                        disabled={quizIndex === 0}
+                        disabled={safeQuizIndex === 0}
                         onClick={() => setQuizIndex(i => Math.max(0, i - 1))}
                       >
                         ← Domanda Prec.
@@ -918,7 +1132,7 @@ ${plainText.slice(0, 8000)}`;
                       <button
                         type="button"
                         className="study-nav-btn"
-                        disabled={quizIndex >= quizQuestions.length - 1}
+                        disabled={safeQuizIndex >= quizQuestions.length - 1}
                         onClick={() => setQuizIndex(i => Math.min(quizQuestions.length - 1, i + 1))}
                       >
                         Prossima →
