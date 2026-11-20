@@ -99,6 +99,23 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
 
   const filteredItems = useMemo(() => {
     const q = query.trim().toLowerCase();
+
+    // Quick subject filter shortcut ">u" (matches VS Code / ITS Study Assistant Command Palette)
+    if (q.startsWith('>u')) {
+      const subFilter = q.slice(2).trim();
+      return subjects
+        .filter(s => !subFilter || s.name.toLowerCase().includes(subFilter))
+        .map<CommandPaletteAction>(sub => ({
+          id: `quick_sub_${sub.id}`,
+          title: `Passa alla materia: ${sub.name}`,
+          subtitle: 'Materia • Comando rapido >u',
+          icon: '📚',
+          group: 'Materie',
+          shortcut: '>u',
+          onExecute: () => onJumpToSubject(sub.id)
+        }));
+    }
+
     const base = !q
       ? allItems.slice(0, 18)
       : allItems
@@ -130,7 +147,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     }
 
     return base;
-  }, [allItems, query, onCreateCalendarReminderFromCommand]);
+  }, [allItems, query, subjects, onJumpToSubject, onCreateCalendarReminderFromCommand]);
 
   useEffect(() => {
     setActiveIndex(0);

@@ -8165,10 +8165,9 @@ body.ide-studio-body::after {
   text-overflow: ellipsis;
 }
 
-/* ---------- 2. IDE 3-COLUMN GRID (ZERO GAP, CRISP 1PX BORDERS) ---------- */
+/* ---------- 2. IDE DYNAMIC DOCKING GRID (ZERO GAP, CRISP 1PX BORDERS) ---------- */
 .ide-studio-mode #main-container.dashboard-container {
   display: grid !important;
-  grid-template-columns: 242px minmax(0, 1fr) 360px !important;
   gap: 0 !important;
   padding: 0 !important;
   margin: 0 !important;
@@ -8177,42 +8176,6 @@ body.ide-studio-body::after {
   height: calc(100vh - 48px) !important;
   max-height: calc(100vh - 48px) !important;
   background: var(--ide-bg);
-}
-
-.ide-studio-mode #main-container.dashboard-container.has-widget-column {
-  grid-template-columns: 242px minmax(0, 1fr) 340px var(--user-widget-col-w, 360px) !important;
-}
-
-/* Dynamic IDE Window Visibility States */
-.ide-studio-mode #main-container.ide-hide-explorer {
-  grid-template-columns: minmax(0, 1fr) 360px !important;
-}
-.ide-studio-mode #main-container.ide-hide-explorer .tools-column {
-  display: none !important;
-}
-
-.ide-studio-mode #main-container.ide-hide-chat {
-  grid-template-columns: 242px minmax(0, 1fr) !important;
-}
-.ide-studio-mode #main-container.ide-hide-chat .chat-column {
-  display: none !important;
-}
-
-.ide-studio-mode #main-container.ide-hide-editor {
-  grid-template-columns: 260px minmax(0, 1fr) !important;
-}
-.ide-studio-mode #main-container.ide-hide-editor #notes-panel {
-  display: none !important;
-}
-
-.ide-studio-mode #main-container.ide-hide-explorer.ide-hide-chat {
-  grid-template-columns: minmax(0, 1fr) !important;
-}
-.ide-studio-mode #main-container.ide-hide-explorer.ide-hide-editor {
-  grid-template-columns: minmax(0, 1fr) !important;
-}
-.ide-studio-mode #main-container.ide-hide-editor.ide-hide-chat {
-  grid-template-columns: minmax(0, 1fr) !important;
 }
 
 /* Strip Classic Glassmorphism / Radii / Padding inside IDE Mode */
@@ -8225,11 +8188,12 @@ body.ide-studio-body::after {
   border: none !important;
   overflow: hidden !important;
   transition: none;
+  min-width: 0;
+  min-height: 0;
 }
 
 .ide-studio-mode .tools-column {
   background: var(--ide-sidebar) !important;
-  border-right: 1px solid var(--ide-border) !important;
 }
 
 .ide-studio-mode #notes-panel {
@@ -8238,7 +8202,14 @@ body.ide-studio-body::after {
 
 .ide-studio-mode .chat-column {
   background: var(--ide-sidebar) !important;
+}
+
+.ide-studio-mode .ide-has-left-border {
   border-left: 1px solid var(--ide-border) !important;
+}
+
+.ide-studio-mode .ide-has-top-border {
+  border-top: 1px solid var(--ide-border) !important;
 }
 
 /* Hide Classic Center Bars when IDE Mode is active */
@@ -9167,6 +9138,1109 @@ body.ide-studio-body::after {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================================
+   WORKSPACE ITS v4.2.0 — IDE WINDOW DOCKING, TABS, PRESETS, FOLDERS,
+   CLEAN VS CODE AI CHAT COMPOSER & UNIFIED IDE STYLING ACROSS ALL MODALS
+   ============================================================================ */
+
+/* --- Draggable Pane Headers & Window Action Icons --- */
+.ide-draggable-header {
+  cursor: grab;
+}
+
+.ide-draggable-header:active {
+  cursor: grabbing;
+}
+
+.ide-pane-icon-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ide-text-muted);
+  font-size: 0.72rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.ide-pane-icon-btn:hover {
+  background: var(--ide-hover);
+  color: var(--ide-text-bright);
+  border-color: var(--ide-border-light);
+}
+
+.ide-pane-icon-btn.is-active {
+  background: var(--ide-active-row);
+  color: var(--ide-primary);
+  border-color: var(--ide-primary);
+}
+
+.ide-pane-icon-btn.is-close:hover {
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+/* --- Shared VS Code Docked Tabbar --- */
+.ide-dock-tabbar {
+  height: 35px;
+  min-height: 35px;
+  background: var(--ide-sidebar);
+  border-bottom: 1px solid var(--ide-border);
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  user-select: none;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ide-dock-tabs-list {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.ide-dock-tab {
+  height: 35px;
+  padding: 0 14px;
+  border: none;
+  border-right: 1px solid var(--ide-border);
+  border-top: 2px solid transparent;
+  background: var(--ide-tab-inactive);
+  color: var(--ide-text-muted);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: grab;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.ide-dock-tab:hover {
+  background: var(--ide-hover);
+  color: var(--ide-text-bright);
+}
+
+.ide-dock-tab.is-active {
+  background: var(--ide-bg);
+  color: var(--ide-text-bright);
+  border-top-color: var(--ide-primary);
+}
+
+.ide-dock-tab-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.ide-dock-tabbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+
+/* --- Live Blue Drag & Drop Docking Overlays --- */
+.ide-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 95;
+  pointer-events: none;
+  padding: 6px;
+  display: flex;
+}
+
+.ide-drop-preview-box {
+  background: rgba(59, 130, 246, 0.22);
+  border: 2px solid #3b82f6;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.35);
+}
+
+.ide-drop-preview-pill {
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+}
+
+.ide-drop-overlay.zone-left {
+  justify-content: flex-start;
+  align-items: stretch;
+}
+.ide-drop-overlay.zone-left .ide-drop-preview-box {
+  width: 48%;
+  height: 100%;
+}
+
+.ide-drop-overlay.zone-right {
+  justify-content: flex-end;
+  align-items: stretch;
+}
+.ide-drop-overlay.zone-right .ide-drop-preview-box {
+  width: 48%;
+  height: 100%;
+}
+
+.ide-drop-overlay.zone-top {
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+}
+.ide-drop-overlay.zone-top .ide-drop-preview-box {
+  width: 100%;
+  height: 48%;
+}
+
+.ide-drop-overlay.zone-bottom {
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+}
+.ide-drop-overlay.zone-bottom .ide-drop-preview-box {
+  width: 100%;
+  height: 48%;
+}
+
+.ide-drop-overlay.zone-tab {
+  align-items: stretch;
+  justify-content: stretch;
+}
+.ide-drop-overlay.zone-tab .ide-drop-preview-box {
+  width: 100%;
+  height: 100%;
+}
+
+/* --- Finestre Popover: Layout Rapidi Presets & Profile Inline Theme Toggle --- */
+.ide-windows-popover {
+  width: 296px;
+}
+
+.ide-popover-divider {
+  height: 1px;
+  background: var(--ide-border);
+  margin: 6px 2px;
+}
+
+.ide-presets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ide-preset-row {
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ide-text);
+  padding: 6px 8px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.ide-preset-row:hover {
+  background: var(--ide-hover);
+  color: var(--ide-text-bright);
+}
+
+.ide-preset-row.is-active {
+  background: var(--ide-active-row);
+  border-color: var(--ide-primary);
+  color: var(--ide-text-bright);
+}
+
+.ide-preset-row-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.ide-preset-row-title {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--ide-text-bright);
+}
+
+.ide-preset-row-desc {
+  font-size: 0.67rem;
+  color: var(--ide-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ide-preset-active-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--ide-primary);
+  flex-shrink: 0;
+}
+
+.ide-profile-theme-block {
+  padding: 2px 4px 4px;
+}
+
+.ide-profile-theme-block .ide-mode-segmented {
+  margin-bottom: 2px;
+}
+
+/* --- Explorer Collapsed Vertical Icon Rail (42px) --- */
+.ide-explorer-rail {
+  width: 100%;
+  height: 100%;
+  background: var(--ide-sidebar);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 4px;
+  gap: 6px;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.ide-rail-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ide-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.ide-rail-btn:hover {
+  background: var(--ide-hover);
+  color: var(--ide-text-bright);
+  border-color: var(--ide-border-light);
+}
+
+.ide-rail-btn.is-active {
+  background: var(--ide-active-row);
+  color: var(--ide-primary);
+  border-color: var(--ide-primary);
+}
+
+.ide-rail-divider {
+  width: 22px;
+  height: 1px;
+  background: var(--ide-border);
+  margin: 2px 0;
+}
+
+.ide-rail-spacer {
+  flex: 1;
+}
+
+/* --- Explorer Folders Tree & Drag-to-Folder --- */
+.ide-explorer-folder-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-radius: 5px;
+  transition: background 0.12s ease;
+}
+
+.ide-explorer-folder-group.is-drop-target {
+  background: rgba(59, 130, 246, 0.16);
+  outline: 1px dashed var(--ide-primary);
+}
+
+.ide-explorer-folder-header {
+  display: flex;
+  align-items: center;
+  padding-right: 4px;
+  border-radius: 5px;
+}
+
+.ide-explorer-folder-header:hover {
+  background: var(--ide-hover);
+}
+
+.ide-explorer-folder-toggle {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--ide-text);
+  padding: 5px 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.ide-explorer-folder-caret {
+  width: 12px;
+  text-align: center;
+  font-size: 0.65rem;
+  color: var(--ide-text-muted);
+  flex-shrink: 0;
+}
+
+.ide-explorer-folder-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-explorer-folder-count {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.64rem;
+  color: var(--ide-text-muted);
+  padding: 0 4px;
+}
+
+.ide-explorer-folder-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.ide-explorer-folder-header:hover .ide-explorer-folder-actions,
+.ide-explorer-folder-header:focus-within .ide-explorer-folder-actions {
+  opacity: 1;
+}
+
+.ide-explorer-folder-actions button {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ide-text-muted);
+  font-size: 0.72rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ide-explorer-folder-actions button:hover {
+  background: var(--ide-border-light);
+  color: var(--ide-text-bright);
+}
+
+.ide-explorer-folder-children {
+  padding-left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-left: 1px solid var(--ide-border);
+  margin-left: 11px;
+}
+
+.ide-explorer-folder-empty {
+  padding: 4px 8px;
+  font-size: 0.68rem;
+  color: var(--ide-text-muted);
+  font-style: italic;
+}
+
+.ide-explorer-row.is-dragging {
+  opacity: 0.45;
+}
+
+.ide-explorer-list.is-root-drop {
+  outline: 1px dashed var(--ide-primary);
+  outline-offset: -3px;
+}
+
+/* --- Clean Aligned VS Code AI Chat Messages & Composer --- */
+.ide-chat-msg-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+
+.ide-chat-bot-avatar {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  border-radius: 7px;
+  background: var(--ide-primary-btn);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.ide-chat-msg-row .chat-msg.ai {
+  flex: 1;
+  min-width: 0;
+  max-width: 100% !important;
+  margin: 0 !important;
+}
+
+.ide-chat-welcome-card {
+  font-size: 0.81rem !important;
+  line-height: 1.55 !important;
+}
+
+.ide-chat-footer {
+  border-top: 1px solid var(--ide-border);
+  background: var(--ide-sidebar);
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.ide-chat-attachments-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ide-chat-attach-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--ide-tab-inactive);
+  border: 1px solid var(--ide-border-light);
+  color: var(--ide-text-bright);
+  font-size: 0.72rem;
+}
+
+.ide-chat-attach-thumb {
+  width: 18px;
+  height: 18px;
+  object-fit: cover;
+  border-radius: 3px;
+}
+
+.ide-chat-attach-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-chat-attach-pill button {
+  border: none;
+  background: transparent;
+  color: var(--ide-text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 0.7rem;
+}
+
+.ide-chat-attach-pill button:hover {
+  color: #f87171;
+}
+
+.ide-chat-doc-chips {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.ide-chat-doc-chip {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 5px;
+  border: 1px solid var(--ide-border-light);
+  background: var(--ide-tab-inactive);
+  color: var(--ide-text);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.ide-chat-doc-chip:hover {
+  background: var(--ide-hover);
+  color: var(--ide-text-bright);
+  border-color: var(--ide-primary);
+}
+
+.ide-chat-microbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.ide-chat-micro-select {
+  height: 25px;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--ide-border-light);
+  background: var(--ide-tab-inactive);
+  color: var(--ide-text-bright);
+  font-size: 0.7rem;
+  font-weight: 500;
+  outline: none;
+  cursor: pointer;
+  min-width: 0;
+  max-width: 96px;
+}
+
+.ide-chat-micro-select option {
+  background: var(--ide-popover-bg);
+  color: var(--ide-text-bright);
+}
+
+.ide-chat-micro-btn {
+  height: 25px;
+  padding: 0 7px;
+  border-radius: 5px;
+  border: 1px solid var(--ide-border-light);
+  background: var(--ide-tab-inactive);
+  color: var(--ide-text);
+  font-size: 0.7rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.ide-chat-micro-btn:hover {
+  background: var(--ide-hover);
+  border-color: var(--ide-primary);
+  color: var(--ide-text-bright);
+}
+
+.ide-chat-micro-btn.is-highlight {
+  margin-left: auto;
+}
+
+.ide-chat-compose-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  margin: 0;
+}
+
+.ide-chat-attach-btn {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  border-radius: 7px;
+  border: 1px solid var(--ide-border-light);
+  background: var(--ide-tab-inactive);
+  color: var(--ide-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.ide-chat-attach-btn:hover {
+  background: var(--ide-hover);
+  border-color: var(--ide-primary);
+  color: var(--ide-text-bright);
+}
+
+.ide-chat-input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid var(--ide-border-light);
+  background: var(--ide-input);
+  color: var(--ide-text-bright);
+  font-size: 0.82rem;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.ide-chat-input::placeholder {
+  color: var(--ide-text-muted);
+}
+
+.ide-chat-input:focus {
+  border-color: var(--ide-primary);
+}
+
+.ide-chat-send-btn {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  border-radius: 7px;
+  border: none;
+  background: var(--ide-primary-btn);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: background 0.12s ease;
+}
+
+.ide-chat-send-btn:hover:not(:disabled) {
+  background: var(--ide-primary-btn-hover);
+}
+
+.ide-chat-send-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ============================================================================
+   UNIFIED IDE STUDIO STYLING FOR ALL MODALS, CTRL+K, MATERIALS, CALENDAR,
+   SETTINGS, FLASHCARDS & MIND MAP (SCOPED STRICTLY TO .ide-studio-mode)
+   ============================================================================ */
+
+/* --- 1. Unified Command Palette (Ctrl+K) --- */
+.ide-studio-mode .cmd-palette-overlay {
+  background: rgba(0, 0, 0, 0.52) !important;
+  backdrop-filter: blur(2px) !important;
+  -webkit-backdrop-filter: blur(2px) !important;
+}
+
+.ide-studio-mode .cmd-palette-box {
+  background: var(--ide-popover-bg) !important;
+  border: 1px solid var(--ide-border-light) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--ide-popover-shadow) !important;
+  color: var(--ide-text) !important;
+}
+
+.ide-studio-mode .cmd-palette-input-row {
+  background: var(--ide-sidebar) !important;
+  border-bottom: 1px solid var(--ide-border) !important;
+  padding: 12px 14px !important;
+}
+
+.ide-studio-mode .cmd-palette-input {
+  color: var(--ide-text-bright) !important;
+  font-size: 0.9rem !important;
+}
+
+.ide-studio-mode .cmd-palette-input::placeholder {
+  color: var(--ide-text-muted) !important;
+}
+
+.ide-studio-mode .cmd-palette-kbd {
+  background: var(--ide-bg) !important;
+  border: 1px solid var(--ide-border-light) !important;
+  color: var(--ide-text-muted) !important;
+  border-radius: 4px !important;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace !important;
+}
+
+.ide-studio-mode .cmd-palette-item {
+  border-radius: 6px !important;
+  color: var(--ide-text) !important;
+}
+
+.ide-studio-mode .cmd-palette-item.is-hovered {
+  background: var(--ide-hover) !important;
+  border-color: var(--ide-border-light) !important;
+}
+
+.ide-studio-mode .cmd-palette-item.is-selected {
+  background: var(--ide-active-row) !important;
+  border-color: var(--ide-primary) !important;
+  border-left: 3px solid var(--ide-primary) !important;
+}
+
+.ide-studio-mode .cmd-palette-item-title {
+  color: var(--ide-text-bright) !important;
+}
+
+.ide-studio-mode .cmd-palette-item-sub,
+.ide-studio-mode .cmd-palette-item-group {
+  color: var(--ide-text-muted) !important;
+}
+
+.ide-studio-mode .cmd-palette-enter-badge {
+  background: var(--ide-primary-btn) !important;
+  color: #ffffff !important;
+  border: none !important;
+}
+
+.ide-studio-mode .cmd-palette-footer {
+  background: var(--ide-sidebar) !important;
+  border-top: 1px solid var(--ide-border) !important;
+  color: var(--ide-text-muted) !important;
+}
+
+/* --- 2. Unified Generic Modals, Settings Modal & Custom Dialogs --- */
+.ide-studio-mode .modal-overlay {
+  background: rgba(0, 0, 0, 0.56) !important;
+  backdrop-filter: blur(2px) !important;
+  -webkit-backdrop-filter: blur(2px) !important;
+}
+
+.ide-studio-mode .modal-box,
+.ide-studio-mode .weather-modal-dialog,
+.ide-studio-mode .export-dispensa-modal {
+  background: var(--ide-popover-bg) !important;
+  border: 1px solid var(--ide-border-light) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--ide-popover-shadow) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  color: var(--ide-text) !important;
+}
+
+.ide-studio-mode .modal-box h3,
+.ide-studio-mode .modal-box h4,
+.ide-studio-mode .modal-title {
+  color: var(--ide-text-bright) !important;
+}
+
+.ide-studio-mode .modal-header {
+  border-bottom: 1px solid var(--ide-border) !important;
+}
+
+.ide-studio-mode .modal-close {
+  color: var(--ide-text-muted) !important;
+  border-radius: 5px !important;
+}
+
+.ide-studio-mode .modal-close:hover {
+  background: var(--ide-hover) !important;
+  color: var(--ide-text-bright) !important;
+}
+
+.ide-studio-mode .modal-box input[type="text"],
+.ide-studio-mode .modal-box input[type="password"],
+.ide-studio-mode .modal-box input[type="url"],
+.ide-studio-mode .modal-box input[type="email"],
+.ide-studio-mode .modal-box input[type="number"],
+.ide-studio-mode .modal-box select,
+.ide-studio-mode .modal-box textarea {
+  background: var(--ide-input) !important;
+  border: 1px solid var(--ide-border-light) !important;
+  color: var(--ide-text-bright) !important;
+  border-radius: 6px !important;
+}
+
+.ide-studio-mode .modal-save-btn,
+.ide-studio-mode .export-primary-btn {
+  background: var(--ide-primary-btn) !important;
+  border: none !important;
+  color: #ffffff !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+.ide-studio-mode .modal-save-btn:hover,
+.ide-studio-mode .export-primary-btn:hover {
+  background: var(--ide-primary-btn-hover) !important;
+}
+
+.ide-studio-mode .dialog-btn,
+.ide-studio-mode .export-secondary-btn {
+  background: var(--ide-tab-inactive) !important;
+  border: 1px solid var(--ide-border-light) !important;
+  color: var(--ide-text-bright) !important;
+  border-radius: 6px !important;
+}
+
+.ide-studio-mode .dialog-btn:hover,
+.ide-studio-mode .export-secondary-btn:hover {
+  background: var(--ide-hover) !important;
+  border-color: var(--ide-primary) !important;
+}
+
+/* SettingsModal Light Mode & Flat IDE Polish */
+.ide-studio-mode .settings-ui-style-section {
+  background: var(--ide-bg) !important;
+  border: 1px solid var(--ide-border-light) !important;
+  border-radius: 8px !important;
+}
+
+.ide-studio-mode .settings-ui-style-title,
+.ide-studio-mode .settings-style-card-name {
+  color: var(--ide-text-bright) !important;
+}
+
+.ide-studio-mode .settings-ui-style-sub,
+.ide-studio-mode .settings-style-card-desc,
+.ide-studio-mode .settings-ide-mode-label {
+  color: var(--ide-text-muted) !important;
+}
+
+.ide-studio-mode .settings-style-card {
+  background: var(--ide-sidebar) !important;
+  border-color: var(--ide-border-light) !important;
+  color: var(--ide-text) !important;
+  border-radius: 8px !important;
+}
+
+.ide-studio-mode .settings-style-card.is-selected {
+  border-color: var(--ide-primary) !important;
+  background: var(--ide-active-row) !important;
+}
+
+.ide-studio-mode .settings-ide-mode-btn {
+  background: var(--ide-tab-inactive) !important;
+  border-color: var(--ide-border-light) !important;
+  color: var(--ide-text) !important;
+}
+
+.ide-studio-mode .settings-ide-mode-btn.is-active {
+  background: var(--ide-primary-btn) !important;
+  border-color: var(--ide-primary-btn) !important;
+  color: #ffffff !important;
+}
+
+.ide-studio-mode.ide-theme-light .modal-box p,
+.ide-studio-mode.ide-theme-light .modal-box label,
+.ide-studio-mode.ide-theme-light .modal-box span {
+  color: inherit;
+}
+
+/* --- 3. Unified Materials / Slide Viewer (#materials-area) --- */
+.ide-studio-mode #materials-area {
+  background: var(--ide-bg) !important;
+  color: var(--ide-text) !important;
+  padding: 18px 24px !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+.ide-studio-mode .material-card {
+  background: var(--ide-sidebar) !important;
+  border: 1px solid var(--ide-border) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  color: var(--ide-text) !important;
+}
+
+.ide-studio-mode .material-card:hover {
+  border-color: var(--ide-primary) !important;
+  background: var(--ide-hover) !important;
+}
+
+.ide-studio-mode .material-name,
+.ide-studio-mode .materials-header-title,
+.ide-studio-mode .material-category-title {
+  color: var(--ide-text-bright) !important;
+}
+
+.ide-studio-mode .add-material-btn {
+  background: var(--ide-primary-btn) !important;
+  color: #ffffff !important;
+  border: none !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+.ide-studio-mode .add-material-btn:hover {
+  background: var(--ide-primary-btn-hover) !important;
+}
+
+/* --- 4. Unified Study Calendar Panel --- */
+.ide-studio-mode .study-calendar-root {
+  background: var(--ide-bg) !important;
+  color: var(--ide-text) !important;
+  border-radius: 0 !important;
+  border: none !important;
+  padding: 14px 18px !important;
+}
+
+.ide-studio-mode .study-cal-toolbar,
+.ide-studio-mode .study-cal-side-panel,
+.ide-studio-mode .study-cal-day-cell,
+.ide-studio-mode .study-cal-event-card,
+.ide-studio-mode .study-cal-week-col,
+.ide-studio-mode .study-cal-agenda-card {
+  background: var(--ide-sidebar) !important;
+  border-color: var(--ide-border) !important;
+  color: var(--ide-text) !important;
+  box-shadow: none !important;
+}
+
+.ide-studio-mode .study-cal-month-title,
+.ide-studio-mode .study-cal-day-num,
+.ide-studio-mode .study-cal-event-title,
+.ide-studio-mode .study-cal-side-header h4 {
+  color: var(--ide-text-bright) !important;
+}
+
+.ide-studio-mode .study-cal-back-btn,
+.ide-studio-mode .study-cal-icon-btn,
+.ide-studio-mode .study-cal-today-btn,
+.ide-studio-mode .study-cal-view-btn {
+  background: var(--ide-tab-inactive) !important;
+  border: 1px solid var(--ide-border-light) !important;
+  color: var(--ide-text) !important;
+  border-radius: 6px !important;
+}
+
+.ide-studio-mode .study-cal-view-btn.is-active,
+.ide-studio-mode .study-cal-add-btn {
+  background: var(--ide-primary-btn) !important;
+  border-color: var(--ide-primary-btn) !important;
+  color: #ffffff !important;
+}
+
+.ide-studio-mode .study-cal-day-cell.is-selected {
+  border-color: var(--ide-primary) !important;
+  background: var(--ide-active-row) !important;
+}
+
+/* --- 5. Unified Study Review (Flashcards/Quiz) & Mind Map Studio --- */
+.ide-studio-mode .study-studio-modal {
+  background: var(--ide-bg) !important;
+  border: 1px solid var(--ide-border-light) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--ide-popover-shadow) !important;
+}
+
+.ide-studio-mode .study-studio-header {
+  background: var(--ide-sidebar) !important;
+  border-bottom: 1px solid var(--ide-border) !important;
+}
+
+.ide-studio-mode .study-studio-sidebar {
+  background: var(--ide-sidebar) !important;
+  border-right: 1px solid var(--ide-border) !important;
+  color: var(--ide-text) !important;
+}
+
+.ide-studio-mode .study-studio-main,
+.ide-studio-mode .mindmap-main-stage {
+  background: var(--ide-bg) !important;
+  color: var(--ide-text) !important;
+}
+
+.ide-studio-mode .study-ai-boost-btn {
+  background: var(--ide-primary-btn) !important;
+  border: none !important;
+  color: #ffffff !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+.ide-studio-mode .study-ai-boost-btn:hover {
+  background: var(--ide-primary-btn-hover) !important;
+}
+
+.ide-studio-mode .study-nav-btn,
+.ide-studio-mode .mindmap-toolbar button {
+  background: var(--ide-tab-inactive) !important;
+  border: 1px solid var(--ide-border-light) !important;
+  color: var(--ide-text-bright) !important;
+  border-radius: 6px !important;
+}
+
+.ide-studio-mode .study-nav-btn:hover,
+.ide-studio-mode .mindmap-toolbar button:hover {
+  background: var(--ide-hover) !important;
+  border-color: var(--ide-primary) !important;
+}
+
+.ide-studio-mode .mindmap-editor-inspector {
+  background: var(--ide-sidebar) !important;
+  border-top: 1px solid var(--ide-border) !important;
+}
+
+/* --- 6. Unified Toasts & Hide Floating Classic Version Badge in IDE Mode --- */
+.ide-studio-mode .app-version-badge {
+  display: none !important;
+}
+
+.ide-studio-mode .toast-item {
+  background: var(--ide-popover-bg) !important;
+  border: 1px solid var(--ide-border-light) !important;
+  color: var(--ide-text-bright) !important;
+  border-radius: 8px !important;
+  box-shadow: var(--ide-popover-shadow) !important;
+  backdrop-filter: none !important;
+}
+
+/* Crisp Light-mode contrast inside inline-styled Settings & generic modals */
+.ide-studio-mode.ide-theme-light .modal-box,
+.ide-studio-mode.ide-theme-light .weather-modal-dialog {
+  color: #0f172a !important;
+}
+
+.ide-studio-mode.ide-theme-light .modal-box button:not(.modal-save-btn):not(.export-primary-btn):not(.settings-ide-mode-btn.is-active):not([style*="6366f1"]):not([style*="4f46e5"]):not([style*="2563eb"]) {
+  color: #1e293b !important;
+}
+
+.ide-studio-mode.ide-theme-light .modal-box [style*="#f8fafc"],
+.ide-studio-mode.ide-theme-light .modal-box [style*="#e2e8f0"],
+.ide-studio-mode.ide-theme-light .modal-box [style*="#f1f5f9"],
+.ide-studio-mode.ide-theme-light .modal-box [style*="rgb(248, 250, 252)"],
+.ide-studio-mode.ide-theme-light .modal-box [style*="rgb(226, 232, 240)"] {
+  color: #0f172a !important;
+}
+
+.ide-studio-mode.ide-theme-light .modal-box [style*="#cbd5e1"],
+.ide-studio-mode.ide-theme-light .modal-box [style*="#94a3b8"] {
+  color: #475569 !important;
+}
+
+.ide-studio-mode.ide-theme-light .modal-box .settings-style-active-tag,
+.ide-studio-mode.ide-theme-light .modal-box .settings-ide-mode-btn.is-active {
+  color: #ffffff !important;
+}
+
+/* Harmonize editor toolbar groups in Light IDE mode */
+.ide-studio-mode.ide-theme-light .editor-toolbar .font-size-stepper,
+.ide-studio-mode.ide-theme-light .editor-toolbar .font-size-presets,
+.ide-studio-mode.ide-theme-light .editor-toolbar .color-palette-wrapper,
+.ide-studio-mode.ide-theme-light .editor-toolbar .toolbar-pill-group {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
 
 
 

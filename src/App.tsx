@@ -41,11 +41,24 @@ import { IdeExplorerPane } from './components/IdeExplorerPane';
 import {
   UiStyleMode,
   IdeThemeMode,
+  IdePaneId,
+  IdeDropZone,
+  IdeColumnGroup,
+  IdeLayoutPresetId,
   IdeWindowVisibility,
   DEFAULT_IDE_WINDOWS,
+  DEFAULT_IDE_COLUMNS,
+  IDE_LAYOUT_PRESETS,
   toggleIdeWindowSafe,
   normalizeUiStyle,
   normalizeIdeThemeMode,
+  normalizeIdeColumns,
+  moveIdePanel,
+  toggleIdeColumnMode,
+  setIdeColumnActiveTab,
+  applyIdeLayoutPreset,
+  detectActiveIdePreset,
+  computeIdeGridPlacement,
   computeNoteWordCount
 } from './utils/ideTheme';
 import { reorderPagesList } from './utils/studyTools';
@@ -190,6 +203,15 @@ export default function App() {
   const [uiStyle, setUiStyle] = useState<UiStyleMode>('ide');
   const [ideThemeMode, setIdeThemeMode] = useState<IdeThemeMode>('dark');
   const [ideWindows, setIdeWindows] = useState<IdeWindowVisibility>(DEFAULT_IDE_WINDOWS);
+  const [ideColumns, setIdeColumns] = useState<IdeColumnGroup[]>(() =>
+    DEFAULT_IDE_COLUMNS.map(c => ({ ...c, panels: [...c.panels] }))
+  );
+  const [ideCollapsedExplorer, setIdeCollapsedExplorer] = useState<boolean>(false);
+  const [maximizedIdePane, setMaximizedIdePane] = useState<IdePaneId | null>(null);
+  const [ideFoldersBySubject, setIdeFoldersBySubject] = useState<Record<string, string[]>>({});
+  const [draggingIdePane, setDraggingIdePane] = useState<IdePaneId | null>(null);
+  const draggingIdePaneRef = useRef<IdePaneId | null>(null);
+  const [ideDropHover, setIdeDropHover] = useState<{ pane: IdePaneId; zone: IdeDropZone } | null>(null);
   const [showDriveBar, setShowDriveBar] = useState<boolean>(true);
   const [columnLayout, setColumnLayout] = useState<ColumnLayoutPreset>('tools-notes-chat');
   const [leftColumnWidth, setLeftColumnWidth] = useState<number>(256);
@@ -599,6 +621,15 @@ export default function App() {
         chat: localPref.ideWindows.chat !== false
       });
     }
+    if (localPref.ideColumns) {
+      setIdeColumns(normalizeIdeColumns(localPref.ideColumns));
+    }
+    if (typeof localPref.ideCollapsedExplorer === 'boolean') {
+      setIdeCollapsedExplorer(localPref.ideCollapsedExplorer);
+    }
+    if (localPref.ideFoldersBySubject && typeof localPref.ideFoldersBySubject === 'object') {
+      setIdeFoldersBySubject(localPref.ideFoldersBySubject);
+    }
     if (typeof localPref.showDriveBar === 'boolean') {
       setShowDriveBar(localPref.showDriveBar);
     }
@@ -892,6 +923,15 @@ export default function App() {
                 editor: pref.ideWindows.editor !== false,
                 chat: pref.ideWindows.chat !== false
               });
+            }
+            if (pref.ideColumns !== undefined) {
+              setIdeColumns(normalizeIdeColumns(pref.ideColumns));
+            }
+            if (pref.ideCollapsedExplorer !== undefined) {
+              setIdeCollapsedExplorer(!!pref.ideCollapsedExplorer);
+            }
+            if (pref.ideFoldersBySubject !== undefined && typeof pref.ideFoldersBySubject === 'object') {
+              setIdeFoldersBySubject(pref.ideFoldersBySubject);
             }
             if (pref.showDriveBar !== undefined) setShowDriveBar(pref.showDriveBar);
             if (pref.columnLayout !== undefined) setColumnLayout(pref.columnLayout);
@@ -1445,6 +1485,10 @@ export default function App() {
     selectedImageEl,
     selectedDrawingEl,
     isDrawingMode,
+    uiStyle,
+    ideWindows,
+    ideColumns,
+    maximizedIdePane,
     restoreNotesScrollPosition
   ]);
 
@@ -1650,6 +1694,9 @@ export default function App() {
         showToast('Almeno una finestra deve rimanere visibile.', 'error');
         return prev;
       }
+      if (!next[key] && maximizedIdePane === key) {
+        setMaximizedIdePane(null);
+      }
       WorkspaceService.saveLocalPreferences({ ideWindows: next });
       if (currentUser) {
         WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { ideWindows: next });
@@ -1658,13 +1705,325 @@ export default function App() {
     });
   };
 
+  const handleCloseIdePane = (paneId: IdePaneId) => {
+    if (!ideWindows[paneId]) return;
+    handleToggleIdeWindow(paneId);
+  };
+
   const handleRestoreIdeWindows = () => {
+    const freshCols = DEFAULT_IDE_COLUMNS.map(c => ({ ...c, panels: [...c.panels] }));
     setIdeWindows(DEFAULT_IDE_WINDOWS);
-    WorkspaceService.saveLocalPreferences({ ideWindows: DEFAULT_IDE_WINDOWS });
+    setIdeColumns(freshCols);
+    setIdeCollapsedExplorer(false);
+    setMaximizedIdePane(null);
+    WorkspaceService.saveLocalPreferences({
+      ideWindows: DEFAULT_IDE_WINDOWS,
+      ideColumns: freshCols,
+      ideCollapsedExplorer: false
+    });
     if (currentUser) {
-      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { ideWindows: DEFAULT_IDE_WINDOWS });
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, {
+        ideWindows: DEFAULT_IDE_WINDOWS,
+        ideColumns: freshCols,
+        ideCollapsedExplorer: false
+      });
     }
     showToast('Layout IDE ripristinato (3/3 finestre attive).');
+  };
+
+  // IDE Docking: Move / Stack / Tab panels
+  const handleMoveIdePanel = (sourcePane: IdePaneId, targetPane: IdePaneId, zone: IdeDropZone) => {
+    if (sourcePane === targetPane) return;
+    setIdeColumns(prev => {
+      const next = moveIdePanel(prev, sourcePane, targetPane, zone);
+      WorkspaceService.saveLocalPreferences({ ideColumns: next });
+      if (currentUser) {
+        WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { ideColumns: next });
+      }
+      return next;
+    });
+    if (sourcePane === 'explorer' && (zone === 'top' || zone === 'bottom' || zone === 'tab')) {
+      setIdeCollapsedExplorer(false);
+      WorkspaceService.saveLocalPreferences({ ideCollapsedExplorer: false });
+    }
+    setMaximizedIdePane(null);
+    const zoneLabel =
+      zone === 'tab'
+        ? 'raggruppata in schede'
+        : zone === 'top' || zone === 'bottom'
+        ? 'impilata verticalmente'
+        : 'spostata';
+    showToast(`Finestra ${zoneLabel}.`);
+  };
+
+  const handleToggleIdeColumnMode = (colId: string) => {
+    setIdeColumns(prev => {
+      const next = toggleIdeColumnMode(prev, colId);
+      WorkspaceService.saveLocalPreferences({ ideColumns: next });
+      if (currentUser) {
+        WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { ideColumns: next });
+      }
+      return next;
+    });
+  };
+
+  const handleSelectIdeColumnTab = (colId: string, paneId: IdePaneId) => {
+    setIdeColumns(prev => {
+      const next = setIdeColumnActiveTab(prev, colId, paneId);
+      WorkspaceService.saveLocalPreferences({ ideColumns: next });
+      if (currentUser) {
+        WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { ideColumns: next });
+      }
+      return next;
+    });
+  };
+
+  const handleApplyIdePreset = (presetId: IdeLayoutPresetId) => {
+    const preset = applyIdeLayoutPreset(presetId);
+    setIdeWindows(preset.windows);
+    setIdeColumns(preset.columns);
+    setIdeCollapsedExplorer(preset.collapsedExplorer);
+    setActiveTab(preset.activeTab);
+    setMaximizedIdePane(null);
+    WorkspaceService.saveLocalPreferences({
+      ideWindows: preset.windows,
+      ideColumns: preset.columns,
+      ideCollapsedExplorer: preset.collapsedExplorer
+    });
+    if (currentUser) {
+      WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, {
+        ideWindows: preset.windows,
+        ideColumns: preset.columns,
+        ideCollapsedExplorer: preset.collapsedExplorer
+      });
+    }
+    const meta = IDE_LAYOUT_PRESETS.find(p => p.id === presetId);
+    showToast(`Layout applicato: ${meta?.label || presetId}`);
+  };
+
+  const handleToggleCollapseExplorer = () => {
+    setIdeCollapsedExplorer(prev => {
+      const next = !prev;
+      WorkspaceService.saveLocalPreferences({ ideCollapsedExplorer: next });
+      if (currentUser) {
+        WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { ideCollapsedExplorer: next });
+      }
+      return next;
+    });
+  };
+
+  const handleToggleMaximizeIdePane = (paneId: IdePaneId) => {
+    setMaximizedIdePane(prev => (prev === paneId ? null : paneId));
+  };
+
+  // Escape restores maximized IDE pane
+  useEffect(() => {
+    if (!maximizedIdePane) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key === 'Escape' &&
+        !isCommandPaletteOpen &&
+        !isSettingsModalOpen &&
+        !isStudyReviewOpen &&
+        !isMindMapOpen &&
+        !dialogState.isOpen
+      ) {
+        setMaximizedIdePane(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    maximizedIdePane,
+    isCommandPaletteOpen,
+    isSettingsModalOpen,
+    isStudyReviewOpen,
+    isMindMapOpen,
+    dialogState.isOpen
+  ]);
+
+  // IDE Explorer Folders CRUD & Drag-to-Folder
+  const handleCreateIdeFolder = async () => {
+    if (workspaceMode === 'shared') {
+      showToast('Le cartelle Explorer sono disponibili nello Spazio Personale.', 'error');
+      return;
+    }
+    const folderName = await openCustomDialog({
+      title: '📁 Nuova Cartella Appunti',
+      description: `Crea una cartella per organizzare le note di <b>${activeSubject}</b>.`,
+      fields: [{ placeholder: 'Es. Lezioni Teoria, Esercizi, Esame...', value: '' }],
+      confirmText: 'Crea Cartella'
+    });
+    const clean = (folderName || '').trim();
+    if (!clean) return;
+    setIdeFoldersBySubject(prev => {
+      const list = prev[activeSubject] || [];
+      if (list.some(f => f.toLowerCase() === clean.toLowerCase())) {
+        return prev;
+      }
+      const next = { ...prev, [activeSubject]: [...list, clean] };
+      WorkspaceService.saveLocalPreferences({ ideFoldersBySubject: next });
+      if (currentUser) {
+        WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { ideFoldersBySubject: next });
+      }
+      return next;
+    });
+    showToast(`Cartella "${clean}" creata!`);
+  };
+
+  const handleMovePageToFolder = async (pageId: string, folderName: string | undefined) => {
+    if (workspaceMode === 'shared') return;
+    const currentSubPages = pages[activeSubject] || [];
+    const targetPage = currentSubPages.find(p => p.id === pageId);
+    if (!targetPage) return;
+    const cleanFolder = folderName?.trim() || undefined;
+    if ((targetPage.folder || undefined) === cleanFolder) return;
+
+    const updatedPage: PageItem = { ...targetPage };
+    if (cleanFolder) {
+      updatedPage.folder = cleanFolder;
+    } else {
+      delete updatedPage.folder;
+    }
+
+    const updatedSubPages = currentSubPages.map(p => (p.id === pageId ? updatedPage : p));
+    const updatedAll = { ...pages, [activeSubject]: updatedSubPages };
+    setPages(updatedAll);
+    WorkspaceService.saveLocalPages(updatedAll);
+    if (currentUser) {
+      await WorkspaceService.savePageToCloud(currentUser.uid, activeSubject, updatedPage);
+    }
+    showToast(
+      cleanFolder
+        ? `"${targetPage.name}" spostata in "${cleanFolder}".`
+        : `"${targetPage.name}" spostata nella root.`
+    );
+  };
+
+  const handleDeleteIdeFolder = async (folderName: string) => {
+    if (workspaceMode === 'shared') return;
+    const clean = folderName.trim();
+    if (!clean) return;
+
+    // Move pages inside this folder back to root (non-destructive)
+    const currentSubPages = pages[activeSubject] || [];
+    const affected = currentSubPages.filter(p => (p.folder || '').trim() === clean);
+    if (affected.length > 0) {
+      const updatedSubPages = currentSubPages.map(p => {
+        if ((p.folder || '').trim() !== clean) return p;
+        const copy = { ...p };
+        delete copy.folder;
+        return copy;
+      });
+      const updatedAll = { ...pages, [activeSubject]: updatedSubPages };
+      setPages(updatedAll);
+      WorkspaceService.saveLocalPages(updatedAll);
+      if (currentUser) {
+        for (const p of affected) {
+          const copy = { ...p };
+          delete copy.folder;
+          await WorkspaceService.savePageToCloud(currentUser.uid, activeSubject, copy);
+        }
+      }
+    }
+
+    setIdeFoldersBySubject(prev => {
+      const list = (prev[activeSubject] || []).filter(f => f !== clean);
+      const next = { ...prev, [activeSubject]: list };
+      WorkspaceService.saveLocalPreferences({ ideFoldersBySubject: next });
+      if (currentUser) {
+        WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, { ideFoldersBySubject: next });
+      }
+      return next;
+    });
+    showToast(`Cartella "${clean}" rimossa (note mantenute nella root).`);
+  };
+
+  // Drag & Drop Pane Docking Handlers
+  const startIdePaneDrag = (e: React.DragEvent, paneId: IdePaneId) => {
+    draggingIdePaneRef.current = paneId;
+    setDraggingIdePane(paneId);
+    e.dataTransfer.setData('text/x-ide-pane', paneId);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const endIdePaneDrag = () => {
+    draggingIdePaneRef.current = null;
+    setDraggingIdePane(null);
+    setIdeDropHover(null);
+  };
+
+  const computeIdePaneDropZone = (e: React.DragEvent): IdeDropZone => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const rx = (e.clientX - rect.left) / Math.max(1, rect.width);
+    const ry = (e.clientY - rect.top) / Math.max(1, rect.height);
+    if (rx < 0.24) return 'left';
+    if (rx > 0.76) return 'right';
+    if (ry < 0.26) return 'top';
+    if (ry > 0.74) return 'bottom';
+    return 'tab';
+  };
+
+  const handleIdePaneDragOver = (e: React.DragEvent, targetPane: IdePaneId) => {
+    const src = draggingIdePaneRef.current;
+    if (!src || src === targetPane) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const zone = computeIdePaneDropZone(e);
+    setIdeDropHover(prev =>
+      prev && prev.pane === targetPane && prev.zone === zone ? prev : { pane: targetPane, zone }
+    );
+  };
+
+  const handleIdePaneDrop = (e: React.DragEvent, targetPane: IdePaneId) => {
+    const src =
+      draggingIdePaneRef.current || (e.dataTransfer.getData('text/x-ide-pane') as IdePaneId);
+    if (!src || src === targetPane) {
+      endIdePaneDrag();
+      return;
+    }
+    e.preventDefault();
+    const zone = computeIdePaneDropZone(e);
+    handleMoveIdePanel(src, targetPane, zone);
+    endIdePaneDrag();
+  };
+
+  const getIdePaneMeta = (paneId: IdePaneId): { label: string; color: string; short: string } => {
+    if (paneId === 'explorer') return { label: 'EXPLORER', color: '#f59e0b', short: 'Explorer' };
+    if (paneId === 'chat') return { label: 'AI CHAT', color: '#a855f7', short: 'AI Chat' };
+    return {
+      label:
+        activeTab === 'materials'
+          ? 'SLIDE / MATERIALI'
+          : activeTab === 'calendar'
+          ? 'CALENDARIO'
+          : 'EDITOR',
+      color: '#3b82f6',
+      short: 'Editor'
+    };
+  };
+
+  const renderIdeDropOverlay = (targetPane: IdePaneId) => {
+    if (!draggingIdePane || draggingIdePane === targetPane) return null;
+    if (!ideDropHover || ideDropHover.pane !== targetPane) return null;
+    const zone = ideDropHover.zone;
+    const hintText =
+      zone === 'left'
+        ? 'Sposta a sinistra'
+        : zone === 'right'
+        ? 'Sposta a destra'
+        : zone === 'top'
+        ? 'Impila sopra'
+        : zone === 'bottom'
+        ? 'Impila sotto'
+        : 'Raggruppa in schede';
+    return (
+      <div className={`ide-drop-overlay zone-${zone}`} aria-hidden="true">
+        <div className="ide-drop-preview-box">
+          <span className="ide-drop-preview-pill">{hintText}</span>
+        </div>
+      </div>
+    );
   };
 
   // Show/Hide Google Drive link bar
@@ -2261,12 +2620,15 @@ export default function App() {
     }
   };
 
-  // Add New Page in active subject
-  const handleAddNewPage = async () => {
+  // Add New Page in active subject (optionally inside an IDE Explorer folder)
+  const handleAddNewPage = async (folderName?: string | React.MouseEvent) => {
+    const cleanFolder = typeof folderName === 'string' && folderName.trim() ? folderName.trim() : undefined;
     const currentSubPages = pages[activeSubject] || [];
     const pageName = await openCustomDialog({
-      title: '📝 Nuova Pagina Appunti',
-      description: `Crea una nuova scheda di appunti in <b>${activeSubject}</b>.`,
+      title: cleanFolder ? `📝 Nuova Nota in "${cleanFolder}"` : '📝 Nuova Pagina Appunti',
+      description: cleanFolder
+        ? `Crea una nuova scheda di appunti nella cartella <b>${cleanFolder}</b> di <b>${activeSubject}</b>.`
+        : `Crea una nuova scheda di appunti in <b>${activeSubject}</b>.`,
       fields: [{ placeholder: 'Titolo della pagina...', value: `Pagina ${currentSubPages.length + 1}` }],
       confirmText: 'Crea Pagina'
     });
@@ -2276,7 +2638,8 @@ export default function App() {
         id: 'page_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
         name: pageName.trim(),
         content: '',
-        order: currentSubPages.length
+        order: currentSubPages.length,
+        ...(cleanFolder ? { folder: cleanFolder } : {})
       };
 
       const updated = {
@@ -6252,6 +6615,25 @@ REGOLE TASSATIVE:
   }
 
   // 3. Authenticated Workspace (When currentUser is present)
+  const ideGrid =
+    uiStyle === 'ide'
+      ? computeIdeGridPlacement(
+          ideColumns,
+          ideWindows,
+          ideCollapsedExplorer,
+          maximizedIdePane,
+          leftColumnWidth,
+          rightColumnWidth
+        )
+      : null;
+  const activeIdePreset = detectActiveIdePreset(
+    ideWindows,
+    ideColumns,
+    ideCollapsedExplorer,
+    activeTab
+  );
+  const hasFullColumnWidget = customWidgets.some(w => w.enabled && w.slot === 'full_column');
+
   return (
     <div className={`app-viewport ${uiStyle === 'ide' ? `ide-studio-mode ide-theme-${ideThemeMode}` : ''}`}>
       {/* Unified App Top Header - IDE Studio TopBar OR Classic TopBar */}
@@ -6270,6 +6652,8 @@ REGOLE TASSATIVE:
             isMindMapOpen={isMindMapOpen}
             ideWindows={ideWindows}
             ideThemeMode={ideThemeMode}
+            activeLayoutPreset={activeIdePreset}
+            isExplorerCollapsed={ideCollapsedExplorer}
             isAdmin={isAdmin}
             pendingRequestsCount={accessRequests.filter(r => r.status === 'pending').length}
             isInstalled={isInstalled}
@@ -6292,11 +6676,14 @@ REGOLE TASSATIVE:
             }}
             onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
             onToggleIdeWindow={handleToggleIdeWindow}
+            onApplyLayoutPreset={handleApplyIdePreset}
+            onToggleCollapseExplorer={handleToggleCollapseExplorer}
             onRestoreDefaultWindows={handleRestoreIdeWindows}
             onSelectCenterTab={tab => setActiveTab(tab)}
             onToggleSplitScreen={() => setIsSplitScreenOpen(v => !v)}
             onOpenStudyReview={() => setIsStudyReviewOpen(true)}
             onOpenMindMap={() => setIsMindMapOpen(true)}
+            onSelectIdeThemeMode={handleSelectIdeThemeMode}
             onToggleIdeThemeMode={() =>
               handleSelectIdeThemeMode(ideThemeMode === 'dark' ? 'light' : 'dark')
             }
@@ -6463,22 +6850,138 @@ REGOLE TASSATIVE:
         )
       )}
 
-      {/* Main Multi-Column Dashboard Container (Supports Dedicated Full-Column Widgets) */}
+      {/* Main Multi-Column Dashboard Container (Supports Dedicated Full-Column Widgets & IDE Docking Grid) */}
       <div
         className={`dashboard-container layout-${columnLayout} ${isSidebarCollapsed && uiStyle === 'classic' ? 'sidebar-collapsed' : ''} ${
           isChatCollapsed && uiStyle === 'classic' ? 'chat-collapsed' : ''
-        } ${customWidgets.some(w => w.enabled && w.slot === 'full_column') ? 'has-widget-column' : ''} ${
+        } ${hasFullColumnWidget ? 'has-widget-column' : ''} ${
+          uiStyle === 'ide' ? 'ide-dock-grid' : ''
+        } ${
           uiStyle === 'ide' && !ideWindows.explorer ? 'ide-hide-explorer' : ''
         } ${uiStyle === 'ide' && !ideWindows.editor ? 'ide-hide-editor' : ''} ${
           uiStyle === 'ide' && !ideWindows.chat ? 'ide-hide-chat' : ''
         }`}
         id="main-container"
+        style={
+          uiStyle === 'ide' && ideGrid
+            ? {
+                gridTemplateColumns: hasFullColumnWidget
+                  ? `${ideGrid.gridTemplateColumns} ${widgetColumnWidth}px`
+                  : ideGrid.gridTemplateColumns,
+                gridTemplateRows: ideGrid.gridTemplateRows
+              }
+            : undefined
+        }
       >
+        {/* Shared VS Code Docked Tabbar when 2+ IDE panes are merged into a tabbed column */}
+        {uiStyle === 'ide' && ideGrid?.tabbar && (
+          <div
+            className={`ide-dock-tabbar ${ideGrid.tabbar.gridColumn > 1 ? 'ide-has-left-border' : ''}`}
+            style={{
+              gridColumn: ideGrid.tabbar.gridColumn,
+              gridRow: 1
+            }}
+            onDragOver={e => {
+              const src = draggingIdePaneRef.current;
+              if (!src || ideGrid.tabbar?.panels.includes(src)) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+            }}
+            onDrop={e => {
+              const src =
+                draggingIdePaneRef.current || (e.dataTransfer.getData('text/x-ide-pane') as IdePaneId);
+              if (!src || !ideGrid.tabbar || ideGrid.tabbar.panels.includes(src)) {
+                endIdePaneDrag();
+                return;
+              }
+              e.preventDefault();
+              handleMoveIdePanel(src, ideGrid.tabbar.activeTab, 'tab');
+              endIdePaneDrag();
+            }}
+          >
+            <div className="ide-dock-tabs-list" role="tablist" aria-label="Finestre raggruppate">
+              {ideGrid.tabbar.panels.map(paneId => {
+                const meta = getIdePaneMeta(paneId);
+                const isActiveTab = ideGrid.tabbar?.activeTab === paneId;
+                return (
+                  <button
+                    key={paneId}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActiveTab}
+                    className={`ide-dock-tab ${isActiveTab ? 'is-active' : ''}`}
+                    draggable
+                    onDragStart={e => startIdePaneDrag(e, paneId)}
+                    onDragEnd={endIdePaneDrag}
+                    onClick={() => handleSelectIdeColumnTab(ideGrid.tabbar!.colId, paneId)}
+                  >
+                    <span className="ide-dock-tab-dot" style={{ background: meta.color }} aria-hidden="true" />
+                    <span>{meta.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="ide-dock-tabbar-actions">
+              <button
+                type="button"
+                className="ide-pane-icon-btn"
+                onClick={() => handleToggleIdeColumnMode(ideGrid.tabbar!.colId)}
+                title="Passa a finestre impilate verticalmente"
+                aria-label="Passa a vista impilata"
+              >
+                ⬓
+              </button>
+              <button
+                type="button"
+                className="ide-pane-icon-btn"
+                onClick={() => handleToggleMaximizeIdePane(ideGrid.tabbar!.activeTab)}
+                title="Massimizza finestra attiva"
+                aria-label="Massimizza finestra attiva"
+              >
+                ⤢
+              </button>
+              <button
+                type="button"
+                className="ide-pane-icon-btn is-close"
+                onClick={() => handleCloseIdePane(ideGrid.tabbar!.activeTab)}
+                title="Chiudi finestra attiva"
+                aria-label="Chiudi finestra attiva"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Left Column: IDE Explorer Pane OR Classic Tools & Quick Launch */}
-        <div className={`panel tools-column ${mobileTab === 'tools' ? 'mobile-active' : ''}`}>
+        <div
+          className={`panel tools-column ${mobileTab === 'tools' ? 'mobile-active' : ''} ${
+            uiStyle === 'ide' && ideGrid?.placements.explorer.hasLeftBorder ? 'ide-has-left-border' : ''
+          } ${
+            uiStyle === 'ide' && ideGrid?.placements.explorer.hasTopBorder ? 'ide-has-top-border' : ''
+          } ${
+            uiStyle === 'ide' && ideCollapsedExplorer && !ideGrid?.placements.explorer.isTabbedColumn && !ideGrid?.placements.explorer.isStackedMulti
+              ? 'ide-explorer-is-collapsed'
+              : ''
+          }`}
+          style={
+            uiStyle === 'ide' && ideGrid
+              ? {
+                  gridColumn: ideGrid.placements.explorer.gridColumn,
+                  gridRow: ideGrid.placements.explorer.gridRow,
+                  display: ideGrid.placements.explorer.visible ? undefined : 'none',
+                  position: 'relative'
+                }
+              : undefined
+          }
+          onDragOver={uiStyle === 'ide' ? e => handleIdePaneDragOver(e, 'explorer') : undefined}
+          onDrop={uiStyle === 'ide' ? e => handleIdePaneDrop(e, 'explorer') : undefined}
+        >
+          {uiStyle === 'ide' && renderIdeDropOverlay('explorer')}
           {uiStyle === 'ide' ? (
             <IdeExplorerPane
               pages={workspaceMode === 'shared' ? activeRoomPages : currentSubPages}
+              extraFolders={workspaceMode === 'personal' ? ideFoldersBySubject[activeSubject] || [] : []}
               activePageId={workspaceMode === 'shared' ? activeRoomPageId : activePageId}
               activeTab={activeTab}
               workspaceMode={workspaceMode}
@@ -6486,6 +6989,17 @@ REGOLE TASSATIVE:
               calendarEventsCount={calendarEvents.length}
               isStudyReviewOpen={isStudyReviewOpen}
               isMindMapOpen={isMindMapOpen}
+              isCollapsed={
+                ideCollapsedExplorer &&
+                !ideGrid?.placements.explorer.isTabbedColumn &&
+                !ideGrid?.placements.explorer.isStackedMulti &&
+                maximizedIdePane !== 'explorer'
+              }
+              hideWindowHeader={!!ideGrid?.placements.explorer.hideWindowHeader}
+              onHeaderDragStart={e => startIdePaneDrag(e, 'explorer')}
+              onHeaderDragEnd={endIdePaneDrag}
+              onToggleCollapse={handleToggleCollapseExplorer}
+              onClosePane={() => handleCloseIdePane('explorer')}
               onSelectPage={pageId => {
                 if (workspaceMode === 'shared') {
                   handleSelectSharedRoomPageTab(pageId);
@@ -6493,13 +7007,16 @@ REGOLE TASSATIVE:
                   handleSelectPersonalPageTab(pageId);
                 }
               }}
-              onAddNewPage={() => {
+              onAddNewPage={folderName => {
                 if (workspaceMode === 'shared') {
                   handleAddNewRoomPage();
                 } else {
-                  handleAddNewPage();
+                  handleAddNewPage(folderName);
                 }
               }}
+              onCreateFolder={handleCreateIdeFolder}
+              onMovePageToFolder={handleMovePageToFolder}
+              onDeleteFolder={handleDeleteIdeFolder}
               onRenamePage={pageId => {
                 if (workspaceMode === 'shared') {
                   handleRenameRoomPage(pageId);
@@ -6721,10 +7238,37 @@ REGOLE TASSATIVE:
         </div>
 
         {/* Center Column: Workspace Notes & Materials */}
-        <div className={`panel ${isNotesMaximized ? 'notes-maximized' : ''} ${mobileTab === 'notes' || mobileTab === 'materials' ? 'mobile-active' : ''}`} id="notes-panel">
+        <div
+          className={`panel ${isNotesMaximized ? 'notes-maximized' : ''} ${mobileTab === 'notes' || mobileTab === 'materials' ? 'mobile-active' : ''} ${
+            uiStyle === 'ide' && ideGrid?.placements.editor.hasLeftBorder ? 'ide-has-left-border' : ''
+          } ${
+            uiStyle === 'ide' && ideGrid?.placements.editor.hasTopBorder ? 'ide-has-top-border' : ''
+          }`}
+          id="notes-panel"
+          style={
+            uiStyle === 'ide' && ideGrid
+              ? {
+                  gridColumn: ideGrid.placements.editor.gridColumn,
+                  gridRow: ideGrid.placements.editor.gridRow,
+                  display: ideGrid.placements.editor.visible ? undefined : 'none',
+                  position: 'relative'
+                }
+              : undefined
+          }
+          onDragOver={uiStyle === 'ide' ? e => handleIdePaneDragOver(e, 'editor') : undefined}
+          onDrop={uiStyle === 'ide' ? e => handleIdePaneDrop(e, 'editor') : undefined}
+        >
+          {uiStyle === 'ide' && renderIdeDropOverlay('editor')}
           {uiStyle === 'ide' && (
             <>
-              <div className="ide-pane-header ide-editor-pane-header">
+              {!ideGrid?.placements.editor.hideWindowHeader && (
+              <div
+                className="ide-pane-header ide-editor-pane-header ide-draggable-header"
+                draggable
+                onDragStart={e => startIdePaneDrag(e, 'editor')}
+                onDragEnd={endIdePaneDrag}
+                title="Trascina per spostare, impilare o raggruppare la finestra Editor"
+              >
                 <div className="ide-pane-header-left">
                   <span className="ide-grip-dots" aria-hidden="true">⋮⋮</span>
                   <svg
@@ -6799,8 +7343,38 @@ REGOLE TASSATIVE:
                       </button>
                     </>
                   )}
+                  {ideGrid?.placements.editor.isStackedMulti && (
+                    <button
+                      type="button"
+                      className="ide-pane-icon-btn"
+                      onClick={() => handleToggleIdeColumnMode(ideGrid.placements.editor.colId)}
+                      title="Raggruppa questa colonna in schede VS Code"
+                      aria-label="Raggruppa colonna Editor in schede"
+                    >
+                      🗂️
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={`ide-pane-icon-btn ${maximizedIdePane === 'editor' ? 'is-active' : ''}`}
+                    onClick={() => handleToggleMaximizeIdePane('editor')}
+                    title={maximizedIdePane === 'editor' ? 'Ripristina finestra (Esc)' : 'Massimizza finestra Editor'}
+                    aria-label={maximizedIdePane === 'editor' ? 'Ripristina Editor' : 'Massimizza Editor'}
+                  >
+                    {maximizedIdePane === 'editor' ? '⤡' : '⤢'}
+                  </button>
+                  <button
+                    type="button"
+                    className="ide-pane-icon-btn is-close"
+                    onClick={() => handleCloseIdePane('editor')}
+                    title="Chiudi finestra Editor"
+                    aria-label="Chiudi Editor"
+                  >
+                    ✕
+                  </button>
                 </div>
               </div>
+              )}
 
               {workspaceMode === 'shared' && activeRoom && (
                 <div className="ide-shared-room-strip">
@@ -8502,14 +9076,38 @@ REGOLE TASSATIVE:
         <div
           className={`panel chat-column ${
             customWidgets.some(w => w.enabled && w.slot === 'right_bottom') ? 'has-bottom-widgets' : ''
-          } ${mobileTab === 'chat' ? 'mobile-active' : ''}`}
+          } ${mobileTab === 'chat' ? 'mobile-active' : ''} ${
+            uiStyle === 'ide' && ideGrid?.placements.chat.hasLeftBorder ? 'ide-has-left-border' : ''
+          } ${
+            uiStyle === 'ide' && ideGrid?.placements.chat.hasTopBorder ? 'ide-has-top-border' : ''
+          }`}
           id="chat-column"
+          style={
+            uiStyle === 'ide' && ideGrid
+              ? {
+                  gridColumn: ideGrid.placements.chat.gridColumn,
+                  gridRow: ideGrid.placements.chat.gridRow,
+                  display: ideGrid.placements.chat.visible ? undefined : 'none',
+                  position: 'relative'
+                }
+              : undefined
+          }
+          onDragOver={uiStyle === 'ide' ? e => handleIdePaneDragOver(e, 'chat') : undefined}
+          onDrop={uiStyle === 'ide' ? e => handleIdePaneDrop(e, 'chat') : undefined}
           onPaste={handleChatPaste}
         >
+          {uiStyle === 'ide' && renderIdeDropOverlay('chat')}
           <div className="ai-chat-panel">
             {uiStyle === 'ide' ? (
               <>
-                <div className="ide-pane-header ide-chat-pane-header">
+                {!ideGrid?.placements.chat.hideWindowHeader && (
+                <div
+                  className="ide-pane-header ide-chat-pane-header ide-draggable-header"
+                  draggable
+                  onDragStart={e => startIdePaneDrag(e, 'chat')}
+                  onDragEnd={endIdePaneDrag}
+                  title="Trascina per spostare, impilare o raggruppare la finestra AI Chat"
+                >
                   <div className="ide-pane-header-left">
                     <span className="ide-grip-dots" aria-hidden="true">⋮⋮</span>
                     <svg
@@ -8545,8 +9143,38 @@ REGOLE TASSATIVE:
                         ↺ Reset
                       </button>
                     )}
+                    {ideGrid?.placements.chat.isStackedMulti && (
+                      <button
+                        type="button"
+                        className="ide-pane-icon-btn"
+                        onClick={() => handleToggleIdeColumnMode(ideGrid.placements.chat.colId)}
+                        title="Raggruppa questa colonna in schede VS Code"
+                        aria-label="Raggruppa colonna AI Chat in schede"
+                      >
+                        🗂️
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className={`ide-pane-icon-btn ${maximizedIdePane === 'chat' ? 'is-active' : ''}`}
+                      onClick={() => handleToggleMaximizeIdePane('chat')}
+                      title={maximizedIdePane === 'chat' ? 'Ripristina finestra (Esc)' : 'Massimizza finestra AI Chat'}
+                      aria-label={maximizedIdePane === 'chat' ? 'Ripristina AI Chat' : 'Massimizza AI Chat'}
+                    >
+                      {maximizedIdePane === 'chat' ? '⤡' : '⤢'}
+                    </button>
+                    <button
+                      type="button"
+                      className="ide-pane-icon-btn is-close"
+                      onClick={() => handleCloseIdePane('chat')}
+                      title="Chiudi finestra AI Chat"
+                      aria-label="Chiudi AI Chat"
+                    >
+                      ✕
+                    </button>
                   </div>
                 </div>
+                )}
 
                 {/* IDE Quick Actions Chips Row (Riassumi / Spiega Concetti / Mini-Quiz) */}
                 <div className="ide-chat-quick-bar">
@@ -8714,17 +9342,33 @@ REGOLE TASSATIVE:
                   })
                 )
               ) : currentSubChats.length === 0 ? (
-                <div className="chat-msg ai">
-                  Chiedi qualcosa, scrivi <b>"evidenzia le cose chiave"</b>, chiedi di generare codice/formule o scrivi <i>"nel blocco di codice dove faccio fibonacci sistemalo e sostituiscilo nella box"</i>!
-                </div>
+                uiStyle === 'ide' ? (
+                  <div className="ide-chat-msg-row">
+                    <div className="ide-chat-bot-avatar" aria-hidden="true">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="8" width="18" height="12" rx="2" />
+                        <path d="M12 2v6" />
+                        <circle cx="9" cy="14" r="1" />
+                        <circle cx="15" cy="14" r="1" />
+                      </svg>
+                    </div>
+                    <div className="chat-msg ai ide-chat-welcome-card">
+                      Ciao! Sono il tuo Tutor AI ITS per <strong>{activeSubject}</strong>. Chiedimi qualsiasi cosa, carica uno screenshot o usa le azioni rapide qui sopra.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="chat-msg ai">
+                    Chiedi qualcosa, scrivi <b>"evidenzia le cose chiave"</b>, chiedi di generare codice/formule o scrivi <i>"nel blocco di codice dove faccio fibonacci sistemalo e sostituiscilo nella box"</i>!
+                  </div>
+                )
               ) : (
                 currentSubChats.map((msg, index) => {
                   const text = msg.parts?.[0]?.text || msg.rawText || '';
                   const hasFile = msg.parts?.some(p => p.inlineData);
 
                   if (msg.role === 'model' || msg.role === 'ai') {
-                    return (
-                      <div key={index} className="chat-msg ai">
+                    const aiCard = (
+                      <div key={uiStyle === 'ide' ? undefined : index} className="chat-msg ai">
                         <div
                           dangerouslySetInnerHTML={{
                             __html: marked.parse(text) as string
@@ -8749,6 +9393,22 @@ REGOLE TASSATIVE:
                           </button>
                         </div>
                       </div>
+                    );
+
+                    return uiStyle === 'ide' ? (
+                      <div key={index} className="ide-chat-msg-row">
+                        <div className="ide-chat-bot-avatar" aria-hidden="true">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="8" width="18" height="12" rx="2" />
+                            <path d="M12 2v6" />
+                            <circle cx="9" cy="14" r="1" />
+                            <circle cx="15" cy="14" r="1" />
+                          </svg>
+                        </div>
+                        {aiCard}
+                      </div>
+                    ) : (
+                      aiCard
                     );
                   } else {
                     return (
@@ -8777,188 +9437,371 @@ REGOLE TASSATIVE:
               )}
             </div>
 
-            {/* File Upload & Pasted Screenshot Preview Bar */}
-            <div className="file-upload-preview-bar" style={{ flexWrap: 'wrap' }}>
-              <input
-                type="file"
-                ref={fileInputRef}
-                accept="image/*,application/pdf"
-                style={{ display: 'none' }}
-                onChange={handleFileUpload}
-              />
-              <button className="chat-btn" onClick={() => fileInputRef.current?.click()} title="Allega un file o incolla direttamente uno screenshot con Ctrl+V">
-                📎 Allega / Ctrl+V
-              </button>
-              {attachedFile && (
-                <div id="attached-file-badge" style={{ maxWidth: '100%' }}>
-                  {attachedFile.mimeType.startsWith('image/') && (
-                    <img
-                      src={`data:${attachedFile.mimeType};base64,${attachedFile.data}`}
-                      alt="Preview"
-                      style={{ width: '22px', height: '22px', objectFit: 'cover', borderRadius: '4px' }}
-                    />
-                  )}
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '130px' }}>
-                    {attachedFile.name}
-                  </span>
-                  <button
-                    onClick={() => {
-                      setAttachedFile(null);
-                      if (fileInputRef.current) fileInputRef.current.value = '';
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-              )}
-            </div>
+            {/* Hidden shared file input for image/PDF attachment */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/*,application/pdf"
+              style={{ display: 'none' }}
+              onChange={handleFileUpload}
+            />
 
-            {/* Active Document Source & Selector */}
-            {chatSelectedMaterial ? (
-              <div className="chat-source-banner">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
-                  <span>📎</span>
-                  <span className="chat-source-name" title={chatSelectedMaterial.name}>
-                    {chatSelectedMaterial.name}
-                  </span>
-                </div>
-                <button
-                  className="chat-source-clear"
-                  onClick={() => setChatSelectedMaterial(null)}
-                  title="Scollega documento"
-                >
-                  ✕
-                </button>
-              </div>
-            ) : (
-              activeDisplayMaterials.length > 0 && (
-                <div className="chat-source-select-bar">
+            {uiStyle === 'ide' ? (
+              /* Clean Aligned VS Code AI Chat Composer (No Analizza / No bottom Aggiungi) */
+              <div className="ide-chat-footer">
+                {(attachedFile || chatSelectedMaterial) && (
+                  <div className="ide-chat-attachments-strip">
+                    {attachedFile && (
+                      <div className="ide-chat-attach-pill" id="attached-file-badge">
+                        {attachedFile.mimeType.startsWith('image/') && (
+                          <img
+                            src={`data:${attachedFile.mimeType};base64,${attachedFile.data}`}
+                            alt="Anteprima allegato"
+                            className="ide-chat-attach-thumb"
+                          />
+                        )}
+                        <span className="ide-chat-attach-name">{attachedFile.name}</span>
+                        <button
+                          type="button"
+                          aria-label="Rimuovi file allegato"
+                          onClick={() => {
+                            setAttachedFile(null);
+                            if (fileInputRef.current) fileInputRef.current.value = '';
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )}
+                    {chatSelectedMaterial && (
+                      <div className="ide-chat-attach-pill is-doc">
+                        <span>📄</span>
+                        <span className="ide-chat-attach-name" title={chatSelectedMaterial.name}>
+                          {chatSelectedMaterial.name}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label="Scollega documento"
+                          onClick={() => setChatSelectedMaterial(null)}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {chatSelectedMaterial && (
+                  <div className="ide-chat-doc-chips">
+                    <button
+                      type="button"
+                      className="ide-chat-doc-chip"
+                      onClick={() =>
+                        handleSendAIChat(`Riassumi in 5 punti chiave il documento "${chatSelectedMaterial.name}"`)
+                      }
+                    >
+                      📝 Riassumi PDF
+                    </button>
+                    <button
+                      type="button"
+                      className="ide-chat-doc-chip"
+                      onClick={() =>
+                        handleSendAIChat(`Fammi 3 domande d'esame basate sul documento "${chatSelectedMaterial.name}"`)
+                      }
+                    >
+                      ❓ Interrogami
+                    </button>
+                  </div>
+                )}
+
+                {/* Compact micro-bar: Model + Keys + Optional PDF Link + Highlight Key */}
+                <div className="ide-chat-microbar">
                   <select
-                    value=""
+                    aria-label="Modello Gemini AI"
+                    className="ide-chat-micro-select"
+                    value={selectedModel}
                     onChange={e => {
-                      const mat = activeDisplayMaterials.find(m => String(m.id) === e.target.value);
-                      if (mat) {
-                        handleSelectMaterialForChat(mat);
+                      setSelectedModel(e.target.value);
+                      WorkspaceService.saveLocalPreferences({ selectedModel: e.target.value });
+                      if (currentUser) {
+                        WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, {
+                          selectedModel: e.target.value
+                        });
                       }
                     }}
-                    className="chat-source-dropdown"
                   >
-                    <option value="" disabled>
-                      📎 Collega un file/PDF alla chat...
-                    </option>
-                    {activeDisplayMaterials.map(m => (
-                      <option key={m.id} value={String(m.id)}>
-                        {m.fileType === 'pdf' ? '📄' : '🔗'} {m.name}
-                      </option>
-                    ))}
+                    <option value="gemini-3.8-flash">3.8 Flash</option>
+                    <option value="gemini-3.8-pro">3.8 Pro</option>
+                    <option value="gemini-3.6-flash">3.6 Flash</option>
                   </select>
+
+                  <button
+                    type="button"
+                    className="ide-chat-micro-btn"
+                    onClick={handleOpenKeysModal}
+                    title="Gestisci chiavi API Gemini"
+                  >
+                    🔑 {apiKeys.length > 0 ? `Keys (${apiKeys.length})` : 'Keys'}
+                  </button>
+
+                  {!chatSelectedMaterial && activeDisplayMaterials.length > 0 && (
+                    <select
+                      aria-label="Collega documento PDF alla chat"
+                      className="ide-chat-micro-select ide-chat-doc-select"
+                      value=""
+                      onChange={e => {
+                        const mat = activeDisplayMaterials.find(m => String(m.id) === e.target.value);
+                        if (mat) handleSelectMaterialForChat(mat);
+                      }}
+                    >
+                      <option value="" disabled>
+                        📄 PDF...
+                      </option>
+                      {activeDisplayMaterials.map(m => (
+                        <option key={m.id} value={String(m.id)}>
+                          {m.fileType === 'pdf' ? '📄' : '🔗'} {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  <button
+                    type="button"
+                    className="ide-chat-micro-btn is-highlight"
+                    onClick={() =>
+                      handleAiHighlightOrEditNotes({
+                        mode: 'highlight',
+                        instruction: chatInput.trim() || 'Evidenzia i concetti chiave negli appunti',
+                        targetTopic: chatInput.trim() ? parseAiNoteEditIntent(chatInput.trim()).targetTopic : null
+                      })
+                    }
+                    title="Evidenzia i concetti chiave direttamente negli appunti"
+                  >
+                    🖍️ Evidenzia
+                  </button>
                 </div>
-              )
-            )}
 
-            {/* Quick Prompts when document is active */}
-            {chatSelectedMaterial && (
-              <div className="chat-quick-chips">
-                <button
-                  className="chat-chip"
-                  onClick={() =>
-                    handleSendAIChat(`Riassumi in 5 punti chiave il documento "${chatSelectedMaterial.name}"`)
-                  }
-                >
-                  📝 Riassumi
-                </button>
-                <button
-                  className="chat-chip"
-                  onClick={() =>
-                    handleSendAIChat(`Fammi 3 domande d'esame basate sul documento "${chatSelectedMaterial.name}"`)
-                  }
-                >
-                  ❓ Interrogami
-                </button>
-                <button
-                  className="chat-chip"
-                  onClick={() =>
-                    handleSendAIChat(`Spiegami i concetti più complessi di "${chatSelectedMaterial.name}"`)
-                  }
-                >
-                  💡 Spiega concetti
-                </button>
-              </div>
-            )}
-
-            {/* API Keys & Model Selector */}
-            <div className="chat-input-row">
-              <button
-                className="chat-btn"
-                onClick={handleOpenKeysModal}
-                style={{ borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
-              >
-                🔑 Keys {apiKeys.length > 0 ? `(${apiKeys.length})` : ''}
-              </button>
-
-              <select
-                value={selectedModel}
-                onChange={e => {
-                  setSelectedModel(e.target.value);
-                  WorkspaceService.saveLocalPreferences({ selectedModel: e.target.value });
-                  if (currentUser) {
-                    WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, {
-                      selectedModel: e.target.value
-                    });
-                  }
-                }}
-                style={{ flex: 1, minWidth: '90px' }}
-              >
-                <option value="gemini-3.8-flash">3.8 Flash</option>
-                <option value="gemini-3.8-pro">3.8 Pro</option>
-                <option value="gemini-3.6-flash">3.6 Flash</option>
-              </select>
-            </div>
-
-            {/* Input Row (Supports Ctrl+V Screenshot Paste) */}
-            <div className="chat-input-row" style={{ marginTop: '8px' }}>
-              <input
-                type="text"
-                id="user-chat-input"
-                placeholder="Chiedi a Gemini o scrivi 'evidenzia le cose chiave'..."
-                value={chatInput}
-                onChange={e => setChatInput(e.target.value)}
-                onPaste={handleChatPaste}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
+                {/* Single-row straight aligned VS Code composer */}
+                <form
+                  className="ide-chat-compose-row"
+                  onSubmit={e => {
                     e.preventDefault();
                     handleSendAIChat();
-                  }
-                }}
-              />
-              <button className="chat-btn accent" onClick={() => handleSendAIChat()}>
-                Invia
-              </button>
-            </div>
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="ide-chat-attach-btn"
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Allega immagine/PDF o incolla uno screenshot con Ctrl+V"
+                    aria-label="Allega file o screenshot"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                    </svg>
+                  </button>
+                  <input
+                    type="text"
+                    id="user-chat-input"
+                    className="ide-chat-input"
+                    placeholder="Chiedi all'AI"
+                    value={chatInput}
+                    onChange={e => setChatInput(e.target.value)}
+                    onPaste={handleChatPaste}
+                  />
+                  <button
+                    type="submit"
+                    className="ide-chat-send-btn"
+                    disabled={isAILoading}
+                    title="Invia messaggio"
+                    aria-label="Invia messaggio AI"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="22" y1="2" x2="11" y2="13" />
+                      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                    </svg>
+                  </button>
+                </form>
+              </div>
+            ) : (
+              <>
+                {/* Classic Mode File Upload & Pasted Screenshot Preview Bar */}
+                <div className="file-upload-preview-bar" style={{ flexWrap: 'wrap' }}>
+                  <button className="chat-btn" onClick={() => fileInputRef.current?.click()} title="Allega un file o incolla direttamente uno screenshot con Ctrl+V">
+                    📎 Allega / Ctrl+V
+                  </button>
+                  {attachedFile && (
+                    <div id="attached-file-badge" style={{ maxWidth: '100%' }}>
+                      {attachedFile.mimeType.startsWith('image/') && (
+                        <img
+                          src={`data:${attachedFile.mimeType};base64,${attachedFile.data}`}
+                          alt="Preview"
+                          style={{ width: '22px', height: '22px', objectFit: 'cover', borderRadius: '4px' }}
+                        />
+                      )}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '130px' }}>
+                        {attachedFile.name}
+                      </span>
+                      <button
+                        onClick={() => {
+                          setAttachedFile(null);
+                          if (fileInputRef.current) fileInputRef.current.value = '';
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
 
-            {/* Bottom Action Buttons */}
-            <div className="chat-input-row" style={{ marginTop: '8px', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}>
-              <button className="chat-btn" onClick={handleAnalyzeNotes} title="Analizza o riassumi gli appunti in chat">
-                🔍 Analizza
-              </button>
-              <button
-                className="chat-btn"
-                onClick={() =>
-                  handleAiHighlightOrEditNotes({
-                    mode: 'highlight',
-                    instruction: chatInput.trim() || 'Evidenzia i concetti chiave negli appunti',
-                    targetTopic: chatInput.trim() ? parseAiNoteEditIntent(chatInput.trim()).targetTopic : null
-                  })
-                }
-                style={{ borderColor: 'rgba(250, 204, 21, 0.45)', color: '#fef08a' }}
-                title="Evidenzia direttamente negli appunti i concetti chiave (o scrivi nell'input un argomento specifico e premi qui)"
-              >
-                🖍️ Evidenzia Chiave
-              </button>
-              <button className="chat-btn" onClick={handleAppendLastResponse} title="Aggiungi l'ultima risposta AI in fondo agli appunti">
-                ➕ Aggiungi
-              </button>
-            </div>
+                {/* Active Document Source & Selector */}
+                {chatSelectedMaterial ? (
+                  <div className="chat-source-banner">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                      <span>📎</span>
+                      <span className="chat-source-name" title={chatSelectedMaterial.name}>
+                        {chatSelectedMaterial.name}
+                      </span>
+                    </div>
+                    <button
+                      className="chat-source-clear"
+                      onClick={() => setChatSelectedMaterial(null)}
+                      title="Scollega documento"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  activeDisplayMaterials.length > 0 && (
+                    <div className="chat-source-select-bar">
+                      <select
+                        value=""
+                        onChange={e => {
+                          const mat = activeDisplayMaterials.find(m => String(m.id) === e.target.value);
+                          if (mat) {
+                            handleSelectMaterialForChat(mat);
+                          }
+                        }}
+                        className="chat-source-dropdown"
+                      >
+                        <option value="" disabled>
+                          📎 Collega un file/PDF alla chat...
+                        </option>
+                        {activeDisplayMaterials.map(m => (
+                          <option key={m.id} value={String(m.id)}>
+                            {m.fileType === 'pdf' ? '📄' : '🔗'} {m.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )
+                )}
+
+                {/* Quick Prompts when document is active */}
+                {chatSelectedMaterial && (
+                  <div className="chat-quick-chips">
+                    <button
+                      className="chat-chip"
+                      onClick={() =>
+                        handleSendAIChat(`Riassumi in 5 punti chiave il documento "${chatSelectedMaterial.name}"`)
+                      }
+                    >
+                      📝 Riassumi
+                    </button>
+                    <button
+                      className="chat-chip"
+                      onClick={() =>
+                        handleSendAIChat(`Fammi 3 domande d'esame basate sul documento "${chatSelectedMaterial.name}"`)
+                      }
+                    >
+                      ❓ Interrogami
+                    </button>
+                    <button
+                      className="chat-chip"
+                      onClick={() =>
+                        handleSendAIChat(`Spiegami i concetti più complessi di "${chatSelectedMaterial.name}"`)
+                      }
+                    >
+                      💡 Spiega concetti
+                    </button>
+                  </div>
+                )}
+
+                {/* API Keys & Model Selector */}
+                <div className="chat-input-row">
+                  <button
+                    className="chat-btn"
+                    onClick={handleOpenKeysModal}
+                    style={{ borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+                  >
+                    🔑 Keys {apiKeys.length > 0 ? `(${apiKeys.length})` : ''}
+                  </button>
+
+                  <select
+                    value={selectedModel}
+                    onChange={e => {
+                      setSelectedModel(e.target.value);
+                      WorkspaceService.saveLocalPreferences({ selectedModel: e.target.value });
+                      if (currentUser) {
+                        WorkspaceService.saveUserPreferencesToCloud(currentUser.uid, {
+                          selectedModel: e.target.value
+                        });
+                      }
+                    }}
+                    style={{ flex: 1, minWidth: '90px' }}
+                  >
+                    <option value="gemini-3.8-flash">3.8 Flash</option>
+                    <option value="gemini-3.8-pro">3.8 Pro</option>
+                    <option value="gemini-3.6-flash">3.6 Flash</option>
+                  </select>
+                </div>
+
+                {/* Input Row (Supports Ctrl+V Screenshot Paste) */}
+                <div className="chat-input-row" style={{ marginTop: '8px' }}>
+                  <input
+                    type="text"
+                    id="user-chat-input"
+                    placeholder="Chiedi a Gemini o scrivi 'evidenzia le cose chiave'..."
+                    value={chatInput}
+                    onChange={e => setChatInput(e.target.value)}
+                    onPaste={handleChatPaste}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSendAIChat();
+                      }
+                    }}
+                  />
+                  <button className="chat-btn accent" onClick={() => handleSendAIChat()}>
+                    Invia
+                  </button>
+                </div>
+
+                {/* Bottom Action Buttons (Classic Mode Only) */}
+                <div className="chat-input-row" style={{ marginTop: '8px', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}>
+                  <button className="chat-btn" onClick={handleAnalyzeNotes} title="Analizza o riassumi gli appunti in chat">
+                    🔍 Analizza
+                  </button>
+                  <button
+                    className="chat-btn"
+                    onClick={() =>
+                      handleAiHighlightOrEditNotes({
+                        mode: 'highlight',
+                        instruction: chatInput.trim() || 'Evidenzia i concetti chiave negli appunti',
+                        targetTopic: chatInput.trim() ? parseAiNoteEditIntent(chatInput.trim()).targetTopic : null
+                      })
+                    }
+                    style={{ borderColor: 'rgba(250, 204, 21, 0.45)', color: '#fef08a' }}
+                    title="Evidenzia direttamente negli appunti i concetti chiave (o scrivi nell'input un argomento specifico e premi qui)"
+                  >
+                    🖍️ Evidenzia Chiave
+                  </button>
+                  <button className="chat-btn" onClick={handleAppendLastResponse} title="Aggiungi l'ultima risposta AI in fondo agli appunti">
+                    ➕ Aggiungi
+                  </button>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Right Bottom Modular Widgets Dock (Under Chat AI - e.g. PDF Viewer, Website, Image, Calculator) */}
@@ -10661,7 +11504,59 @@ REGOLE TASSATIVE:
               icon: '📅',
               group: 'Azioni Rapide',
               onExecute: () => setActiveTab('calendar')
-            }
+            },
+            ...(uiStyle === 'ide'
+              ? [
+                  {
+                    id: 'qa_ide_preset_base',
+                    title: 'Layout IDE: Studio Base (3/3)',
+                    subtitle: 'Explorer · Editor · AI Chat affiancati',
+                    icon: '⊞',
+                    group: 'Layout IDE',
+                    onExecute: () => handleApplyIdePreset('studio-base')
+                  },
+                  {
+                    id: 'qa_ide_preset_slide',
+                    title: 'Layout IDE: Lettura Slide',
+                    subtitle: 'Explorer + Materiali & PDF a schermo largo',
+                    icon: '📄',
+                    group: 'Layout IDE',
+                    onExecute: () => handleApplyIdePreset('lettura-slide')
+                  },
+                  {
+                    id: 'qa_ide_preset_stacked',
+                    title: 'Layout IDE: Ripasso Impilato',
+                    subtitle: 'Editor + AI Chat impilati · Explorer compresso',
+                    icon: '⬓',
+                    group: 'Layout IDE',
+                    onExecute: () => handleApplyIdePreset('ripasso-impilato')
+                  },
+                  {
+                    id: 'qa_ide_preset_focus',
+                    title: 'Layout IDE: Focus Editor',
+                    subtitle: 'Solo Editor a tutto schermo',
+                    icon: '🎯',
+                    group: 'Layout IDE',
+                    onExecute: () => handleApplyIdePreset('focus-editor')
+                  },
+                  {
+                    id: 'qa_ide_collapse_explorer',
+                    title: ideCollapsedExplorer ? 'Espandi Sidebar Explorer' : 'Comprimi Sidebar Explorer (Icone)',
+                    subtitle: 'Riduci o espandi Explorer in barra laterale sottile',
+                    icon: '◧',
+                    group: 'Layout IDE',
+                    onExecute: () => handleToggleCollapseExplorer()
+                  },
+                  {
+                    id: 'qa_ide_new_folder',
+                    title: 'Explorer: Nuova Cartella Appunti',
+                    subtitle: `Crea una cartella in ${activeSubject}`,
+                    icon: '📁',
+                    group: 'Layout IDE',
+                    onExecute: () => handleCreateIdeFolder()
+                  }
+                ]
+              : [])
           ] as CommandPaletteAction[]
         }
         onJumpToSubject={subId => {

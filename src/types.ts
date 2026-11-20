@@ -3,6 +3,7 @@ export interface PageItem {
   name: string;
   content: string;
   order?: number;
+  folder?: string;
 }
 
 export interface MaterialItem {
@@ -134,6 +135,14 @@ export interface UserPreferences {
   uiStyle?: 'ide' | 'classic';
   ideThemeMode?: 'dark' | 'light';
   ideWindows?: { explorer: boolean; editor: boolean; chat: boolean };
+  ideColumns?: Array<{
+    id: string;
+    panels: Array<'explorer' | 'editor' | 'chat'>;
+    mode: 'stack' | 'tabs';
+    activeTab: 'explorer' | 'editor' | 'chat';
+  }>;
+  ideCollapsedExplorer?: boolean;
+  ideFoldersBySubject?: Record<string, string[]>;
 }
 
 export interface AttachedFile {

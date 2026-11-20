@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { SubjectItem } from '../types';
 import { APP_VERSION } from '../utils/editorTools';
 import {
+  IDE_LAYOUT_PRESETS,
+  IdeLayoutPresetId,
   IdeThemeMode,
   IdeWindowVisibility,
   UiStyleMode,
@@ -26,6 +28,8 @@ interface IdeTopHeaderProps {
   isMindMapOpen: boolean;
   ideWindows: IdeWindowVisibility;
   ideThemeMode: IdeThemeMode;
+  activeLayoutPreset: IdeLayoutPresetId | 'custom';
+  isExplorerCollapsed: boolean;
   isAdmin: boolean;
   pendingRequestsCount: number;
   isInstalled: boolean;
@@ -37,11 +41,14 @@ interface IdeTopHeaderProps {
   onOpenJoinRoom: () => void;
   onOpenCommandPalette: () => void;
   onToggleIdeWindow: (key: keyof IdeWindowVisibility) => void;
+  onApplyLayoutPreset: (presetId: IdeLayoutPresetId) => void;
+  onToggleCollapseExplorer: () => void;
   onRestoreDefaultWindows: () => void;
   onSelectCenterTab: (tab: 'notes' | 'materials' | 'calendar') => void;
   onToggleSplitScreen: () => void;
   onOpenStudyReview: () => void;
   onOpenMindMap: () => void;
+  onSelectIdeThemeMode: (mode: IdeThemeMode) => void;
   onToggleIdeThemeMode: () => void;
   onSwitchUiStyle: (style: UiStyleMode) => void;
   onOpenSettings: () => void;
@@ -65,6 +72,8 @@ export const IdeTopHeader: React.FC<IdeTopHeaderProps> = ({
   isMindMapOpen,
   ideWindows,
   ideThemeMode,
+  activeLayoutPreset,
+  isExplorerCollapsed,
   isAdmin,
   pendingRequestsCount,
   isInstalled,
@@ -76,11 +85,14 @@ export const IdeTopHeader: React.FC<IdeTopHeaderProps> = ({
   onOpenJoinRoom,
   onOpenCommandPalette,
   onToggleIdeWindow,
+  onApplyLayoutPreset,
+  onToggleCollapseExplorer,
   onRestoreDefaultWindows,
   onSelectCenterTab,
   onToggleSplitScreen,
   onOpenStudyReview,
   onOpenMindMap,
+  onSelectIdeThemeMode,
   onToggleIdeThemeMode,
   onSwitchUiStyle,
   onOpenSettings,
@@ -189,7 +201,7 @@ export const IdeTopHeader: React.FC<IdeTopHeaderProps> = ({
               {workspaceMode === 'personal' ? (
                 <>
                   <div className="ide-popover-section-head">
-                    <span>MATERIE ({subjects.length})</span>
+                    <span>LE TUE MATERIE ({subjects.length})</span>
                     <button
                       type="button"
                       className="ide-popover-inline-link"
@@ -307,8 +319,40 @@ export const IdeTopHeader: React.FC<IdeTopHeaderProps> = ({
 
           {openMenu === 'windows' && (
             <div className="ide-dropdown-popover ide-windows-popover" role="menu" aria-label="Finestre Layout">
+              {/* Section 1: Layout Rapidi (matches v1.0.3 video) */}
               <div className="ide-windows-pop-header">
-                <span>Finestre Layout</span>
+                <span>Layout Rapidi</span>
+                <span className="ide-windows-pop-ratio">
+                  {activeLayoutPreset === 'custom' ? 'Personalizzato' : `${visibleCount}/3`}
+                </span>
+              </div>
+
+              <div className="ide-presets-list">
+                {IDE_LAYOUT_PRESETS.map(preset => {
+                  const isActive = activeLayoutPreset === preset.id;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className={`ide-preset-row ${isActive ? 'is-active' : ''}`}
+                      onClick={() => {
+                        onApplyLayoutPreset(preset.id);
+                        setOpenMenu(null);
+                      }}
+                    >
+                      <div className="ide-preset-info">
+                        <span className="ide-preset-label">{preset.label}</span>
+                        <span className="ide-preset-desc">{preset.description}</span>
+                      </div>
+                      {isActive && <span className="ide-row-check">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Section 2: Finestre Attive */}
+              <div className="ide-popover-section-head" style={{ marginTop: '6px', borderTop: '1px solid var(--ide-border)', paddingTop: '7px' }}>
+                <span>FINESTRE ATTIVE</span>
                 <span className="ide-windows-pop-ratio">{visibleCount}/3</span>
               </div>
 
@@ -489,27 +533,39 @@ export const IdeTopHeader: React.FC<IdeTopHeaderProps> = ({
                 </button>
               </div>
 
-              <div className="ide-popover-footer ide-windows-pop-footer">
+              <div className="ide-popover-footer ide-windows-pop-footer-col">
                 <button
                   type="button"
-                  className="ide-popover-inline-link"
+                  className="ide-popover-row"
                   onClick={() => {
-                    onToggleSplitScreen();
+                    onToggleCollapseExplorer();
                     setOpenMenu(null);
                   }}
                 >
-                  🔀 {isSplitScreenOpen ? 'Chiudi Split' : 'Split-Screen'}
+                  <span>◧ {isExplorerCollapsed ? 'Espandi Explorer' : 'Comprimi Explorer'}</span>
                 </button>
-                <button
-                  type="button"
-                  className="ide-popover-inline-link"
-                  onClick={() => {
-                    onRestoreDefaultWindows();
-                    setOpenMenu(null);
-                  }}
-                >
-                  ↺ Ripristina 3/3
-                </button>
+                <div className="ide-windows-pop-footer">
+                  <button
+                    type="button"
+                    className="ide-popover-inline-link"
+                    onClick={() => {
+                      onToggleSplitScreen();
+                      setOpenMenu(null);
+                    }}
+                  >
+                    🔀 {isSplitScreenOpen ? 'Chiudi Split' : 'Split-Screen'}
+                  </button>
+                  <button
+                    type="button"
+                    className="ide-popover-inline-link"
+                    onClick={() => {
+                      onRestoreDefaultWindows();
+                      setOpenMenu(null);
+                    }}
+                  >
+                    ↺ Ripristina layout base
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -577,6 +633,27 @@ export const IdeTopHeader: React.FC<IdeTopHeaderProps> = ({
                 <span>{currentUser.email || 'Modalità Locale'}</span>
               </div>
 
+              {/* Inline Tema Interfaccia segmented toggle (matches video 00:33) */}
+              <div className="ide-popover-section-head" style={{ paddingTop: '2px' }}>
+                <span>TEMA INTERFACCIA</span>
+              </div>
+              <div className="ide-mode-segmented">
+                <button
+                  type="button"
+                  className={ideThemeMode === 'light' ? 'is-active' : ''}
+                  onClick={() => onSelectIdeThemeMode('light')}
+                >
+                  ☀️ Chiaro
+                </button>
+                <button
+                  type="button"
+                  className={ideThemeMode === 'dark' ? 'is-active' : ''}
+                  onClick={() => onSelectIdeThemeMode('dark')}
+                >
+                  🌙 Scuro
+                </button>
+              </div>
+
               <div className="ide-popover-list">
                 <button
                   type="button"
@@ -586,7 +663,7 @@ export const IdeTopHeader: React.FC<IdeTopHeaderProps> = ({
                     onOpenSettings();
                   }}
                 >
-                  <span>⚙️ Impostazioni Workspace</span>
+                  <span>⚙️ Impostazioni &amp; Modello AI</span>
                 </button>
                 <button
                   type="button"

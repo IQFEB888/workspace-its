@@ -101,7 +101,10 @@ export class WorkspaceService {
       savedPenColors: this.localGet('workspace_saved_pen_colors', DEFAULT_PEN_COLORS),
       uiStyle: localStorage.getItem('workspace_ui_style') === 'classic' ? 'classic' : 'ide',
       ideThemeMode: localStorage.getItem('workspace_ide_theme_mode') === 'light' ? 'light' : 'dark',
-      ideWindows: this.localGet('workspace_ide_windows', { explorer: true, editor: true, chat: true })
+      ideWindows: this.localGet('workspace_ide_windows', { explorer: true, editor: true, chat: true }),
+      ideColumns: this.localGet('workspace_ide_columns', undefined as any),
+      ideCollapsedExplorer: localStorage.getItem('workspace_ide_collapsed_explorer') === 'true',
+      ideFoldersBySubject: this.localGet('workspace_ide_folders_by_subject', {})
     };
   }
 
@@ -208,6 +211,13 @@ export class WorkspaceService {
     if (pref.uiStyle !== undefined) localStorage.setItem('workspace_ui_style', pref.uiStyle);
     if (pref.ideThemeMode !== undefined) localStorage.setItem('workspace_ide_theme_mode', pref.ideThemeMode);
     if (pref.ideWindows !== undefined) this.localSet('workspace_ide_windows', pref.ideWindows);
+    if (pref.ideColumns !== undefined) this.localSet('workspace_ide_columns', pref.ideColumns);
+    if (pref.ideCollapsedExplorer !== undefined) {
+      localStorage.setItem('workspace_ide_collapsed_explorer', String(pref.ideCollapsedExplorer));
+    }
+    if (pref.ideFoldersBySubject !== undefined) {
+      this.localSet('workspace_ide_folders_by_subject', pref.ideFoldersBySubject);
+    }
   }
 
   static saveLocalPages(pages: Record<string, PageItem[]>): void {
@@ -292,7 +302,10 @@ export class WorkspaceService {
                 savedPenColors: data.savedPenColors,
                 uiStyle: data.uiStyle,
                 ideThemeMode: data.ideThemeMode,
-                ideWindows: data.ideWindows
+                ideWindows: data.ideWindows,
+                ideColumns: data.ideColumns,
+                ideCollapsedExplorer: data.ideCollapsedExplorer,
+                ideFoldersBySubject: data.ideFoldersBySubject
               });
             }
           }
@@ -346,7 +359,8 @@ export class WorkspaceService {
               id: pageId,
               name: d.name || 'Pagina',
               content: cleanedHtml,
-              order: d.order || 0
+              order: d.order || 0,
+              ...(d.folder ? { folder: String(d.folder) } : {})
             };
             pagesBySubject[sub].push(pageItem);
             if (
@@ -529,6 +543,9 @@ export class WorkspaceService {
       if (pref.uiStyle !== undefined) payload.uiStyle = pref.uiStyle;
       if (pref.ideThemeMode !== undefined) payload.ideThemeMode = pref.ideThemeMode;
       if (pref.ideWindows !== undefined) payload.ideWindows = pref.ideWindows;
+      if (pref.ideColumns !== undefined) payload.ideColumns = pref.ideColumns;
+      if (pref.ideCollapsedExplorer !== undefined) payload.ideCollapsedExplorer = pref.ideCollapsedExplorer;
+      if (pref.ideFoldersBySubject !== undefined) payload.ideFoldersBySubject = pref.ideFoldersBySubject;
 
       await setDoc(userDocRef, payload, { merge: true });
     } catch (e) {
@@ -573,6 +590,7 @@ export class WorkspaceService {
         name: page.name,
         content: page.content,
         order: page.order || 0,
+        folder: page.folder || '',
         updatedAt: new Date().toISOString()
       }, { merge: true });
     } catch (e) {
